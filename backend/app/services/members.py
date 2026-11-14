@@ -73,6 +73,11 @@ def task_assignments(tasks: list[dict], aliases: list[dict]) -> dict[str, list[s
     (the dashboard then shows the raw cell instead of guessing)."""
     result = {}
     for task in tasks:
+        # An approved reassignment sets an explicit roster code. It takes
+        # precedence over imported text, which may lack a matching alias.
+        if task.get("owner_code"):
+            result[str(task["id"])] = [task["owner_code"]]
+            continue
         text = (task.get("assignee_text") or "").strip()
         codes = assignment_members(text, aliases) if text else set()
         result[str(task["id"])] = sorted(codes) if codes is not None else None
@@ -113,6 +118,15 @@ class MemberStore:
         return self._execute("members", lambda table: table.select(
             self.PUBLIC_FIELDS
         ).eq("active", True).order("display_name")).data
+
+    def previous_roles(self) -> dict[str, list[str]]:
+        """{code: previous roles} from members.previous_roles; {} until that column exists
+        (supabase/migrations/20261115100000_add_member_previous_roles.sql)."""
+        try:
+            rows = self._execute("members", lambda table: table.select("code,previous_roles")).data
+        except StorageUnavailable:
+            return {}
+        return {r["code"]: r["previous_roles"] for r in rows if r.get("previous_roles")}
 
     def list_roles(self):
         """Role text used to derive skills (services/member_skills.py). No contact details."""

@@ -1,0 +1,19 @@
+# Used by `gcloud run deploy --source .` (replaces the .gitignore-based default, which would
+# drop backend/data and break `COPY data ./data` in the Dockerfile).
+.git
+.gcloudignore
+.env
+.env.*
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+tests
+*.log
+# Private local data must never be uploaded.
+data/recordings
+data/demo-login.json

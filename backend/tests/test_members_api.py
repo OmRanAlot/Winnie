@@ -8,6 +8,12 @@ from app.main import app
 from app.routes import members as route
 from app.services.members import AliasConflict, MemberStore, task_assignments
 
+
+def test_explicit_owner_takes_precedence_over_imported_assignment_text():
+    tasks = [{"id": "reassigned", "owner_code": "NEW_MEMBER", "assignee_text": "Old Name"}]
+    assert task_assignments(tasks, []) == {"reassigned": ["NEW_MEMBER"]}
+
+
 ALIASES = [
     {"alias": "Avery Chen", "member_code": "AVERY"},
     {"alias": "avery@example.test", "member_code": "AVERY"},
@@ -25,6 +31,9 @@ class Members:
         if self.fail:
             raise StorageUnavailable("down")
         return [PUBLIC]
+
+    def previous_roles(self):
+        return {}
 
     def aliases(self, semester):
         assert semester == "fall-2026"
@@ -53,6 +62,7 @@ SKILLS = {"AVERY": {"technical": [{"skill": "budgeting", "evidence": "Money"}],
 def client(monkeypatch):
     # Never read the developer's real backend/data/member_skills.json in tests.
     monkeypatch.setattr(route, "load_skills", lambda: SKILLS)
+    monkeypatch.setattr(route, "load_previous_roles", dict)
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -67,7 +77,8 @@ def test_members_returns_public_fields_only(client):
     body = client.get("/api/members").json()
     assert body["success"] and body["meta"] == {"total": 1}
     assert body["data"] == [{**PUBLIC, "skills": ["budgeting", "follow-up"], "technical_skills": ["budgeting"],
-                             "soft_skills": ["follow-up"], "skills_source": "role-derived"}]
+                             "soft_skills": ["follow-up"], "skills_source": "role-derived",
+                             "previous_roles": [], "previous_role_skills": [], "previous_roles_source": None}]
     assert not {"email", "phone_number"} & set(body["data"][0])
 
 

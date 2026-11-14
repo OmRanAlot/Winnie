@@ -1,0 +1,13 @@
+{
+  "_note": "Roles current board members held on earlier WiCS boards, as provided by the board. Keyed by members.code. 'listed_as' keeps the original wording; 'role' uses current board_role names. Past members who are no longer on the board are not stored.",
+  "WICS_5BF86382B9D1": {"name": "Stephanie Nicolaescu", "previous_roles": [{"role": "Membership Chair", "listed_as": "Membership Chair"}]},
+  "WICS_F270BEB89484": {"name": "Lakshita Madhavan", "previous_roles": [{"role": "President", "listed_as": "President"}]},
+  "WICS_0F35597A1B13": {"name": "Saidarsha Karunakaran", "previous_roles": [{"role": "Event Coordinator", "listed_as": "Event Coordinator"}]},
+  "WICS_2E4298E0E6EF": {"name": "Diya Pottangadi", "previous_roles": [{"role": "Event Coordinator", "listed_as": "Event Coordinator"}]},
+  "WICS_9C89011F60F6": {"name": "Sharanya Raj", "previous_roles": [{"role": "Public Relations Chair", "listed_as": "Public Relations"}]},
+  "WICS_A3170E24504C": {"name": "Caithy Liao", "previous_roles": [{"role": "Public Relations Chair", "listed_as": "Public Relations"}]},
+  "WICS_E4BB91FE61BF": {"name": "Manisha Palaniappan", "previous_roles": [{"role": "Fundraising Coordinator", "listed_as": "Fundraising Coordinator"}]},
+  "WICS_CDEB40900555": {"name": "Carlin Verano", "previous_roles": [{"role": "Industry Partnerships Chair", "listed_as": "Industry Partnerships Chair"}]},
+  "WICS_CC12A0A285DF": {"name": "Meera James", "previous_roles": [{"role": "Technical Director", "listed_as": "Technical Director"}]},
+  "WICS_B7D9D83A652B": {"name": "Anne Therese Argonza", "previous_roles": [{"role": "Secretary", "listed_as": "Secretary"}]}
+}

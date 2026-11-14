@@ -47,6 +47,7 @@ def personal_reply(message, members, tasks, semester_code: str) -> str:
         )
     except AliasConflict:
         return "Member assignment setup needs review. Please contact the project admin."
+
     if not selected:
         reply = f"No unfinished tasks matched your verified assignments for {semester_code}."
     else:

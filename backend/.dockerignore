@@ -1,3 +1,4 @@
+.git
 .env
 .env.*
 .venv
@@ -10,4 +11,7 @@ __pycache__
 htmlcov
 tests
 *.log
-Dockerfile
+# Private local data must never be baked into the image.
+data/recordings
+data/demo-login.json
+env.yaml

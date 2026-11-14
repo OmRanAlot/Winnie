@@ -12,6 +12,7 @@ async function request(path, options = {}) {
   let response;
   try {
     response = await fetch(`/api${path}`, {
+      cache: "no-store",
       ...options,
       headers: { "Content-Type": "application/json", ...options.headers },
       signal: options.signal ?? AbortSignal.timeout(15000),
@@ -40,16 +41,22 @@ export function weekStart(today = new Date()) {
 export function toUiTask(t, monday = weekStart()) {
   const due = t.due_date ? new Date(`${t.due_date}T00:00:00`) : null;
   const day = due ? Math.round((due - monday) / 86400000) : -1; // 0 = Monday of this week
+  const ownerCode = t.current_assignee_code ?? t.owner_code ?? null;
+  const originalAssigneeCode = t.original_assignee_code ?? t.initial_assignee_code ?? t.owner_code ?? null;
   return {
     id: t.id,
     code: t.task_code,
+    ownerCode,
+    originalAssigneeCode,
     title: t.title,
     assigned: usDate(t.created_at?.slice(0, 10)),
     start: usDate(t.due_date) || "—",
     due: usDate(t.due_date) || t.deadline_text || "No date",
     dueIso: t.due_date,
     finished: t.status === "done" ? usDate(t.updated_at?.slice(0, 10)) : "",
-    assignee: null, // no member mapping in the API yet; assigneeText holds the tracker cell
+    assignee: ownerCode,
+    currentAssignee: ownerCode,
+    initialAssignee: originalAssigneeCode,
     assigneeText: t.assignee_text || "",
     status: STATUS_TO_UI[t.status] ?? "Upcoming",
     priority: t.priority ?? "normal",
@@ -68,7 +75,7 @@ export async function getTasks() {
   for (let offset = 0; ; offset += PAGE) {
     const body = await request(`/tasks/records?limit=${PAGE}&offset=${offset}`);
     all.push(...body.data);
-    if (body.data.length < PAGE || all.length >= (body.meta?.total ?? 0)) break;
+    if (body.data.length < PAGE || (body.meta?.total != null && all.length >= body.meta.total)) break;
   }
   const monday = weekStart();
   return all.map((t) => toUiTask(t, monday));
@@ -80,11 +87,13 @@ export async function getMembers() {
   return body.data.map((m) => ({
     id: m.code,
     name: m.display_name,
-    role: m.board_role,
+    role: m.board_role === "PR Chair" ? "Public Relations Chair" : m.board_role,
     description: m.role_description,
     skills: m.skills ?? [],
     technical: m.technical_skills ?? [],
     soft: m.soft_skills ?? [],
+    previousRoles: m.previous_roles ?? [],
+    previousRoleSkills: m.previous_role_skills ?? [],
     skillsSource: m.skills_source ?? null, // "role-derived" = generated from the role text
   }));
 }
@@ -112,6 +121,23 @@ export async function decideHelpRequest(key, number, revision, action) {
 export async function getAssignments() {
   const body = await request("/members/assignments");
   return { byTask: body.data, meta: body.meta };
+}
+
+export async function generateTaskPlan(input) {
+  const body = await request("/planning/drafts", {
+    method: "POST",
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(200000),
+  });
+  return body.data;
+}
+
+export async function createTaskRecord(task) {
+  const body = await request("/tasks/records", { // POST /api/tasks does not exist (405)
+    method: "POST",
+    body: JSON.stringify(task),
+  });
+  return toUiTask(body.data);
 }
 
 // Save a meeting recording (audio + transcript JSON, shape = backend schemas.Recording).

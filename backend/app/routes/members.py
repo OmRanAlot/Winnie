@@ -3,6 +3,7 @@
     GET /api/members                       public profiles, with role-based skills
     GET /api/members/assignments           which members each task is assigned to
     GET /api/members/candidates/{task_id}  who could take over a pending task (skills + workload)
+    GET /api/members/{code}/advisors       members who held this member's role before
 
 Only public profile fields are returned; contact details stay in the backend. Uses the same
 access check as /api/tasks.
@@ -19,6 +20,7 @@ from httpx import HTTPError
 from app.core.settings import Settings
 from app.integrations.supabase import StorageUnavailable
 from app.routes.tasks import authorize_tasks, envelope
+from app.services.member_history import advisors_for, load_previous_roles, with_previous_roles
 from app.services.member_skills import load_skills, with_skills
 from app.services.members import AliasConflict, MemberStore, task_assignments
 from app.services.task_matching import suggest_candidates, workload
@@ -54,10 +56,17 @@ def semester_tasks(tasks: TaskStore, semester: str) -> list[dict]:
             return all_tasks
 
 
+def profiles(members: MemberStore) -> list[dict]:
+    """Active members with role-based skills and previous roles attached."""
+    skills = load_skills()
+    return with_previous_roles(with_skills(members.list_active(), skills), load_previous_roles(),
+                               members.previous_roles(), skills)
+
+
 @router.get("")
 def list_members(members: Annotated[MemberStore, Depends(get_member_store)]):
     try:
-        data = with_skills(members.list_active(), load_skills())
+        data = profiles(members)
     except StorageUnavailable:
         return failure(503, "Member storage is unavailable. Check Supabase configuration.")
     return envelope(data, {"total": len(data)})
@@ -98,7 +107,9 @@ async def task_candidates(
             return envelope([], {"reason": "Task is already done."})
         all_tasks = semester_tasks(tasks, settings.active_semester)
         assignments = task_assignments(all_tasks, members.aliases(settings.active_semester))
-        people = with_skills(members.list_active(), load_skills())
+        # Skills from previous roles count too: a former Event Coordinator can cover event work.
+        people = [{**p, "skills": list(dict.fromkeys(p["skills"] + p["previous_role_skills"]))}
+                  for p in profiles(members)]
     except TaskNotFound:
         return failure(404, "Task not found.")
     except AliasConflict:
@@ -115,3 +126,18 @@ async def task_candidates(
     except ValueError:
         return failure(502, "Gemini returned an unusable answer. Please try again.")
     return envelope(data, {"current_assignees": current, "considered": len(people) - len(current)})
+
+
+@router.get("/{code}/advisors")
+def role_advisors(code: str, members: Annotated[MemberStore, Depends(get_member_store)]):
+    """Members who previously held this member's current role, e.g. to ask for advice when stuck."""
+    try:
+        people = profiles(members)
+    except StorageUnavailable:
+        return failure(503, "Member storage is unavailable. Check Supabase configuration.")
+    member = next((p for p in people if p["code"] == code), None)
+    if member is None:
+        return failure(404, "Member not found.")
+    data = [{"code": a["code"], "display_name": a["display_name"], "board_role": a["board_role"],
+             "previous_roles": a["previous_roles"]} for a in advisors_for(member, people)]
+    return envelope(data, {"role": member["board_role"], "total": len(data)})

@@ -38,3 +38,5 @@ uploads/
 Thumbs.db
 .vscode/
 .idea/
+
+env.yaml
