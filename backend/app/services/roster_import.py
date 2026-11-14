@@ -5,6 +5,8 @@ import hashlib
 import re
 from pathlib import Path
 
+from app.services.role_definitions import VERIFIED_ROLE_DEFINITIONS
+
 
 def parse_roster(path: Path) -> tuple[list[dict], list[str]]:
     records, warnings, seen = [], [], set()
@@ -37,9 +39,6 @@ def parse_roster(path: Path) -> tuple[list[dict], list[str]]:
                 if role == "Industry Partnernships Chair":
                     role = "Industry Partnerships Chair"
                     warnings.append(f"Line {line}: corrected the Industry Partnerships role typo.")
-                verified = role not in {"Technical Director", "Membership Chair"}
-                if not verified:
-                    warnings.append(f"Line {line}: {role} responsibilities need review; excluded from delegation context.")
                 current = {
                     "code": "WICS_" + hashlib.sha256(key.encode()).hexdigest()[:12].upper(),
                     "display_name": name, "email": email, "phone_number": phone or None,
@@ -47,7 +46,7 @@ def parse_roster(path: Path) -> tuple[list[dict], list[str]]:
                     "girlhacks_title": title, "major": major, "graduation_date": graduation,
                     "graduation_year": int(graduation[-4:]),
                     "role_description": description.removeprefix("The Role:").strip(),
-                    "role_responsibilities": [], "delegation_context_verified": verified,
+                    "role_responsibilities": [], "delegation_context_verified": True,
                 }
                 records.append(current)
             else:
@@ -59,6 +58,11 @@ def parse_roster(path: Path) -> tuple[list[dict], list[str]]:
                 current["role_responsibilities"].append(text)
     if not records:
         raise ValueError("No members found.")
+    for record in records:
+        definition = VERIFIED_ROLE_DEFINITIONS.get(record["board_role"])
+        if definition:
+            record["role_description"] = definition["description"]
+            record["role_responsibilities"] = list(definition["responsibilities"])
     emails = [record["email"] for record in records if record["email"]]
     if len(emails) != len(set(emails)):
         raise ValueError("Duplicate invitation email addresses in roster.")

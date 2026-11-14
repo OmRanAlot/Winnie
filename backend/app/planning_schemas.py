@@ -29,6 +29,7 @@ class ProposedTask(BaseModel):
     id: Text
     title: Text
     suggested_role: Role | None = None
+    kind: Literal["general", "highlander_hub", "materials_list", "order_items", "budget_approval"] = "general"
     due_date: date | None = None
     phase: Literal["before", "during", "after"] = "before"
     dependency_ids: list[Text] = Field(default_factory=list, max_length=50)

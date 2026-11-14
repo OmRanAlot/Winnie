@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from app.agents.stages import DeepStageRunner
@@ -25,6 +25,15 @@ from app.services.planning_history import (
     match_roles,
     timing_statistics,
 )
+from app.services.planning_policies import (
+    ORDER_LEAD_DAYS,
+    apply_task_policies,
+    demo_secretary_roster,
+    required_order_edges,
+    validate_order_deadlines,
+    validate_policy_dependencies,
+)
+from app.settings import REPO_ROOT
 
 
 def exact_classification(name: str, taxonomy: dict) -> Classification:
@@ -46,6 +55,7 @@ def validate_classification(result: Classification, taxonomy: dict):
 
 
 def apply_dependencies(plan: DraftContents, dependencies: Dependencies, evidence: set):
+    validate_policy_dependencies(plan, dependencies)
     tasks = {t.id: t.model_copy(deep=True) for t in plan.tasks}
     seen = set()
     for task in tasks.values():
@@ -69,7 +79,11 @@ def apply_dependencies(plan: DraftContents, dependencies: Dependencies, evidence
 def apply_schedule(plan, schedule, dependencies, request, examples):
     ids = {t.id for t in plan.tasks}
     if len(schedule.items) != len(ids) or {s.task_id for s in schedule.items} != ids:
-        raise ValueError("Schedule must cover every task exactly once.")
+        returned = [s.task_id for s in schedule.items]
+        missing, extra = sorted(ids - set(returned)), sorted(set(returned) - ids)
+        duplicates = sorted({task_id for task_id in returned if returned.count(task_id) > 1})
+        raise ValueError(f"Schedule must cover every task exactly once. Missing: {missing}; "
+                         f"unexpected: {extra}; duplicated: {duplicates}.")
     evidence = {t["evidence_id"] for e in examples for t in e["tasks"]}
     dates = {s.task_id: s.due_date for s in schedule.items}
     for item in schedule.items:
@@ -79,6 +93,7 @@ def apply_schedule(plan, schedule, dependencies, request, examples):
                             questions=plan.questions)
     # Reuse existing phase/evidence validation, without changing the legacy endpoint contract.
     validate_draft(updated, request, examples)
+    validate_order_deadlines(updated, request.event_date)
     for edge in dependencies.edges:
         upstream, downstream = dates[edge.upstream_task_id], dates[edge.downstream_task_id]
         if upstream and downstream and (downstream - upstream).days < edge.minimum_gap_days:
@@ -126,6 +141,20 @@ async def _pipeline(request, knowledge_path, taxonomy_path, roster_path, history
     async def stage(name, schema, payload):
         value = await runner.run(name, schema, payload)
         return schema.model_validate(value)
+
+    async def validated_stage(name, schema, payload, validate):
+        """Give the specialist actionable validation feedback, with bounded retries."""
+        current_payload = payload
+        for attempt in range(3):
+            result = await stage(name, schema, current_payload)
+            try:
+                return result, validate(result)
+            except ValueError as exc:
+                if attempt == 2:
+                    raise
+                current_payload = {**payload, "validation_feedback": str(exc),
+                                   "previous_attempt": result.model_dump(mode="json")}
+        raise ValueError("Specialist repair attempts exhausted.")
 
     if request.category is not None:
         classification = Classification(category=request.category, confidence=1,
@@ -180,26 +209,48 @@ async def _pipeline(request, knowledge_path, taxonomy_path, roster_path, history
         if any(t.due_date is not None or t.dependency_ids for t in plan.tasks):
             raise ValueError("Task extraction cannot bypass scheduling or dependency stages.")
     validate_draft(plan, request, examples)
+    plan = apply_task_policies(plan)
     stages.append("task_and_role_planning")
     evidence = {t["evidence_id"] for e in examples for t in e["tasks"]}
-    dependencies = Dependencies() if mode == "mock" else await stage("dependencies", Dependencies, {
-        **payload, "draft": plan.model_dump(mode="json"),
-    })
-    plan = apply_dependencies(plan, dependencies, evidence)
+    payload["ordering_deadline"] = (request.event_date - timedelta(days=ORDER_LEAD_DAYS)).isoformat()
+    payload["required_ordering_dependencies"] = required_order_edges(plan)
+    if any(task.kind == "order_items" for task in plan.tasks) and request.event_date - timedelta(days=ORDER_LEAD_DAYS) < date.today():
+        warnings.append("The mandatory 21-day ordering cutoff has already passed; review event timing and whether orders were already placed.")
+    if mode == "mock":
+        dependencies = Dependencies.model_validate({"edges": [
+            {"upstream_task_id": upstream, "downstream_task_id": downstream,
+             "minimum_gap_days": 1, "rationale": "User policy: requirements and budget precede ordering."}
+            for upstream, downstream in required_order_edges(plan)]})
+        plan = apply_dependencies(plan, dependencies, evidence)
+    else:
+        dependencies, plan = await validated_stage("dependencies", Dependencies, {
+            **payload, "draft": plan.model_dump(mode="json"),
+        }, lambda result: apply_dependencies(plan, result, evidence))
     stages.append("dependency_planning")
-    schedule = Schedule(items=[ScheduleItem(task_id=t.id, due_date=None,
-                                           rationale="Offline mode does not infer schedules.")
-                               for t in plan.tasks]) if mode == "mock" else await stage(
-        "timeline", Schedule, {**payload, "draft": plan.model_dump(mode="json"),
-                               "dependencies": dependencies.model_dump(), "timing_statistics": stats,
-                               "planning_date": date.today().isoformat()},
-    )
-    plan = apply_schedule(plan, schedule, dependencies, request, examples)
+    if mode == "mock":
+        schedule = Schedule(items=[ScheduleItem(task_id=t.id,
+                                                due_date=(request.event_date - timedelta(days=ORDER_LEAD_DAYS)) if t.kind == "order_items" else None,
+                                                rationale="Offline mode does not infer schedules.")
+                                    for t in plan.tasks])
+        plan = apply_schedule(plan, schedule, dependencies, request, examples)
+    else:
+        schedule, plan = await validated_stage("timeline", Schedule, {
+            **payload, "draft": plan.model_dump(mode="json"),
+            "required_task_ids": [task.id for task in plan.tasks],
+            "dependencies": dependencies.model_dump(), "timing_statistics": stats,
+            "planning_date": date.today().isoformat(),
+        }, lambda result: apply_schedule(plan, result, dependencies, request, examples))
     warnings.extend(schedule.warnings)
     if any(item.due_date is None for item in schedule.items):
         warnings.append("Some deadlines remain unknown; dependency readiness is not guaranteed.")
     stages.append("timeline_planning")
-    assignments = match_roles(plan.tasks, rosters, request.semester_code)
+    assignment_rosters = list(rosters)
+    if not any(roster.semester_code == request.semester_code for roster in assignment_rosters):
+        demo_roster = demo_secretary_roster(REPO_ROOT / "backend/data/eboardMembers.json", request.semester_code)
+        if demo_roster:
+            assignment_rosters.append(demo_roster)
+            warnings.append("Secretary matching uses the current demo roster, not a confirmed semester-wide roster.")
+    assignments = match_roles(plan.tasks, assignment_rosters, request.semester_code)
     stages.append("verified_role_to_member_matching")
     if any(a["proposed_member_code"] is None for a in assignments):
         warnings.append("Some owners need a verified role holder or a choice between multiple holders.")
