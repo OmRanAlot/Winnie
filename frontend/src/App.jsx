@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from "react";
-import { getAssignments, getMembers, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
+import { getAssignments, getCandidates, getMembers, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
 import Recorder from "./Recorder.jsx";
 
 /* ---------- Placeholder data (replace with backend responses) ---------- */
@@ -36,7 +36,6 @@ const SAMPLE_TASKS = [
   { id: 16, title: "Review room layout", assigned: "11/08/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 9, day: 5, len: 1, notes: "" },
   { id: 17, title: "Collect final RSVP count", assigned: "11/09/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 5, len: 1, notes: "" },
 ];
-const DUE_SOON_IDS = TASKS.filter((t) => t.status !== "Completed").map((t) => t.id);
 const MEETINGS = [
   { id: 1, date: "11/13/26", name: "Fall 2026 E-Board Meeting", tasks: [[ "Allocate budget for GBM 1", 3], ["Design GBM 1 flyer", 7]] },
   { id: 2, date: "11/10/26", name: "Finance Logistics Meeting", tasks: [["Book GBM 1 room", 5]] },
@@ -314,6 +313,13 @@ export default function App() {
   const [open, setOpen] = useState({});
   const [notes, setNotes] = useState({});
   const [recorder, setRecorder] = useState(null); // meeting kind being recorded, or null
+  const [cands, setCands] = useState({}); // task id -> {loading} | {list} | {error}: skill-matched suggestions
+  const loadCandidates = (t) => {
+    setCands((c) => ({ ...c, [t.id]: { loading: true } }));
+    getCandidates(t.id)
+      .then((list) => setCands((c) => ({ ...c, [t.id]: { list } })))
+      .catch((e) => setCands((c) => ({ ...c, [t.id]: { error: e.message } })));
+  };
   const [TASKS, setTasks] = useState(SAMPLE_TASKS);
   const [PEOPLE, setPeople] = useState(SAMPLE_PEOPLE);
   const tasks = TASKS; // the redesign's screens read `tasks`; same live list
@@ -469,7 +475,12 @@ export default function App() {
       page = (<><Top title="Profile" tag={isAdminView} />
         <div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div><h2 style={isAdminView ? { cursor: "pointer" } : {}} onClick={() => isAdminView && setModal({ view: q })}>{q.name}</h2><p>{q.role}</p></div></div>
         <div className="two"><div className="panel"><h3>Tasks</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.title}</a> ({t.status})</li>)}{!ts.length && <li className="none">No tasks assigned yet.</li>}</ul></div>
-          <div className="panel"><h3>Skills</h3><ul>{q.skills.map((s) => <li key={s}>{s}</li>)}{!q.skills.length && <li>No skills listed yet</li>}</ul>
+          <div className="panel"><h3>Skills</h3>
+            {q.technical?.length || q.soft?.length ? (<>
+              <p className="lbl" style={{ margin: "4px 0" }}>Technical</p><ul>{q.technical.map((s) => <li key={s}>{s}</li>)}</ul>
+              <p className="lbl" style={{ margin: "8px 0 4px" }}>Soft skills</p><ul>{q.soft.map((s) => <li key={s}>{s}</li>)}</ul>
+              {q.skillsSource === "role-derived" && <p style={{ fontSize: 13, opacity: 0.75 }}>Based on the {q.role} role description, not individual experience.</p>}
+            </>) : <ul>{q.skills.map((s) => <li key={s}>{s}</li>)}{!q.skills.length && <li>No skills listed yet</li>}</ul>}
             {q.description && <p style={{ fontSize: 15, lineHeight: 1.5 }}>{q.description}</p>}</div></div></>);
       break;
     }
@@ -491,7 +502,17 @@ export default function App() {
         {tasks.filter((t) => t.status === st).map((t) => (<Fragment key={t.id}>
           <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
-          <div className="row" style={{ gap: 8 }}>{avs && PEOPLE.filter((q) => !owns(t, q.id) && (!q.skills.length || q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s)))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />)}</div>
+          <div className="row" style={{ gap: 8 }}>{avs && (live ? (() => {
+            // Live: only people whose skills fit this task (backend + Gemini), lightest workload first.
+            const c = cands[t.id];
+            if (!c) return <button className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }} title="Find board members whose skills fit this task" onClick={() => loadCandidates(t)}>Suggest</button>;
+            if (c.loading) return <small>Checking skills…</small>;
+            if (c.error) return <small title={c.error}>Couldn’t check · <a href="#retry" onClick={(e) => { e.preventDefault(); loadCandidates(t); }}>retry</a></small>;
+            if (!c.list.length) return <small>No one else has the skills for this</small>;
+            return c.list.map((s) => { const q = person(s.code) ?? { id: s.code, name: s.name };
+              return <Avatar key={s.code} p={q} cls="sm" title={`${s.name} · ${s.fit === "strong" ? "Strong fit" : "Possible fit"}\n${s.matched_skills.join(", ")}\n${s.due_this_week} due this week · ${s.open} open\n${s.reason}`}
+                style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => setModal({ reassign: [t, q, s] })} />; });
+          })() : PEOPLE.filter((q) => !owns(t, q.id) && (!q.skills.length || q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s)))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />))}</div>
           {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!tasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
@@ -564,7 +585,10 @@ export default function App() {
         <div className="acts"><button className="btn out" onClick={() => { setModal(null); say("Task accepted"); }}>Accept</button><button className="btn out" onClick={() => { setModal(null); say("Task declined"); }}>Decline</button></div></div></div>)}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
-      {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br /><small>Your request goes to an admin for approval.</small>
+      {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />
+        {modal.reassign[2] && <small style={{ display: "block", margin: "6px 0" }}><b>{modal.reassign[2].fit === "strong" ? "Strong fit" : "Possible fit"}:</b> {modal.reassign[2].reason}<br />
+          Skills: {modal.reassign[2].matched_skills.join(", ")} · {modal.reassign[2].due_this_week} due this week, {modal.reassign[2].open} open</small>}
+        <small>Your request goes to an admin for approval.</small>
         <div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button><button className="btn" onClick={() => { setModal(null); say("Reassignment request sent to admin"); }}>Send request</button></div></div></div>)}
       {recorder && <Recorder kind={recorder} onClose={() => setRecorder(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
