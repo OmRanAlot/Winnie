@@ -48,3 +48,14 @@ class Recording(BaseModel):
     durationMs: int = Field(ge=0)
     transcription: Transcript
     audio: Audio
+
+class Member(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=5, max_length=100)
+    phone: str = Field(min_length=7, max_length=20)
+    skills: list[str] = Field(min_items=0, max_items=20)
+    role: Literal["President", "Vice President", "Secretary", 
+                  "Treasurer", "PR1", "PR2", "Event Coordinator1", "Event Coordinator2", 
+                  "Community Outreach Chair", "Industry Partnership Chair1", 
+                  "Industry Partnership Chair2", "Technical Director"] = "Trainee"
+

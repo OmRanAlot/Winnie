@@ -1,4 +1,5 @@
-"""POST /api/recordings: receive a browser recording (audio + transcript JSON) and save it.
+"""POST /api/recordings: receive a browser recording (audio + transcript JSON) and save the JSON
+and the audio file.
 
 Called by frontend/src/lib/api.ts (saveRecording). Checks the content type and the 15 MB limit
 while streaming, validates the body against schemas.Recording, then hands it to
@@ -42,7 +43,8 @@ async def create_recording(request: Request):
     except ValidationError:
         return failure("Invalid recording. Check the audio data, size, and transcript fields.", 422)
     try:
-        filename = await run_in_threadpool(save_recording, recording)
+        saved = await run_in_threadpool(save_recording, recording)
     except OSError:
         return failure("Could not save the recording. Please retry or download locally.", 503)
-    return {"success": True, "data": {"filename": filename}, "error": None, "meta": {}}
+    data = {"filename": saved.json_filename, "audioFilename": saved.audio_filename}
+    return {"success": True, "data": data, "error": None, "meta": {}}

@@ -10,6 +10,7 @@ What is planned but not built lives in the docstrings of app/__init__.py and rou
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routes.assign_task_from_gemini import router as assign_task_router
 from app.routes.health import router as health_router
 from app.routes.recordings import router as recordings_router
 from app.settings import Settings
@@ -25,3 +26,4 @@ app.add_middleware(
 )
 app.include_router(health_router)
 app.include_router(recordings_router)
+app.include_router(assign_task_router)
