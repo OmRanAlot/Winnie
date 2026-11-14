@@ -86,6 +86,19 @@ def test_ambiguous_shared_name_segmentation_is_not_guessed():
     assert assignment_members("Avery Chen", aliases) is None
 
 
+def test_reassignment_owner_controls_personal_task_visibility():
+    class ReassignedTasks:
+        def unfinished_for_semester(self, semester):
+            return [
+                {**task("Assigned to you", "Unknown Alias", None), "owner_code": "AVERY"},
+                {**task("Assigned away", "Avery Chen", None), "owner_code": "MORGAN"},
+            ]
+
+    reply = personal_reply(message(), Members(), ReassignedTasks(), "fall-2026")
+    assert "Assigned to you" in reply
+    assert "Assigned away" not in reply
+
+
 def test_task_list_is_personal_ordered_and_has_no_other_members_task():
     reply = personal_reply(message(), Members(), Tasks(), "fall-2026")
     assert "1. early" in reply

@@ -11,7 +11,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 # Install dependencies separately so source-only changes reuse this layer.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY app ./app
 COPY data ./data

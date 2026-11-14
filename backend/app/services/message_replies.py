@@ -30,7 +30,10 @@ def personal_reply(message, members, tasks, semester_code: str) -> str:
     selected, unresolved = [], False
     for task in tasks.unfinished_for_semester(semester_code):
         try:
-            assigned = assignment_members(task.get("assignee_text", ""), aliases)
+            assigned = (
+                {task["owner_code"]} if task.get("owner_code")
+                else assignment_members(task.get("assignee_text", ""), aliases)
+            )
         except AliasConflict:
             return "Member assignment setup needs review. Please contact the project admin."
         if assigned is None:

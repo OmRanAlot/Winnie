@@ -8,6 +8,12 @@ from app.main import app
 from app.routes import members as route
 from app.services.members import AliasConflict, MemberStore, task_assignments
 
+
+def test_explicit_owner_takes_precedence_over_imported_assignment_text():
+    tasks = [{"id": "reassigned", "owner_code": "NEW_MEMBER", "assignee_text": "Old Name"}]
+    assert task_assignments(tasks, []) == {"reassigned": ["NEW_MEMBER"]}
+
+
 ALIASES = [
     {"alias": "Avery Chen", "member_code": "AVERY"},
     {"alias": "avery@example.test", "member_code": "AVERY"},
