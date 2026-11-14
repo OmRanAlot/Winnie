@@ -1,4 +1,4 @@
-# Secrets
+# Secrets / local configuration
 .env
 .env.*
 !.env.example
@@ -8,6 +8,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -19,6 +20,11 @@ htmlcov/
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Local data and private source material
+data/
+uploads/
+*.log
 
 # OS / editors
 .DS_Store
