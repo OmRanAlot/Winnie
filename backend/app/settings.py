@@ -9,7 +9,7 @@ Planned settings for the integrations are listed in app/__init__.py.
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # backend/app/settings.py -> repo root
@@ -41,3 +41,6 @@ class Settings(BaseSettings):
         default="gemini-3.8-flash",
         validation_alias=AliasChoices("GEMINI_MODEL", "WINNIE_GEMINI_MODEL"),
     )
+    supabase_url: str = ""
+    supabase_secret_key: SecretStr = SecretStr("")
+    task_api_key: SecretStr = SecretStr("")

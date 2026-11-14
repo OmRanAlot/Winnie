@@ -1,31 +1,50 @@
-// Messaging sidecar: the ONLY job of this service is to move direct messages between Photon
-// (iMessage) and the FastAPI backend. All business logic ("what does 'done' mean?") lives in
-// backend/. Photon ships TypeScript SDKs only, which is why this Node service exists at all.
-//
-//   iMessage <-> Photon <-> messaging/ (this file) <-> backend /webhooks/messaging
-//                                         ^---- backend calls POST /send
-//
-// Nothing is built yet. This single file is the whole service for now; split it only when it
-// outgrows one screen. The sections below are the plan, in build order.
-//
-// Run (from messaging/): npm run dev
-//
-// ---------------------------------------------------------------------------------------------
-// 1. CONFIG (env vars; fail fast at startup if a required one is missing)
-//    PHOTON_API_KEY, PORT, BACKEND_WEBHOOK_URL, MESSAGING_WEBHOOK_SECRET.
-//    MESSAGING_WEBHOOK_SECRET must match backend/.env. See .env.example.
-//
-// 2. PAYLOAD TYPES (the backend <-> sidecar contract)
-//    Keep in sync with the messaging shapes in backend/app/schemas.py when those are added.
-//
-// 3. CONNECT TO PHOTON
-//    Use @photon-ai/advanced-imessage. Confirm the real API, auth and inbound transport first.
-//
-// 4. INBOUND: iMessage -> backend
-//    Subscribe to inbound messages. Normalise each one (sender handle, text, thread id), sign it
-//    with MESSAGING_WEBHOOK_SECRET, and POST it to BACKEND_WEBHOOK_URL. No business logic here.
-//
-// 5. OUTBOUND: backend -> iMessage
-//    Tiny HTTP server: POST /send {recipient handle, text, optional quick-reply hints} and
-//    GET /health. Verify the request came from the backend, then send through Photon.
-// ---------------------------------------------------------------------------------------------
+import { Spectrum } from "spectrum-ts";
+import { imessage } from "spectrum-ts/providers/imessage";
+
+const projectId = process.env.PROJECT_ID?.trim();
+const projectSecret = process.env.PROJECT_SECRET?.trim();
+
+if (!projectId || !projectSecret) {
+  console.error("Set PROJECT_ID and PROJECT_SECRET in messaging/.env before starting.");
+  process.exit(1);
+}
+
+console.log("Connecting to Photon Spectrum...");
+const app = await Spectrum({
+  projectId,
+  projectSecret,
+  providers: [imessage.config()],
+});
+
+console.log("Echo listener started. Text your Photon line from an allowed phone.");
+
+// Reply within the incoming conversation. Do not log phone numbers or text bodies.
+for await (const [space, message] of app.messages) {
+  if (message.content.type === "text") {
+    try {
+      const response = await fetch(
+        "http://localhost:8000/api/messages",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            text: message.content.text,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Backend request failed: ${response.status}`)
+      }
+
+      //Read Python's reply from the response body.
+      const data = await response.json();
+
+      //Send that reply back to the original conversation via Photon
+      await space.send(data.reply);
+    } catch { console.error("Could not process the message.") }
+  }
+}
+
