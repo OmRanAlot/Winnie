@@ -75,7 +75,23 @@ Open [the dashboard](http://localhost:5173) and [the API docs](http://localhost:
 
 On macOS/Linux, use `cp` instead of `Copy-Item` and `cd` instead of `Set-Location`.
 
+## Task tracker setup
+
+See [Google Sheets source selection and semester rollover](backend/README.md#google-sheets-source-selection-and-semester-rollover)
+for choosing the spreadsheet ID, selecting the active monthly tab, and switching
+to a new semester's workbook. Use the workbook that the data came from: historical
+Spring exports keep the Spring workbook ID even when Fall is the current semester.
+
+The current importer reads CSV/TSV exports and saves reviewed changes to Supabase.
+Live access to private Google Sheets and automatic recurring sync are not implemented
+yet. The [import guide](docs/TRACKER_IMPORT.md) covers database setup, permanent task
+IDs, previewing changes, and applying an import.
+
 ## Checks
+
+Event planning now has a read-only draft endpoint, historical calendar/tracker
+matching, an offline checklist mode and an optional LangChain Deep Agents adapter.
+See the [event planning guide](docs/EVENT_PLANNING.md) for setup and sample requests.
 
 ```powershell
 Set-Location backend; uv run pytest; uv run ruff check .
@@ -84,6 +100,9 @@ npm --prefix frontend run build
 
 ## What exists today
 
-This is a development scaffold: a browser conversation recorder (audio + transcript saved as JSON), the API health and recordings endpoints, configuration loading, and tests for both. Agent planning, member/task persistence, approval enforcement, messaging, and reminders are planned in the linked documents; they are not implemented yet. No credentials are needed for the starter health check. Settings marked as future in `.env.example` are reserved for later phases.
+The backend includes browser recordings, health checks, task persistence/imports,
+member messaging support and read-only event planning drafts. Proposal persistence,
+approval/activation and scheduled reminders remain planned. No credentials are
+needed for the starter health check. See the feature guides for integration setup.
 
 Never commit `.env` files, actual member phone numbers, inbox contents, recordings, or private transcripts. Only `VITE_` values are exposed to browser code; put provider credentials in the backend environment.

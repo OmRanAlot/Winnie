@@ -10,7 +10,14 @@ from fastapi.responses import JSONResponse
 from app.integrations.supabase import StorageUnavailable
 from app.services.tasks import TaskNotFound, TaskStore
 from app.settings import Settings
-from app.task_schemas import MonthCode, StakeholderCode, TaskCreate, TaskStatus, TaskUpdate
+from app.task_schemas import (
+    MonthCode,
+    SemesterCode,
+    StakeholderCode,
+    TaskCreate,
+    TaskStatus,
+    TaskUpdate,
+)
 
 
 def authorize_tasks(x_winnie_api_key: str = Header(default="")):
@@ -65,6 +72,7 @@ def create_task(task: TaskCreate, store: Store):
 def list_tasks(
     store: Store,
     month_code: MonthCode | None = None,
+    semester_code: SemesterCode | None = None,
     status: TaskStatus | None = None,
     stakeholder_code: StakeholderCode | None = None,
     limit: int = Query(default=50, ge=1, le=100),
@@ -74,7 +82,8 @@ def list_tasks(
 
     def operation():
         tasks, total = store.list(
-            month_code=month_code, status=status, stakeholder_code=stakeholder_code,
+            month_code=month_code, semester_code=semester_code,
+            status=status, stakeholder_code=stakeholder_code,
             limit=limit, offset=offset,
         )
         meta["total"] = total

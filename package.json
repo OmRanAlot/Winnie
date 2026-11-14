@@ -7,7 +7,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:profiles": "node --test supabase/tests/profiles.test.mjs supabase/tests/roster.test.mjs"
   },
   "repository": {
     "type": "git",
@@ -21,6 +22,7 @@
   },
   "homepage": "https://github.com/Sharanya-Raj/Winnie#readme",
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
     "supabase": "^3.1.0"
   },
   "dependencies": {
