@@ -73,6 +73,11 @@ def task_assignments(tasks: list[dict], aliases: list[dict]) -> dict[str, list[s
     (the dashboard then shows the raw cell instead of guessing)."""
     result = {}
     for task in tasks:
+        # An approved reassignment sets an explicit roster code. It takes
+        # precedence over imported text, which may lack a matching alias.
+        if task.get("owner_code"):
+            result[str(task["id"])] = [task["owner_code"]]
+            continue
         text = (task.get("assignee_text") or "").strip()
         codes = assignment_members(text, aliases) if text else set()
         result[str(task["id"])] = sorted(codes) if codes is not None else None
