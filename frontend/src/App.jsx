@@ -27,102 +27,164 @@ const MEETINGS = [
 ];
 const REQUESTS = [{ id: 1, task: 3, from: 3, to: 1 }, { id: 2, task: 5, from: 8, to: 7 }, { id: 3, task: 6, from: 6, to: 5 }];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const COLORS = { Upcoming: "#e8a36b", "In-Progress": "#d9695a", Completed: "#7fb08a" };
+const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
 const person = (id) => PEOPLE.find((p) => p.id === id);
 const task = (id) => TASKS.find((t) => t.id === id);
 
 /* ---------- Styles (palette pulled from the logo) ---------- */
 const CSS = `
-:root{--ink:#4a1109;--maroon:#5a0d05;--rust:#b5472a;--orange:#e07a4a;--salmon:#f6b3a0;--peach:#fbe3d3;--sun:#ffd98a;--paper:#fffaf5;--panel:#f8e6da;--line:#ecc9b6}
+:root{--ink:#3a1410;--maroon:#5a0d05;--rust:#b5472a;--paper:#f3ebe2;--surface:#eadfd2;--hover:#e0d0bf;--line:#d6c4b2;--muted:#7a6459;--sun:#e0b25a;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--r:6px;--frame-band:clamp(12px,6.6vw,96px)}
 *{box-sizing:border-box}
-body{margin:0;background:var(--paper);color:var(--ink);font-family:"Nunito","Segoe UI",system-ui,sans-serif}
-.app{max-width:1100px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:20px 28px 0;position:relative}
-.top{display:flex;align-items:center;gap:16px;min-height:56px;margin-bottom:12px}
-.top h1{flex:1;text-align:center;font-size:26px;margin:0;font-weight:800;color:var(--maroon)}
+body{margin:0;background:var(--maroon);color:var(--ink);font-family:"Kabel","Josefin Sans","Hanken Grotesk","Segoe UI",system-ui,sans-serif;font-size:16px;line-height:1.5}
+h1,h2,h3,h4,.big{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif;letter-spacing:2px}
+button.btn,button.pill,button.link,button.bell,button.back,button.chev,button.rb,.nav button,.hub button{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif}
+.app{max-width:calc(1120px + var(--frame-band) + var(--frame-band));width:calc(100% - var(--frame-band) - var(--frame-band));margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:var(--s5) var(--s6) 0;background:var(--paper);border-left:var(--frame-band) solid var(--rust);border-right:var(--frame-band) solid var(--rust)}
+.top{display:flex;align-items:center;gap:var(--s4);min-height:56px;margin-bottom:var(--s4)}
+.top h1{flex:1;text-align:center;font-size:28px;margin:0;font-weight:700;letter-spacing:2px}
+.top .greeting{text-align:left;font-size:40px;font-weight:600}
 .top .sp{width:44px}
-.back{border:0;background:var(--peach);color:var(--maroon);width:44px;height:44px;border-radius:50%;font-size:22px;cursor:pointer}
-.adm{color:#d83a3a;font-weight:800;font-size:20px;min-width:96px;text-align:right}
+.back{border:1.5px solid var(--ink);background:transparent;color:var(--ink);width:44px;height:44px;border-radius:50%;cursor:pointer;display:grid;place-items:center}
+.back:hover{background:var(--ink);color:var(--paper)}
+.adm{color:var(--rust);font-weight:700;font-size:15px;min-width:96px;text-align:right;letter-spacing:.02em}
 button{font-family:inherit}
-.btn{border:0;background:var(--rust);color:#fff;font-weight:800;font-size:16px;padding:12px 26px;border-radius:999px;cursor:pointer}
-.btn:hover{background:var(--maroon)}.btn.alt{background:var(--peach);color:var(--maroon)}.btn.alt:hover{background:var(--salmon)}
-.btn.out{background:#fff;color:var(--maroon);border:2px solid var(--maroon)}
-.link{background:none;border:0;color:var(--maroon);text-decoration:underline;font-size:18px;cursor:pointer;margin-top:10px}
+.btn{border:0;background:var(--rust);color:#fff8f0;font-weight:650;font-size:15px;padding:var(--s3) var(--s5);border-radius:var(--r);cursor:pointer}
+.btn:hover{background:var(--maroon)}
+.btn.alt{background:var(--surface);color:var(--ink);border:1px solid var(--line)}.btn.alt:hover{background:var(--hover)}
+.btn.out{background:transparent;color:var(--ink);border:1.5px solid var(--ink)}.btn.out:hover{background:var(--ink);color:var(--paper)}
+.link{background:none;border:0;color:var(--ink);text-decoration:underline;text-underline-offset:4px;font-size:16px;cursor:pointer;margin-top:var(--s2)}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
-.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;padding-bottom:60px}
-.center h2{font-size:34px;margin:0;color:var(--maroon);border-bottom:3px solid var(--maroon);padding:0 60px 10px;width:min(700px,100%)}
-.logo{width:150px;height:150px;object-fit:contain}
-.form{display:grid;grid-template-columns:auto 280px;gap:14px 14px;align-items:center;text-align:right;font-size:20px;font-weight:700}
-.field{border:0;background:var(--panel);border-radius:999px;padding:12px 18px;font-size:16px;color:var(--ink);font-family:inherit;width:100%}
-textarea.field{border-radius:18px;min-height:110px;resize:vertical}
-.pill{background:var(--panel);border-radius:999px;padding:14px 24px;font-size:18px;font-weight:600;border:0;color:var(--ink);text-align:left;font-family:inherit}
-button.pill{cursor:pointer}button.pill:hover{background:var(--salmon)}
-.panel{background:var(--panel);border-radius:24px;padding:20px 26px}
-.panel h3{margin:0 0 10px;text-align:center;font-size:24px;color:var(--maroon)}
-.panel ul{margin:0;padding-left:22px;line-height:1.9;font-size:18px}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-.avatar{width:56px;height:56px;border-radius:50%;background:var(--salmon);border:3px solid var(--maroon);display:grid;place-items:center;font-weight:800;color:var(--maroon);flex:none;cursor:pointer;padding:0;font-size:17px}
-.avatar.sm{width:44px;height:44px;font-size:14px}
-.avatar.lg{width:110px;height:110px;font-size:36px;cursor:default;border-width:4px}
-.id{display:flex;gap:26px;align-items:center;margin-bottom:12px}
-.id h2{margin:0;font-size:32px;border-bottom:3px solid var(--maroon);padding-bottom:8px;flex:1;max-width:640px}
-.id p{margin:6px 0 0;font-size:20px}
-.grid2{display:grid;grid-template-columns:1fr 3px 1fr;gap:20px 28px;margin-top:20px}
-.divider{border-left:3px dashed var(--maroon);grid-row:1/5;grid-column:2}
-.row{display:flex;align-items:center;gap:14px}.row .pill{flex:1;text-align:center}
-.home{display:grid;grid-template-columns:1fr 330px;gap:28px;flex:1}
-.home h3{text-align:center;font-size:26px;margin:0 0 10px}
-.nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px;background:var(--panel);margin:18px -28px 0;padding:18px 28px;position:sticky;bottom:0}
-.nav button{border:0;background:#fff;border-radius:999px;padding:12px;font-size:24px;font-weight:700;color:var(--maroon);cursor:pointer}
-.nav button:hover{background:var(--sun)}
-.bell{position:relative;background:none;border:0;font-size:30px;cursor:pointer}
-.bell b{position:absolute;right:-4px;top:-4px;background:var(--rust);color:#fff;border-radius:50%;width:20px;height:20px;font-size:12px;display:grid;place-items:center}
-.due{display:flex;align-items:center;gap:10px;margin-bottom:12px}
-.due .pill{flex:1;padding:12px 20px}
-.dot{width:26px;height:26px;border-radius:50%;flex:none;border:0}
-.gantt{background:var(--panel);border-radius:20px;overflow:hidden;font-size:13px}
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s4);padding-bottom:var(--s6)}
+.center h2{font-size:40px;margin:0;font-weight:700;letter-spacing:2px;border-bottom:2px solid var(--ink);padding:0 var(--s6) var(--s3);width:min(640px,100%);text-align:center}
+.logo{width:132px;height:132px;object-fit:contain}
+.form{display:grid;grid-template-columns:auto 280px;gap:var(--s3) var(--s4);align-items:center;text-align:right;font-weight:600}
+.field{border:1px solid var(--line);background:#f9f4ee;border-radius:var(--r);padding:var(--s3) var(--s4);font-size:16px;color:var(--ink);font-family:inherit;width:100%}
+textarea.field{min-height:110px;resize:vertical}
+.pill{background:var(--surface);border-radius:var(--r);padding:var(--s3) var(--s4);font-size:16px;font-weight:500;border:0;color:var(--ink);text-align:left;font-family:inherit}
+button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
+.panel{background:var(--surface);border-radius:var(--r);padding:var(--s5)}
+.panel h3{margin:0 0 var(--s3);font-size:20px;font-weight:650}
+.panel ul{margin:0;padding-left:var(--s5);line-height:1.9}
+.panel .none,.empty{color:var(--muted);list-style:none;margin-left:calc(var(--s5) * -1)}
+.empty{grid-column:1/-1;margin:0;padding:var(--s2) 0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:var(--s5)}
+.avatar{width:52px;height:52px;border-radius:50%;background:#f0c9b3;border:2px solid var(--maroon);box-shadow:2px 2px 0 var(--maroon);display:grid;place-items:center;font-weight:700;color:var(--maroon);flex:none;cursor:pointer;padding:0;font-size:16px}
+.avatar:hover{background:var(--sun)}
+.avatar.sm{width:40px;height:40px;font-size:13px}
+.avatar.lg{width:104px;height:104px;font-size:34px;cursor:default;box-shadow:4px 4px 0 var(--maroon)}
+.id{display:flex;gap:var(--s5);align-items:center;margin-bottom:var(--s4)}
+.id h2{margin:0;font-size:32px;font-weight:700;border-bottom:2px solid var(--ink);padding-bottom:var(--s2);flex:1;max-width:640px}
+.id p{margin:var(--s2) 0 0;font-size:18px;color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 2px 1fr;gap:var(--s5) var(--s6);margin-top:var(--s5)}
+.divider{border-left:2px dashed var(--ink);grid-row:1/5;grid-column:2}
+.row{display:flex;align-items:center;gap:var(--s3)}.row .pill{flex:1;text-align:left}
+.home{display:grid;grid-template-columns:1fr 320px;gap:var(--s6);flex:1;min-width:0}
+.home>div,.gantt{min-width:0;width:100%}
+.home h3{font-size:22px;margin:0 0 var(--s3);font-weight:650}
+.nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:var(--s5) calc(var(--s6) * -1) 0;padding:var(--s4) var(--s6);position:sticky;bottom:0}
+.nav button{border:1px solid var(--line);background:var(--paper);border-radius:var(--r);padding:var(--s3);font-size:20px;font-weight:600;color:var(--ink);cursor:pointer}
+.nav button:hover{background:var(--ink);color:var(--paper)}
+.bell{position:relative;background:none;border:0;color:var(--ink);cursor:pointer;padding:var(--s2);display:grid}
+.bell b{position:absolute;right:0;top:0;background:var(--rust);color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;display:grid;place-items:center}
+.due{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s2)}
+.due .pill{flex:1;min-width:0}
+.st{font-size:13px;font-weight:650;padding-bottom:2px;border-bottom:3px solid var(--c);white-space:nowrap}
+.status-action{padding:var(--s2) var(--s3);font-size:13px;white-space:nowrap}
+.gantt{background:var(--surface);border-radius:var(--r);overflow:hidden;font-size:13px}
 .gh,.gr{display:grid;grid-template-columns:150px 84px 84px 84px 1fr;align-items:center}
-.gh{background:var(--peach);font-weight:800;padding:8px 10px;gap:4px}
-.gr{padding:4px 10px;gap:4px;height:40px;border-top:1px solid var(--line);cursor:pointer}
-.gr:hover{background:#fff6ee}
+.gh{background:var(--hover);font-weight:700;padding:var(--s2) var(--s3);gap:var(--s1)}
+.gr{padding:var(--s1) var(--s3);gap:var(--s1);height:40px;border-top:1px solid var(--line);cursor:pointer}
+.gr:hover{background:#f1e7dc}
 .gr span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-weight:700}
 .lane{position:relative;height:100%;background:repeating-linear-gradient(90deg,transparent 0 calc(100%/7 - 1px),var(--line) calc(100%/7 - 1px) calc(100%/7))}
-.bar{position:absolute;top:9px;height:22px;border-radius:6px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.12)}
-.tog{display:flex;align-items:center;gap:8px;justify-content:flex-end;font-size:14px;margin-bottom:6px;cursor:pointer}
-.sw{width:44px;height:24px;border-radius:99px;background:var(--line);position:relative}
-.sw i{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--maroon);transition:left .15s}
-.sw.on{background:var(--salmon)}.sw.on i{left:23px}
-.legend{display:flex;gap:16px;margin-top:8px;font-size:14px;justify-content:center}
-.legend i{display:inline-block;width:14px;height:14px;border-radius:4px;margin-right:6px;vertical-align:-2px}
-.sec{font-size:26px;margin:18px 0 8px}
-.sum{display:grid;grid-template-columns:1fr 240px;gap:8px 14px;align-items:center;max-width:960px;margin:0 auto;width:100%}
+.bar{position:absolute;top:10px;height:20px;border-radius:3px}
+.tog{display:flex;align-items:center;gap:var(--s2);justify-content:flex-end;font-size:14px;margin-bottom:var(--s2);cursor:pointer}
+.sw{width:40px;height:22px;border-radius:99px;background:var(--line);position:relative}
+.sw i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--ink);transition:left .15s}
+.sw.on{background:var(--rust)}.sw.on i{left:21px;background:#fff8f0}
+.legend{display:flex;gap:var(--s4);margin-top:var(--s3);font-size:14px}
+.legend i{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:var(--s2);vertical-align:-2px}
+.sec{font-size:22px;margin:var(--s5) 0 var(--s2);font-weight:650}
+.sum{display:grid;grid-template-columns:1fr 240px;gap:var(--s2) var(--s4);align-items:center;max-width:960px;margin:0 auto;width:100%}
 .sum .pill{display:flex;justify-content:space-between;align-items:center;width:100%;cursor:pointer}
-.chev{background:none;border:0;font-size:22px;cursor:pointer;color:var(--maroon);transition:transform .15s}
+.chev{background:none;border:0;cursor:pointer;color:var(--ink);display:grid;transition:transform .15s}
 .chev.open{transform:rotate(180deg)}
-.det{grid-column:1/-1;background:#fff;border-radius:18px;padding:10px 20px;margin:-2px 0 6px;font-size:16px}
-.modal{position:fixed;inset:0;background:rgba(74,17,9,.35);display:grid;place-items:center;z-index:9}
-.box{background:#fff;border:3px solid var(--maroon);border-radius:26px;padding:26px 34px;text-align:center;max-width:480px;font-size:20px;line-height:1.5}
-.box h4{margin:0 0 8px;font-size:22px;text-decoration:underline}
-.box .acts{display:flex;gap:14px;justify-content:center;margin-top:14px}
-.toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--maroon);color:#fff;padding:12px 24px;border-radius:999px;z-index:10;font-weight:700}
-.hub{display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:880px;margin:30px auto}
-.hub button{background:var(--panel);border:0;padding:30px;font-size:24px;font-weight:700;color:var(--maroon);border-radius:20px;cursor:pointer}
-.hub button:hover{background:var(--salmon)}.hub button:last-child:nth-child(odd){grid-column:1/-1;justify-self:center;width:50%}
-.lbl{font-weight:800;font-size:18px}
-.meter{height:16px;background:#fff;border-radius:99px;overflow:hidden}.meter i{display:block;height:100%;background:linear-gradient(90deg,var(--orange),var(--sun))}
-.score{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-.big{font-size:44px;font-weight:800;color:var(--rust)}
-.cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px}
+.det{grid-column:1/-1;background:#f9f4ee;border:1px solid var(--line);border-radius:var(--r);padding:var(--s3) var(--s4);margin:0 0 var(--s2);font-size:15px}
+.modal{position:fixed;inset:0;background:rgba(58,20,16,.4);display:grid;place-items:center;z-index:9}
+.box{background:var(--paper);border:2px solid var(--ink);border-radius:var(--r);padding:var(--s5) var(--s6);max-width:480px;font-size:18px;line-height:1.6}
+.box h4{margin:0 0 var(--s2);font-size:22px}
+.box .acts{display:flex;gap:var(--s3);margin-top:var(--s4)}
+.toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:var(--s3) var(--s5);border-radius:var(--r);z-index:10;font-weight:600}
+.hub{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4);max-width:880px;margin:var(--s6) auto}
+.hub button{background:var(--surface);border:1px solid var(--line);padding:var(--s6);font-size:22px;font-weight:650;color:var(--ink);border-radius:var(--r);cursor:pointer;text-align:left}
+.hub button:hover{background:var(--ink);color:var(--paper)}.hub button:last-child:nth-child(odd){grid-column:1/-1;justify-self:center;width:50%}
+.lbl{font-weight:700}
+.meter{height:10px;background:#f9f4ee;border-radius:2px;overflow:hidden}.meter i{display:block;height:100%;background:var(--rust)}
+.score{display:grid;grid-template-columns:1fr 1fr;gap:var(--s5)}
+.big{font-size:56px;font-weight:700;color:var(--rust);line-height:1.1}
+.cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5)}
 .cols .panel{min-height:320px}
-.cols .panel p{white-space:pre-wrap;font-size:15px;line-height:1.7}
-.req{display:flex;align-items:center;gap:18px;margin-bottom:16px}
-.req .panel{flex:1;text-align:center;font-size:19px;line-height:1.5;border-radius:30px}
-.rb{width:54px;height:54px;border-radius:50%;border:0;color:#fff;font-size:26px;cursor:pointer}
-.side{display:flex;flex-direction:column;gap:12px}.side .pill{text-align:center;background:var(--maroon);color:#fff;cursor:pointer}.side .pill.on{background:var(--rust)}
-@media(max-width:800px){.home,.two,.cols,.score,.hub{grid-template-columns:1fr}.gh,.gr{grid-template-columns:110px 0 0 0 1fr}.gh span:nth-child(2),.gh span:nth-child(3),.gh span:nth-child(4),.gr span:nth-child(2),.gr span:nth-child(3),.gr span:nth-child(4){display:none}.grid2{grid-template-columns:1fr}.divider{display:none}.sum{grid-template-columns:1fr}.hub button:last-child:nth-child(odd){width:100%}}
+.cols .panel p{white-space:pre-wrap;font-size:15px;line-height:1.7;margin:0}
+.req{display:flex;align-items:center;gap:var(--s4);margin-bottom:var(--s4)}
+.req .panel{flex:1;font-size:18px;line-height:1.6}
+.rb{width:48px;height:48px;border-radius:50%;border:0;color:#fff8f0;cursor:pointer;display:grid;place-items:center}
+.side{display:flex;flex-direction:column;gap:var(--s3)}.side .pill{background:var(--ink);color:var(--paper);cursor:pointer}
+.task-form{grid-template-columns:150px minmax(0,1fr)}
+.dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 436px);pointer-events:none}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+@media(max-width:800px){
+  .app{padding:var(--s4)}
+  .nav{margin:var(--s4) calc(var(--s4) * -1) 0;padding:var(--s3) var(--s4);gap:var(--s2)}
+  .home,.two,.cols,.score,.hub{grid-template-columns:1fr}
+  .home,.home>div,.gantt,.gh,.gr{min-width:0;width:100%}
+  .meeting-layout{grid-template-columns:1fr!important}
+  .task-form{grid-template-columns:minmax(0,100px) minmax(0,1fr)!important}
+  .gh,.gr{grid-template-columns:minmax(0,110px) 0 0 0 minmax(0,1fr)}
+  .gh span:nth-child(2),.gh span:nth-child(3),.gh span:nth-child(4),.gr span:nth-child(2),.gr span:nth-child(3),.gr span:nth-child(4){display:none}
+  .grid2{grid-template-columns:1fr}
+  .grid2 .row{grid-column:1!important;grid-row:auto!important}
+  .divider{display:none}
+  .sum{grid-template-columns:1fr}
+  .hub button:last-child:nth-child(odd){width:100%}
+  .dependency-lines{width:calc(100% - 130px)}
+}
+@media(max-width:520px){
+  .app{padding:var(--s3);border-radius:0}
+  .top{gap:var(--s2);min-height:44px}
+  .top .sp{width:20px}
+  .top h1{font-size:clamp(16px,5vw,21px);letter-spacing:1px}
+  .top .greeting{font-size:clamp(21px,7vw,30px);letter-spacing:1px}
+  .adm{min-width:0;font-size:11px}
+  .back{width:38px;height:38px}
+  .center h2{font-size:clamp(24px,8vw,34px);padding-right:var(--s3);padding-left:var(--s3)}
+  .logo{width:104px;height:104px}
+  .form{grid-template-columns:minmax(0,1fr);gap:var(--s2);width:min(100%,360px);text-align:left}
+  .id{gap:var(--s3)}
+  .avatar.lg{width:80px;height:80px;font-size:26px}
+  .id h2{font-size:clamp(21px,7vw,28px);overflow-wrap:anywhere}
+  .home h3{font-size:19px}
+  .nav{gap:var(--s1);padding:var(--s2)}
+  .nav button{min-width:0;padding:var(--s2) 4px;font-size:clamp(12px,3.7vw,16px)}
+  .due{gap:var(--s2)}
+  .due .pill{padding:var(--s2);font-size:14px}
+  .st{font-size:11px}
+  .status-action{padding:var(--s2);font-size:11px}
+  .panel{padding:var(--s4)}
+  .gh,.gr{grid-template-columns:minmax(0,92px) 0 0 0 minmax(0,1fr)}
+  .gantt{font-size:11px}
+  .legend{flex-wrap:wrap;gap:var(--s2)}
+  .hub button{padding:var(--s4)}
+  .req{flex-wrap:wrap}
+  .req .panel{flex-basis:100%}
+  .rb{flex:1}
+  .box{width:min(480px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;padding:var(--s4)}
+  .toast{max-width:calc(100% - 32px);text-align:center}
+}
 `;
 
 const ini = (n) => n.split(" ").map((w) => w[0]).join("");
+const IC = { back: "M15 5l-7 7 7 7", bell: "M6 17h12l-1.5-2V10a4.5 4.5 0 0 0-9 0v5zM10 20h4", mic: "M12 4a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v3", check: "M5 12.5l4.5 4.5L19 7", x: "M6 6l12 12M18 6L6 18", chev: "M6 9l6 6 6-6", arrow: "M5 12h14M13 6l6 6-6 6" };
+const Icon = ({ n, s = 22 }) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={IC[n]} /></svg>;
 const Avatar = ({ p, cls = "", ...r }) => <button className={`avatar ${cls}`} title={p.name} aria-label={p.name} {...r}>{ini(p.name)}</button>;
 
 /* ---------- Gantt ---------- */
@@ -144,7 +206,7 @@ function Gantt({ tasks, onOpen }) {
             </div>
           ))}
           {deps && (
-            <svg viewBox={`0 0 ${W} ${tasks.length * H}`} preserveAspectRatio="none" style={{ position: "absolute", top: 0, right: 10, width: "calc(100% - 436px)", height: tasks.length * H, pointerEvents: "none" }}>
+            <svg className="dependency-lines" viewBox={`0 0 ${W} ${tasks.length * H}`} preserveAspectRatio="none" style={{ height: tasks.length * H }}>
               {tasks.filter((t) => t.dep && idx[t.dep] !== undefined).map((t) => {
                 const a = task(t.dep), x1 = (a.day + a.len) * cw, y1 = idx[a.id] * H + H / 2, x2 = (t.day + 0.1) * cw, y2 = idx[t.id] * H + 9;
                 return <path key={t.id} d={`M${x1} ${y1} H${x1 + 8} V${y2 - 4} H${x2} V${y2}`} fill="none" stroke="#4a1109" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />;
@@ -166,6 +228,7 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState("");
   const [reqs, setReqs] = useState(REQUESTS);
+  const [tasks, setTasks] = useState(TASKS);
   const [open, setOpen] = useState({});
   const [notes, setNotes] = useState({});
   const p = stack[stack.length - 1];
@@ -173,12 +236,15 @@ export default function App() {
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   const home = () => { setStack([{ n: "landing" }]); setViewAs(null); setAdmin(false); };
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
+  const setTaskStatus = (id, status) => {
+    setTasks((current) => current.map((t) => t.id === id ? { ...t, status } : t));
+  };
   const isAdminView = admin && !viewAs;
   const me = viewAs ? person(viewAs) : person(isAdminView ? 1 : 2);
 
   const Top = ({ title, tag, noBack }) => (
     <div className="top">
-      {noBack ? <span className="sp" /> : <button className="back" onClick={back} aria-label="Back">←</button>}
+      {noBack ? <span className="sp" /> : <button className="back" onClick={back} aria-label="Back"><Icon n="back" /></button>}
       <h1>{title}</h1>{tag ? <span className="adm">(ADMIN)</span> : <span className="sp" />}
     </div>
   );
@@ -232,28 +298,32 @@ export default function App() {
       page = (<div className="center"><h2 style={{ lineHeight: 1.3 }}>Your account has been successfully registered!</h2><p style={{ fontSize: 20, margin: 0 }}>You can now login with your registered credentials.</p><button className="link" onClick={home}>Back to Home</button></div>);
       break;
     case "dash": {
-      const mine = viewAs ? TASKS.filter((t) => t.assignee === viewAs) : isAdminView ? TASKS : TASKS.filter((t) => t.assignee === 2 || t.dep);
-      const soon = TASKS.filter((t) => t.status !== "Completed").slice(0, isAdminView ? 3 : 4);
+      const mine = viewAs ? tasks.filter((t) => t.assignee === viewAs) : isAdminView ? tasks : tasks.filter((t) => t.assignee === 2 || t.dep);
+      const soon = tasks.filter((t) => t.status !== "Completed").slice(0, isAdminView ? 3 : 4);
       page = (<>
-        <div className="top"><h1 style={{ textAlign: "left", fontSize: 36, fontWeight: 600 }}>Hey {me.name.split(" ")[0]}!</h1>
+        <div className="top"><h1 className="greeting">Hey {me.name.split(" ")[0]}!</h1>
           {viewAs ? <button className="btn alt" onClick={() => { setViewAs(null); setStack([{ n: "dash" }, { n: "admin" }]); }}>BACK TO ADMIN</button>
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
-            : <button className="bell" aria-label="Notifications" onClick={() => setModal("notif")}>🔔<b>1</b></button>}
+            : <button className="bell" aria-label="Notifications" onClick={() => setModal("notif")}><Icon n="bell" s={26} /><b>1</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
         <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
             {isAdminView && <Avatar p={person(t.assignee)} cls="sm" onClick={() => go("profile", { id: t.assignee })} />}
             <button className="pill" onClick={() => go("task", { id: t.id })}>{t.title}</button>
-            {!isAdminView && <span className="dot" style={{ background: COLORS[t.status] }} title={t.status} />}</div>))}</div></div>
+            {!isAdminView && <span className="st" style={{ "--c": COLORS[t.status] }}>{t.status}</span>}
+            <button className="btn alt status-action" aria-label={`Mark ${t.title} ${t.status === "Upcoming" ? "in progress" : "completed"}`}
+              onClick={() => setTaskStatus(t.id, t.status === "Upcoming" ? "In-Progress" : "Completed")}>
+              {t.status === "Upcoming" ? "Start" : "Complete"}
+            </button></div>))}</div></div>
         <Nav /></>);
       break;
     }
     case "meetings":
       page = (<><Top title="Meetings" /><div style={{ textAlign: "right", marginTop: -50, marginBottom: 20, fontSize: 20, pointerEvents: "none" }}>11/14/2026</div>
-        <div className="two" style={{ gridTemplateColumns: "180px 1fr", gap: 24 }}>
+        <div className="two meeting-layout" style={{ gridTemplateColumns: "180px 1fr", gap: 24 }}>
           <div className="side panel">{["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" onClick={() => say(`${k} recording started (placeholder)`)}>{k}</button>)}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            {["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" style={{ padding: 28 }} onClick={() => say(`New ${k.toLowerCase()} recording — backend will store notes & transcript`)}>🎙&nbsp;&nbsp;Create a new recording</button>)}
+            {["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" style={{ padding: 28, display: "flex", alignItems: "center", gap: 10 }} onClick={() => say(`New ${k.toLowerCase()} recording — backend will store notes & transcript`)}><Icon n="mic" />Create a new recording</button>)}
             <button className="btn alt" style={{ alignSelf: "flex-end" }} onClick={() => go("past")}>Past Meetings</button></div></div></>);
       break;
     case "past":
@@ -267,26 +337,26 @@ export default function App() {
         <div className="cols"><div className="panel"><h3>Notes:</h3><p>{"• Reviewed GBM 1 timeline\n• Confirmed budget owner\n• Flyer due before Thursday\n• Next meeting TBD"}</p></div>
           <div className="panel"><h3>Transcript:</h3><p>{"[00:00] Welcome everyone…\n[00:42] First item is the GBM agenda…\n[03:10] Who can take the budget?…"}</p></div>
           <div><h3 style={{ textAlign: "center", fontSize: 24, marginTop: 0 }}>Delegated Tasks:</h3>
-            {m.tasks.map(([t, a]) => <div className="due" key={t}><span>➜</span><button className="pill" style={{ flex: 1, textAlign: "center" }} onClick={() => go("task", { id: TASKS.find((x) => x.title === t)?.id || 1 })}>{t}<br /><small>Assignee: {person(a).name}</small></button></div>)}</div></div></>);
+            {m.tasks.map(([t, a]) => <div className="due" key={t}><Icon n="arrow" s={18} /><button className="pill" style={{ flex: 1, textAlign: "center" }} onClick={() => go("task", { id: TASKS.find((x) => x.title === t)?.id || 1 })}>{t}<br /><small>Assignee: {person(a).name}</small></button></div>)}</div></div></>);
       break;
     }
     case "profiles":
       page = <Grid title="Profiles" onPick={(q) => go("profile", { id: q.id })} />;
       break;
     case "profile": {
-      const q = person(p.id), ts = TASKS.filter((t) => t.assignee === q.id);
+      const q = person(p.id), ts = tasks.filter((t) => t.assignee === q.id);
       page = (<><Top title="Profile" tag={isAdminView} />
         <div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div><h2 style={isAdminView ? { cursor: "pointer" } : {}} onClick={() => isAdminView && setModal({ view: q })}>{q.name}</h2><p>{q.role}</p></div></div>
-        <div className="two"><div className="panel"><h3>Tasks</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.title}</a> ({t.status})</li>)}{!ts.length && <li>No tasks yet</li>}</ul></div>
+        <div className="two"><div className="panel"><h3>Tasks</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.title}</a> ({t.status})</li>)}{!ts.length && <li className="none">No tasks assigned yet.</li>}</ul></div>
           <div className="panel"><h3>Skills</h3><ul>{q.skills.map((s) => <li key={s}>{s}</li>)}</ul></div></div></>);
       break;
     }
     case "task": {
-      const t = task(p.id), dep = t.dep ? task(t.dep) : null;
+      const t = tasks.find((item) => item.id === p.id), dep = t.dep ? tasks.find((item) => item.id === t.dep) : null;
       const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due], ["Assignee", person(t.assignee).name], ["Status", t.status], ["Dependency", dep ? `Depends on “${dep.title}” (${person(dep.assignee).name})` : "None"]];
       page = (<><Top title={t.title} /><div className="two" style={{ maxWidth: 960, margin: "10px auto" }}>
-        <div className="panel"><div className="form" style={{ textAlign: "left", fontSize: 18, gridTemplateColumns: "150px 1fr" }}>
-          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" defaultValue={v}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
+        <div className="panel"><div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
+          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} onChange={(e) => setTaskStatus(t.id, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
         <div className="panel"><h3>Notes</h3><textarea className="field" style={{ minHeight: 200 }} placeholder="Add notes for yourself or an admin…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
           <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" onClick={() => say("Notes saved (placeholder)")}>Save notes</button></div></div></div></>);
       break;
@@ -294,11 +364,11 @@ export default function App() {
     case "tasks": {
       const G = (title, st, avs) => (<>
         <h2 className="sec" style={{ gridColumn: 1 }}>{title}</h2>{avs ? <h2 className="sec" style={{ fontSize: 24 }}>Assign Task:</h2> : <span />}
-        {TASKS.filter((t) => t.status === st).map((t) => (<Fragment key={t.id}>
+        {tasks.filter((t) => t.status === st).map((t) => (<Fragment key={t.id}>
           <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
-            <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}>⌄</button></div>
+            <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
           <div className="row" style={{ gap: 8 }}>{avs && PEOPLE.filter((q) => q.id !== t.assignee && q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />)}</div>
-          {open[t.id] && <div className="det">Assignee: {person(t.assignee).name} · Status: {t.status} · Assigned {t.assigned}</div>}</Fragment>))}</>);
+          {open[t.id] && <div className="det">Assignee: {person(t.assignee).name} · Status: {t.status} · Assigned {t.assigned}</div>}</Fragment>))}{!tasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
@@ -315,7 +385,7 @@ export default function App() {
     case "edit": {
       const q = person(p.id);
       page = (<><Top title="Edit Profile" tag /><div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div style={{ flex: 1 }}><input className="field" defaultValue={q.name} aria-label="Name" style={{ maxWidth: 500, fontSize: 26 }} /><input className="field" defaultValue={q.role} aria-label="Position" style={{ maxWidth: 500, marginTop: 8 }} /></div></div>
-        <div className="two"><div className="panel"><h3>Edit Tasks</h3><ul>{TASKS.filter((t) => t.assignee === q.id).map((t) => <li key={t.id}>{t.title} ({t.status})</li>)}</ul></div>
+        <div className="two"><div className="panel"><h3>Edit Tasks</h3><ul>{tasks.filter((t) => t.assignee === q.id).map((t) => <li key={t.id}>{t.title} ({t.status})</li>)}</ul></div>
           <div className="panel"><h3>Edit Skills</h3><ul>{q.skills.map((s) => <li key={s}><input className="field" defaultValue={s} style={{ padding: "4px 12px", width: "80%" }} /></li>)}</ul></div></div>
         <div style={{ textAlign: "center", marginTop: 18 }}><button className="btn" onClick={() => say("Profile saved (placeholder)")}>Save changes</button></div></>);
       break;
@@ -337,7 +407,7 @@ export default function App() {
       page = <Grid title="Task Metrics" tag onPick={(q) => go("tm", { id: q.id })} extra={<div style={{ textAlign: "center", marginTop: 20 }}><button className="btn alt" onClick={() => go("reassigned")}>Tasks Re-assigned</button></div>} />;
       break;
     case "tm": {
-      const q = person(p.id), done = TASKS.filter((t) => t.status === "Completed");
+      const q = person(p.id), done = tasks.filter((t) => t.status === "Completed");
       page = (<><Top title={`${q.name}'s Task Metrics`} tag /><Ident q={q} /><h3 style={{ textAlign: "center", fontSize: 26, margin: "0 0 10px" }}>Tasks Completed: {done.length}</h3>
         {done.map((t) => <div className="due" key={t.id}><span style={{ width: 110, fontSize: 18 }}>{t.finished}:</span><button className="pill" onClick={() => go("task", { id: t.id })}>{t.title}</button></div>)}</>);
       break;
@@ -347,9 +417,9 @@ export default function App() {
       break;
     case "review":
       page = (<><Top title="Review Pending Task Re-assignments" tag />{reqs.map((r) => (<div className="req" key={r.id}><div className="panel">Task Re-assignment Request:<br />“{task(r.task).title}”<br />{person(r.from).name} → {person(r.to).name}</div>
-        <button className="rb" style={{ background: "#4fae5e" }} aria-label="Approve" onClick={() => { setReqs(reqs.filter((x) => x.id !== r.id)); say("Approved — recipient will be notified"); }}>✓</button>
-        <button className="rb" style={{ background: "#e5594f" }} aria-label="Deny" onClick={() => { setReqs(reqs.filter((x) => x.id !== r.id)); say("Request denied"); }}>✕</button></div>))}
-        {!reqs.length && <p style={{ textAlign: "center", fontSize: 20 }}>No pending requests. New ones will appear here.</p>}</>);
+        <button className="rb" style={{ background: "#5f7a3d" }} aria-label="Approve" onClick={() => { setReqs(reqs.filter((x) => x.id !== r.id)); say("Approved — recipient will be notified"); }}><Icon n="check" s={24} /></button>
+        <button className="rb" style={{ background: "#b5472a" }} aria-label="Deny" onClick={() => { setReqs(reqs.filter((x) => x.id !== r.id)); say("Request denied"); }}><Icon n="x" s={24} /></button></div>))}
+        {!reqs.length && <p className="empty">No pending requests. New ones will appear here.</p>}</>);
       break;
     case "meetmetrics":
       page = <Grid title="Meeting Metrics" tag onPick={(q) => go("mm", { id: q.id })} />;
