@@ -1,56 +1,25 @@
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { getAssignments, getCandidates, getMembers, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
 import Recorder from "./Recorder.jsx";
+import { supabase } from "./lib/supabase";
+import { reassignmentStore } from "./lib/reassignments.js";
+const requestsStore = reassignmentStore(supabase);
 
-/* ---------- Placeholder data (replace with backend responses) ---------- */
-// Sample people: shown when the backend is unreachable, and still used by the sample
-// Meetings / Requests screens. Real members come from GET /api/members.
-const SAMPLE_PEOPLE = [
-  { id: 1, name: "Maya Patel", role: "President", skills: ["Leadership", "Public speaking", "Budgeting"] },
-  { id: 2, name: "Jordan Lee", role: "Vice President", skills: ["Planning", "Outreach", "Docs"] },
-  { id: 3, name: "Sam Rivera", role: "Treasurer", skills: ["Budgeting", "Spreadsheets", "Sponsorship"] },
-  { id: 4, name: "Priya Shah", role: "Secretary", skills: ["Note-taking", "Scheduling", "Docs"] },
-  { id: 5, name: "Alex Kim", role: "Event Coordinator", skills: ["Logistics", "Planning", "Vendors"] },
-  { id: 6, name: "Dana Cruz", role: "Event Coordinator", skills: ["Design", "Logistics", "Outreach"] },
-  { id: 7, name: "Riley Chen", role: "PR Chair", skills: ["Design", "Social media", "Writing"] },
-  { id: 8, name: "Taylor Brooks", role: "PR Chair", skills: ["Photography", "Writing", "Outreach"] },
-];
-// Sample tasks, shown only when the backend can't be reached. Real tasks come from GET /api/tasks.
-// day = start column (0 = Mon), len = days wide, dep = id of task it depends on
-const SAMPLE_TASKS = [
-  { id: 1, title: "Draft GBM 1 agenda", assigned: "11/02/2026", start: "11/09/2026", due: "11/10/2026", finished: "11/10/2026", assignee: 2, status: "Completed", dep: null, day: 0, len: 1.2, notes: "" },
-  { id: 2, title: "Book GBM 1 room", assigned: "11/02/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 5, status: "In-Progress", priority: "high", dep: 1, day: 1, len: 1.2, notes: "Waiting on facilities reply." },
-  { id: 3, title: "Allocate budget for GBM 1", assigned: "11/03/2026", start: "11/11/2026", due: "11/13/2026", finished: "", assignee: 3, status: "Upcoming", priority: "high", dep: 2, day: 2, len: 2, notes: "" },
-  { id: 4, title: "Design GBM 1 flyer", assigned: "11/03/2026", start: "11/10/2026", due: "11/12/2026", finished: "", assignee: 7, status: "In-Progress", dep: null, day: 1, len: 2, notes: "" },
-  { id: 5, title: "Post flyer on socials", assigned: "11/04/2026", start: "11/12/2026", due: "11/14/2026", finished: "", assignee: 8, status: "Upcoming", dep: 4, day: 3, len: 1.6, notes: "" },
-  { id: 6, title: "Order snacks", assigned: "11/04/2026", start: "11/13/2026", due: "11/15/2026", finished: "", assignee: 6, status: "Upcoming", priority: "low", dep: 3, day: 4, len: 1.8, notes: "" },
-  { id: 7, title: "Draft RSVP form", assigned: "11/04/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 4, status: "Upcoming", dep: 1, day: 1, len: 1, notes: "" },
-  { id: 8, title: "Share RSVP form", assigned: "11/05/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 8, status: "Upcoming", dep: 7, day: 2, len: 1.2, notes: "" },
-  { id: 9, title: "Prepare event layout", assigned: "11/05/2026", start: "11/12/2026", due: "11/14/2026", finished: "", assignee: 5, status: "Upcoming", dep: 2, day: 3, len: 1.5, notes: "" },
-  { id: 10, title: "Print GBM 1 flyers", assigned: "11/06/2026", start: "11/12/2026", due: "11/13/2026", finished: "", assignee: 7, status: "Upcoming", dep: 4, day: 3, len: 1.2, notes: "" },
-  { id: 11, title: "Confirm catering delivery", assigned: "11/06/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 6, status: "Upcoming", dep: 6, day: 5, len: 1.5, notes: "" },
-  { id: 12, title: "Confirm GBM 1 event plan", assigned: "11/06/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 1, status: "Upcoming", priority: "high", dep: 1, day: 2, len: 1, notes: "" },
-  { id: 13, title: "Review final event budget", assigned: "11/07/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 1, status: "Upcoming", priority: "high", dep: 3, day: 4, len: 1, notes: "" },
-  { id: 14, title: "Prepare opening remarks", assigned: "11/07/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 2, status: "Upcoming", dep: 1, day: 2, len: 1, notes: "" },
-  { id: 15, title: "Send GBM 1 reminder", assigned: "11/08/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 4, len: 1, notes: "" },
-  { id: 16, title: "Review room layout", assigned: "11/08/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 9, day: 5, len: 1, notes: "" },
-  { id: 17, title: "Collect final RSVP count", assigned: "11/09/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 5, len: 1, notes: "" },
-].map((t) => ({ ...t, priority: t.priority ?? "normal" }));
+// Meeting previews remain separate from the live task and request data.
 const MEETINGS = [
   { id: 1, date: "11/13/26", name: "Fall 2026 E-Board Meeting", tasks: [[ "Allocate budget for GBM 1", 3], ["Design GBM 1 flyer", 7]] },
   { id: 2, date: "11/10/26", name: "Finance Logistics Meeting", tasks: [["Book GBM 1 room", 5]] },
   { id: 3, date: "11/06/26", name: "P/VP Transition Meeting", tasks: [["Draft GBM 1 agenda", 2]] },
 ];
-const REQUESTS = [{ id: 1, task: 3, from: 3, to: 1 }, { id: 2, task: 5, from: 8, to: 7 }, { id: 3, task: 6, from: 6, to: 5 }];
+
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
-// Kept in sync with App's state so the helpers below see live data; sample ids still resolve
-// for the screens that are not connected yet.
-let currentPeople = SAMPLE_PEOPLE;
-let currentTasks = SAMPLE_TASKS;
-const person = (id) => currentPeople.find((p) => p.id === id) ?? SAMPLE_PEOPLE.find((p) => p.id === id);
-const task = (id) => currentTasks.find((t) => t.id === id) ?? SAMPLE_TASKS.find((t) => t.id === id);
-const owns = (t, id) => t.assignee === id || (t.assignees ?? []).includes(id);
+// Helpers read the latest database-backed task and roster state.
+let currentPeople = [];
+let currentTasks = [];
+const person = (id) => currentPeople.find((p) => p.id === id);
+const task = (id) => currentTasks.find((t) => t.id === id);
+const owns = (t, id) => !!id && (t.assignee === id || (t.assignees ?? []).includes(id));
 const seedOf = (id) => [...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0);
 const dueDateKey = (t) => {
   if (t.dueIso) {
@@ -350,14 +319,20 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
 }
 
 /* ---------- App ---------- */
-export default function App() {
-  const [stack, setStack] = useState([{ n: "landing" }]);
-  const [admin, setAdmin] = useState(false);
+export default function App({ profile, admin, signOut }) {
+  const [stack, setStack] = useState([{ n: "dash" }]);
   const [viewAs, setViewAs] = useState(null);
   const [adminShowAllGantt, setAdminShowAllGantt] = useState(false);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState("");
-  const [reqs, setReqs] = useState(REQUESTS);
+  const [reqs, setReqs] = useState([]);
+  const [requestError, setRequestError] = useState("");
+  const [requestBusy, setRequestBusy] = useState(false);
+  const mutationLock = useRef(false);
+  const [requestReason, setRequestReason] = useState("");
+  const [dataError, setDataError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const refreshVersion = useRef(0);
   const [open, setOpen] = useState({});
   const [notes, setNotes] = useState({});
   const [recorder, setRecorder] = useState(null); // meeting kind being recorded, or null
@@ -368,46 +343,87 @@ export default function App() {
       .then((list) => setCands((c) => ({ ...c, [t.id]: { list } })))
       .catch((e) => setCands((c) => ({ ...c, [t.id]: { error: e.message } })));
   };
-  const [TASKS, setTasks] = useState(SAMPLE_TASKS);
-  const [PEOPLE, setPeople] = useState(SAMPLE_PEOPLE);
+  const [TASKS, setTasks] = useState([]);
+  const [PEOPLE, setPeople] = useState([]);
   const tasks = TASKS; // the redesign's screens read `tasks`; same live list
   const [source, setSource] = useState("Loading tasks…");
   const live = source.startsWith("Live");
   currentTasks = TASKS;
   currentPeople = PEOPLE;
-  useEffect(() => {
-    Promise.all([getTasks(), getMembers(), getAssignments().catch(() => null)])
-      .then(([ts, people, assignments]) => {
-        const byTask = assignments?.byTask ?? {};
-        // First recognized member is the "assignee" the design shows; all of them can see the task.
-        setTasks(ts.map((t) => ({ ...t, assignees: byTask[t.id] ?? [], assignee: byTask[t.id]?.[0] ?? null })));
-        if (people.length) setPeople(people);
-        const linked = Object.values(byTask).filter((c) => c && c.length).length;
-        setSource(`Live: ${ts.length} tasks, ${people.length} members, ${linked} tasks linked to people`);
-      })
-      .catch((e) => setSource(`Sample data (${e.message})`));
-  }, []);
-  const changeStatus = async (t, status) => {
-    if (!live) { say("Sample data: start the backend to save changes"); return; }
-    const before = TASKS;
-    setTasks(TASKS.map((x) => (x.id === t.id ? { ...x, status } : x)));
+  const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
     try {
-      const saved = await updateTaskStatus(t.id, status);
-      setTasks((ts) => ts.map((x) => (x.id === t.id ? saved : x)));
-      say(`Saved: “${t.title}” is ${status}`);
-    } catch (e) { setTasks(before); say(`Not saved: ${e.message}`); }
+      const [ts, people, assignments, requests] = await Promise.all([
+        getTasks(), getMembers(), getAssignments(), requestsStore.list(),
+      ]);
+      if (version !== refreshVersion.current) return;
+      const byTask = assignments.byTask;
+      setTasks(ts.map((t) => {
+        const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
+        return { ...t, assignees: codes, assignee: codes[0] ?? null };
+      }));
+      setPeople(people);
+      setReqs(requests);
+      setDataError("");
+      setSource(`Live: ${ts.length} tasks, ${people.length} members`);
+    } catch (e) {
+      if (version === refreshVersion.current) {
+        setDataError(e.message);
+        setSource("Connection error ? displayed data may be out of date");
+      }
+      throw e;
+    } finally { if (version === refreshVersion.current) setLoading(false); }
+  }, []);
+  useEffect(() => {
+    const reload = () => { refresh().catch(() => {}); };
+    reload();
+    const timer = setInterval(reload, 15000);
+    window.addEventListener("focus", reload);
+    return () => { ++refreshVersion.current; clearInterval(timer); window.removeEventListener("focus", reload); };
+  }, [refresh]);
+  useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
+  const sendRequest = async () => {
+    if (mutationLock.current || !modal?.reassign) return;
+    mutationLock.current = true; setRequestBusy(true); setRequestError("");
+    try {
+      await requestsStore.submit(modal.reassign[0].id, modal.reassign[1].id, requestReason);
+      setModal(null); setRequestReason("");
+      say("Reassignment request saved for review");
+      try { await refresh(); } catch { say("Request saved. Refresh failed; please retry."); }
+    } catch (e) { setRequestError(e.message); }
+    finally { mutationLock.current = false; setRequestBusy(false); }
+  };
+  const decideRequest = async (r, decision) => {
+    if (mutationLock.current || !admin) return;
+    mutationLock.current = true; setRequestBusy(true); setRequestError("");
+    try {
+      await requestsStore.review(r.id, decision);
+      setCands({});
+      say(decision === "approved" ? "Approved ? task assignment saved" : "Request denied");
+      try { await refresh(); } catch { say("Decision saved. Refresh failed; please retry."); }
+    } catch (e) {
+      setRequestError(e.message);
+      refresh().catch(() => {});
+    } finally { mutationLock.current = false; setRequestBusy(false); }
+  };
+  const changeStatus = async (t, status) => {
+    if (!live) { say("Reconnect and refresh before saving changes"); return; }
+    try {
+      await updateTaskStatus(t.id, status);
+      await refresh();
+      say(`Saved: ?${t.title}? is ${status}`);
+    } catch (e) { say(`Could not refresh or save: ${e.message}`); }
   };
   const p = stack[stack.length - 1];
   const go = (n, x = {}) => setStack((s) => [...s, { n, ...x }]);
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
-  const home = () => { setStack([{ n: "landing" }]); setViewAs(null); setAdmin(false); };
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
   // Status buttons in the redesign: save through the same path as the task page.
   const setTaskStatus = (id, status) => { const t = task(id); if (t) changeStatus(t, status); };
   const isAdminView = admin && !viewAs;
-  // No real login yet: admins see the President's view, everyone else the Vice President's.
-  const byRole = (role) => PEOPLE.find((q) => q.role === role);
-  const me = (viewAs ? person(viewAs) : live ? byRole(isAdminView ? "President" : "Vice President") : person(isAdminView ? 1 : 2)) ?? PEOPLE[0];
+  const me = (viewAs ? person(viewAs) : PEOPLE.find(q => q.id === profile.member_code)) ?? {
+    id: profile.member_code, name: profile.name || "Member", role: profile.role, skills: [],
+  };
 
   const Top = ({ title, tag, noBack }) => (
     <div className="top">
@@ -436,34 +452,8 @@ export default function App() {
   );
 
   let page;
-  switch (p.n) {
-    case "landing":
-      page = (<div className="center"><img className="logo" src="/wics-logo.png" alt="WiCS logo" onError={(e) => (e.target.style.display = "none")} />
-        <h2>Ask Winnie!</h2><button className="btn" style={{ width: 260, fontSize: 24 }} onClick={() => go("login")}>Login</button>
-        <button className="link" onClick={() => go("register")}>Create an account</button></div>);
-      break;
-    case "login":
-      page = (<div className="center"><h2>Login:</h2>
-        <div className="form"><label htmlFor="u">Username:</label><input id="u" className="field" onChange={(e) => (window.__u = e.target.value)} />
-          <label htmlFor="pw">Password:</label><input id="pw" type="password" className="field" /></div>
-        <button className="btn" onClick={() => { const a = /admin/i.test(window.__u || ""); setAdmin(a); setStack([{ n: "dash" }]); }}>Submit</button>
-        <button className="btn out" onClick={() => go("reset")}>Reset your password</button>
-        <button className="link" onClick={home}>Back to Home</button></div>);
-      break;
-    case "reset":
-      page = (<div className="center"><h2>Reset Password:</h2>
-        <div className="form"><label>Email:</label><input type="email" className="field" /><label>Set Password:</label><input type="password" className="field" /><label>Confirm Password:</label><input type="password" className="field" /></div>
-        <button className="btn" onClick={() => say("Reset email sent (placeholder — backend will send it)")}>Submit</button>
-        <button className="link" onClick={home}>Back to Home</button></div>);
-      break;
-    case "register":
-      page = (<div className="center"><h2>Register:</h2>
-        <div className="form"><label>Name:</label><input className="field" /><label>Email:</label><input type="email" className="field" /><label>Username:</label><input className="field" /><label>Password:</label><input type="password" className="field" /><label>Confirm Password:</label><input type="password" className="field" /></div>
-        <button className="btn" onClick={() => go("registered")}>Submit</button><button className="link" onClick={home}>Back to Home</button></div>);
-      break;
-    case "registered":
-      page = (<div className="center"><h2 style={{ lineHeight: 1.3 }}>Your account has been successfully registered!</h2><p style={{ fontSize: 20, margin: 0 }}>You can now login with your registered credentials.</p><button className="link" onClick={home}>Back to Home</button></div>);
-      break;
+  const adminPages = ["admin", "editlist", "edit", "eval", "evals", "taskmetrics", "tm", "meetmetrics", "mm", "reassigned"];
+  switch (!admin && adminPages.includes(p.n) ? "dash" : p.n) {
     case "dash": {
       // Live: the Gantt picks the week itself; admins see everyone's tasks, members their own.
       const mine = TASKS.filter((t) => owns(t, me.id));
@@ -473,7 +463,7 @@ export default function App() {
         <div className="top"><h1 className="greeting">Hey {me.name.split(" ")[0]}!</h1>
           {viewAs ? <button className="btn alt" onClick={() => { setViewAs(null); setStack([{ n: "dash" }, { n: "admin" }]); }}>BACK TO ADMIN</button>
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
-            : <button className="bell" aria-label="Notifications" onClick={() => setModal("notif")}><Icon n="bell" s={26} /><b>1</b></button>}
+            : <button className="bell" aria-label="Notifications" onClick={() => go("review")}><Icon n="bell" s={26} /><b>{reqs.filter(r => r.status === "pending").length}</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
         <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} allTasks={TASKS} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
@@ -511,14 +501,14 @@ export default function App() {
         <div className="cols"><div className="panel"><h3>Notes:</h3><p>{"• Reviewed GBM 1 timeline\n• Confirmed budget owner\n• Flyer due before Thursday\n• Next meeting TBD"}</p></div>
           <div className="panel"><h3>Transcript:</h3><p>{"[00:00] Welcome everyone…\n[00:42] First item is the GBM agenda…\n[03:10] Who can take the budget?…"}</p></div>
           <div><h3 style={{ textAlign: "center", fontSize: 24, marginTop: 0 }}>Delegated Tasks:</h3>
-            {m.tasks.map(([t, a]) => <div className="due" key={t}><Icon n="arrow" s={18} /><button className="pill" style={{ flex: 1, textAlign: "center" }} onClick={() => go("task", { id: TASKS.find((x) => x.title === t)?.id || 1 })}>{t}<br /><small>Assignee: {person(a).name}</small></button></div>)}</div></div></>);
+            {m.tasks.map(([t, a]) => <div className="due" key={t}><Icon n="arrow" s={18} /><button className="pill" style={{ flex: 1, textAlign: "center" }} onClick={() => go("task", { id: TASKS.find((x) => x.title === t)?.id || 1 })}>{t}<br /><small>Assignee: {person(a)?.name || "Not linked"}</small></button></div>)}</div></div></>);
       break;
     }
     case "profiles":
       page = <Grid title="Profiles" onPick={(q) => go("profile", { id: q.id })} />;
       break;
     case "profile": {
-      const q = person(p.id), ts = TASKS.filter((t) => owns(t, q.id));
+      const q = person(p.id) ?? me, ts = TASKS.filter((t) => owns(t, q.id));
       page = (<><Top title="Profile" tag={isAdminView} />
         <div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div><h2 style={isAdminView ? { cursor: "pointer" } : {}} onClick={() => isAdminView && setModal({ view: q })}>{q.name}</h2><p>{q.role}</p></div></div>
         <div className="two"><div className="panel"><h3>Tasks</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.title}</a> ({t.status})</li>)}{!ts.length && <li className="none">No tasks assigned yet.</li>}</ul></div>
@@ -535,9 +525,18 @@ export default function App() {
       const t = task(p.id);
       if (!t) { page = (<><Top title="Task not found" /><p style={{ textAlign: "center", fontSize: 20 }}>This task isn’t in the current data (meeting links still use sample tasks).</p></>); break; }
       const dep = t.dep ? task(t.dep) : null;
-      const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due], ["Assignee", t.assigneeText || who(t).name], ["Status", t.status], ["Dependency", dep ? `Depends on “${dep.title}” (${who(dep).name})` : "None"]];
+      const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due], ["Assignee", t.assigneeText || who(t).name], ["Original assignee", person(t.originalAssigneeCode)?.name || t.originalAssigneeCode || "Not recorded"], ["Status", t.status], ["Dependency", dep ? `Depends on “${dep.title}” (${who(dep).name})` : "None"]];
       page = (<><Top title={t.title} /><div className="two" style={{ maxWidth: 960, margin: "10px auto" }}>
-        <div className="panel"><div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
+        <div className="panel">
+          {t.status !== "Completed" && <label>Request reassignment to
+            <select className="field" value="" disabled={!live || !profile.member_code} onChange={e => {
+              const proposed = person(e.target.value);
+              if (proposed) { setRequestError(""); setRequestReason(""); setModal({ reassign: [t, proposed] }); }
+            }}><option value="">Choose a member</option>
+              {PEOPLE.filter(q => !owns(t, q.id)).map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+          </label>}
+          <div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
           {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
         <div className="panel"><h3>Notes</h3><textarea className="field" style={{ minHeight: 200 }} placeholder="Add notes for yourself or an admin…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
           <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" onClick={() => say("Notes saved (placeholder)")}>Save notes</button></div></div></div></>);
@@ -558,8 +557,8 @@ export default function App() {
             if (!c.list.length) return <small>No one else has the skills for this</small>;
             return c.list.map((s) => { const q = person(s.code) ?? { id: s.code, name: s.name };
               return <Avatar key={s.code} p={q} cls="sm" title={`${s.name} · ${s.fit === "strong" ? "Strong fit" : "Possible fit"}\n${s.matched_skills.join(", ")}\n${s.due_this_week} due this week · ${s.open} open\n${s.reason}`}
-                style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => setModal({ reassign: [t, q, s] })} />; });
-          })() : PEOPLE.filter((q) => !owns(t, q.id) && (!q.skills.length || q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s)))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />))}</div>
+                style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => { setRequestError(""); setRequestReason(""); setModal({ reassign: [t, q, s] }); }} />; });
+          })() : <small>Reconnect to request reassignment.</small>)}</div>
           {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!tasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
@@ -605,14 +604,33 @@ export default function App() {
       break;
     }
     case "reassigned":
-      page = (<><Top title={`Tasks Re-assigned: ${REQUESTS.length}`} tag />{REQUESTS.map((r) => <div className="due" key={r.id}><span style={{ width: 110, fontSize: 18 }}>11/1{r.id}/2026:</span><button className="pill" onClick={() => go("task", { id: r.task })}>{task(r.task).title}</button><span style={{ fontSize: 18, width: 230 }}>Assignee: {person(r.to).name}</span></div>)}</>);
+    case "review": {
+      const approvedOnly = p.n === "reassigned";
+      const visible = approvedOnly ? reqs.filter(r => r.status === "approved") : reqs;
+      const pending = visible.filter(r => r.status === "pending");
+      const history = visible.filter(r => r.status !== "pending");
+      const card = (r) => <div className="req" key={r.id}>
+        <div className="panel"><strong>{task(r.task_id)?.title || `Task ${r.task_id}`}</strong>
+          <p>Requested by {person(r.requester_code)?.name || r.requester_code}</p>
+          <p>Proposed assignee: {person(r.proposed_assignee_code)?.name || r.proposed_assignee_code}</p>
+          <p>{r.reason || "No reason provided."}</p>
+          <small>{new Date(r.created_at).toLocaleString()} ? {r.status}</small>
+          {r.review_note && <p>Review: {r.review_note}</p>}
+        </div>
+        {admin && r.status === "pending" && <>
+          <button className="btn" disabled={requestBusy || !!dataError} onClick={() => decideRequest(r, "approved")}>Approve</button>
+          <button className="btn alt" disabled={requestBusy || !!dataError} onClick={() => decideRequest(r, "rejected")}>Deny</button>
+        </>}
+      </div>;
+      page = <><Top title={approvedOnly ? "Approved Reassignments" : admin ? "Reassignment Requests" : "Your Reassignment Requests"} tag={admin} />
+        <button className="btn alt" onClick={() => refresh().catch(() => {})}>Refresh</button>
+        {requestError && <p role="alert">{requestError}</p>}
+        {!approvedOnly && <><h2>Pending ({pending.length})</h2>{pending.map(card)}
+          {!loading && !dataError && !pending.length && <p className="empty">No pending requests.</p>}</>}
+        <h2>{approvedOnly ? "Approved" : "History"}</h2>{history.map(card)}
+      </>;
       break;
-    case "review":
-      page = (<><Top title="Review Pending Task Re-assignments" tag />{reqs.map((r) => (<div className="req" key={r.id}><div className="panel">Task Re-assignment Request:<br />“{task(r.task).title}”<br />{person(r.from).name} → {person(r.to).name}</div>
-        <button className="rb" style={{ background: "#5f7a3d" }} aria-label="Approve" onClick={() => { setReqs(reqs.filter((x) => x.id !== r.id)); say("Approved — recipient will be notified"); }}><Icon n="check" s={24} /></button>
-        <button className="rb" style={{ background: "#b5472a" }} aria-label="Deny" onClick={() => { setReqs(reqs.filter((x) => x.id !== r.id)); say("Request denied"); }}><Icon n="x" s={24} /></button></div>))}
-        {!reqs.length && <p className="empty">No pending requests. New ones will appear here.</p>}</>);
-      break;
+    }
     case "meetmetrics":
       page = <Grid title="Meeting Metrics" tag onPick={(q) => go("mm", { id: q.id })} />;
       break;
@@ -627,16 +645,25 @@ export default function App() {
 
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
-    <div className="app"><style>{CSS}</style><main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
-      {modal === "notif" && (<div className="modal"><div className="box"><h4>Incoming task from Sam Rivera:</h4>Task Reassignment Request:<br />Sam Rivera → {me.name}<br />“Allocate Budget for GBM 1”
-        <div className="acts"><button className="btn out" onClick={() => { setModal(null); say("Task accepted"); }}>Accept</button><button className="btn out" onClick={() => { setModal(null); say("Task declined"); }}>Decline</button></div></div></div>)}
+    <div className="app"><style>{CSS}</style><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
+        <button className="link" onClick={() => go("review")}>Requests ({reqs.filter(r => r.status === "pending").length})</button>
+        <button className="link" onClick={signOut}>Sign out</button>
+      </header>
+      {dataError && <div role="alert">Could not refresh Supabase data: {dataError} <button onClick={() => refresh().catch(() => {})}>Retry</button></div>}
+      {loading && <p role="status">Loading tasks and requests?</p>}
+      <main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
       {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />
         {modal.reassign[2] && <small style={{ display: "block", margin: "6px 0" }}><b>{modal.reassign[2].fit === "strong" ? "Strong fit" : "Possible fit"}:</b> {modal.reassign[2].reason}<br />
           Skills: {modal.reassign[2].matched_skills.join(", ")} · {modal.reassign[2].due_this_week} due this week, {modal.reassign[2].open} open</small>}
-        <small>Your request goes to an admin for approval.</small>
-        <div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button><button className="btn" onClick={() => { setModal(null); say("Reassignment request sent to admin"); }}>Send request</button></div></div></div>)}
+        <small>Your request goes to the president, VP, or an admin for approval.</small>
+        <label style={{ display: "block", marginTop: 12 }}>Reason (optional)
+          <textarea className="field" maxLength={10000} value={requestReason} onChange={e => setRequestReason(e.target.value)} disabled={requestBusy} />
+        </label>
+        {requestError && <p role="alert">{requestError}</p>}
+        {!profile.member_code && <p role="alert">Your account must be linked to the member roster before requesting a reassignment.</p>}
+        <div className="acts"><button className="btn alt" disabled={requestBusy} onClick={() => setModal(null)}>Cancel</button><button className="btn" disabled={requestBusy || !profile.member_code || !live} onClick={sendRequest}>{requestBusy ? "Saving?" : "Send request"}</button></div></div></div>)}
       {recorder && <Recorder kind={recorder} onClose={() => setRecorder(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <div role="status" style={{ position: "fixed", top: 8, right: 12, fontSize: 12, padding: "4px 10px", borderRadius: 999, background: live ? "#7fb08a" : "#e8a36b", color: "#fff", fontWeight: 700 }}>{source}</div>

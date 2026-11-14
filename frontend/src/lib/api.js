@@ -12,6 +12,7 @@ async function request(path, options = {}) {
   let response;
   try {
     response = await fetch(`/api${path}`, {
+      cache: "no-store",
       ...options,
       headers: { "Content-Type": "application/json", ...options.headers },
       signal: options.signal ?? AbortSignal.timeout(15000),
@@ -49,7 +50,9 @@ export function toUiTask(t, monday = weekStart()) {
     due: usDate(t.due_date) || t.deadline_text || "No date",
     dueIso: t.due_date,
     finished: t.status === "done" ? usDate(t.updated_at?.slice(0, 10)) : "",
-    assignee: null, // no member mapping in the API yet; assigneeText holds the tracker cell
+    assignee: t.owner_code ?? null,
+    ownerCode: t.owner_code ?? null,
+    originalAssigneeCode: t.original_assignee_code ?? null,
     assigneeText: t.assignee_text || "",
     status: STATUS_TO_UI[t.status] ?? "Upcoming",
     priority: t.priority ?? "normal",
@@ -66,9 +69,9 @@ export function toUiTask(t, monday = weekStart()) {
 export async function getTasks() {
   const all = [];
   for (let offset = 0; ; offset += PAGE) {
-    const body = await request(`/tasks?limit=${PAGE}&offset=${offset}`);
+    const body = await request(`/tasks/records?limit=${PAGE}&offset=${offset}`);
     all.push(...body.data);
-    if (body.data.length < PAGE || all.length >= (body.meta?.total ?? 0)) break;
+    if (body.data.length < PAGE || (body.meta?.total != null && all.length >= body.meta.total)) break;
   }
   const monday = weekStart();
   return all.map((t) => toUiTask(t, monday));
@@ -123,7 +126,7 @@ export async function assignRecordingTasks(id) {
 export async function updateTaskStatus(id, uiStatus) {
   const status = STATUS_FROM_UI[uiStatus];
   if (!status) throw new Error(`Unknown status ${uiStatus}`);
-  const body = await request(`/tasks/${encodeURIComponent(id)}`, {
+  const body = await request(`/tasks/records/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
