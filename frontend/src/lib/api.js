@@ -50,9 +50,9 @@ export function toUiTask(t, monday = weekStart()) {
     due: usDate(t.due_date) || t.deadline_text || "No date",
     dueIso: t.due_date,
     finished: t.status === "done" ? usDate(t.updated_at?.slice(0, 10)) : "",
-    assignee: t.owner_code ?? null,
-    ownerCode: t.owner_code ?? null,
-    originalAssigneeCode: t.original_assignee_code ?? null,
+    assignee: t.current_assignee_code ?? t.owner_code ?? null,
+    currentAssignee: t.current_assignee_code ?? t.owner_code ?? null,
+    initialAssignee: t.initial_assignee_code ?? t.owner_code ?? null,
     assigneeText: t.assignee_text || "",
     status: STATUS_TO_UI[t.status] ?? "Upcoming",
     priority: t.priority ?? "normal",
@@ -88,6 +88,8 @@ export async function getMembers() {
     skills: m.skills ?? [],
     technical: m.technical_skills ?? [],
     soft: m.soft_skills ?? [],
+    previousRoles: m.previous_roles ?? [],
+    previousRoleSkills: m.previous_role_skills ?? [],
     skillsSource: m.skills_source ?? null, // "role-derived" = generated from the role text
   }));
 }
@@ -105,6 +107,23 @@ export async function getCandidates(taskId) {
 export async function getAssignments() {
   const body = await request("/members/assignments");
   return { byTask: body.data, meta: body.meta };
+}
+
+export async function generateTaskPlan(input) {
+  const body = await request("/planning/drafts", {
+    method: "POST",
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(200000),
+  });
+  return body.data;
+}
+
+export async function createTaskRecord(task) {
+  const body = await request("/tasks", {
+    method: "POST",
+    body: JSON.stringify(task),
+  });
+  return toUiTask(body.data);
 }
 
 // Save a meeting recording (audio + transcript JSON, shape = backend schemas.Recording).
