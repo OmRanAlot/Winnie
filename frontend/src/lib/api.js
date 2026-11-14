@@ -52,6 +52,7 @@ export function toUiTask(t, monday = weekStart()) {
     assignee: null, // no member mapping in the API yet; assigneeText holds the tracker cell
     assigneeText: t.assignee_text || "",
     status: STATUS_TO_UI[t.status] ?? "Upcoming",
+    priority: t.priority ?? "normal",
     blocked: t.status === "blocked",
     dep: null, // dependencies are not stored in the backend yet
     day,
