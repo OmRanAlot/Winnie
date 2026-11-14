@@ -18,7 +18,7 @@ from app.services.tasks import TaskStore
 def authorize_reminder_bridge(x_winnie_bridge_secret: str = Header(default="")):
     expected = Settings().messaging_bridge_secret.get_secret_value()
     if not expected:
-        raise HTTPException(503, "Configure the messaging bridge secret.")
+        raise HTTPException(401, "Invalid messaging bridge credentials.")
     if not compare_digest(expected.encode(), x_winnie_bridge_secret.encode()):
         raise HTTPException(401, "Invalid messaging bridge credentials.")
 

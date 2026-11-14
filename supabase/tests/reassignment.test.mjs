@@ -20,7 +20,7 @@ async function database() {
       raw_user_meta_data jsonb default '{}');
   `);
   for (const name of ['20261114080000_create_tasks.sql', '20261114100000_add_tracker_context.sql',
-    '20261114120000_add_messaging_members.sql', '20261114120000_create_profiles.sql',
+    '20261114120000_add_messaging_members.sql', '20261114120001_create_profiles.sql',
     '20261114140000_link_member_roster.sql']) {
     await db.exec(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
   }
