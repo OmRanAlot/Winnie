@@ -13,7 +13,9 @@ param(
     [string]$Service = "api"
 )
 
-$ErrorActionPreference = "Stop"
+# Not "Stop": Windows PowerShell 5.1 treats gcloud's progress output on stderr as a fatal
+# error. Failures are caught by checking $LASTEXITCODE after each gcloud call instead.
+$ErrorActionPreference = "Continue"
 
 # Secret Manager secret name == the env var name the backend reads.
 $SecretNames = @("GEMINI_API_KEY", "SUPABASE_SECRET_KEY", "WINNIE_MESSAGING_BRIDGE_SECRET")
@@ -31,8 +33,14 @@ function Save-Secret([string]$Name, [string]$Value) {
     $tmp = [IO.Path]::GetTempFileName()
     try {
         [IO.File]::WriteAllText($tmp, $Value, (New-Object Text.UTF8Encoding $false))
-        gcloud secrets describe $Name --project $ProjectId *> $null
-        if ($LASTEXITCODE -eq 0) {
+        # Windows PowerShell 5.1 treats native stderr as fatal under "Stop"; a missing
+        # secret is expected here, so relax it for this one check.
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        gcloud secrets describe $Name --project $ProjectId 2>$null | Out-Null
+        $exists = ($LASTEXITCODE -eq 0)
+        $ErrorActionPreference = $prev
+        if ($exists) {
             gcloud secrets versions add $Name --data-file=$tmp --project $ProjectId | Out-Null
         } else {
             gcloud secrets create $Name --data-file=$tmp --replication-policy=automatic --project $ProjectId | Out-Null
@@ -74,6 +82,7 @@ if ($envVars) { $updateArgs += @("--update-env-vars", ($envVars -join ",")) }
 
 if ($secretMounts -or $envVars) {
     gcloud @updateArgs
+    if ($LASTEXITCODE -ne 0) { throw "gcloud run services update failed" }
     Write-Host "Done. Check: gcloud run services logs read $Service --region $Region --limit 20"
 } else {
     Write-Host "Nothing entered; service left unchanged."
