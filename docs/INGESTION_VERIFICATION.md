@@ -1,5 +1,10 @@
 # Ingestion verification — 2026-11-14
 
+**Schema follow-up:** the code and migration chain now use the shared UUID task
+store. See [schema upgrade](SCHEMA_UPGRADE.md) for deployment steps and tests.
+The observations below describe the original mismatch; hosted application of the
+new migration and a real-provider write smoke test remain separate deployment steps.
+
 Ingestion is in the existing backend. The separate `ingest/` directory is absent.
 The entry point is `POST /api/meetings/ingest`, registered in `backend/app/main.py`.
 Its implementation is `backend/app/routes/meetings.py` and

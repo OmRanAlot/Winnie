@@ -30,7 +30,7 @@ def db(monkeypatch) -> FakeClient:
 
 
 @pytest.fixture
-def client():
+def client(signed_in_member):
     with TestClient(app) as test_client:
         yield test_client
 
@@ -77,15 +77,42 @@ def test_list_tasks_rejects_unknown_status(client, db):
 
 def test_patch_status_checks_off_a_task(client, db):
     seed(db)
-    response = client.patch("/api/tasks/1/status", json={"status": "done"})
+    task_id = db.tables["tasks"][0]["id"]
+    response = client.patch(f"/api/tasks/{task_id}/status", json={"status": "done"})
     assert response.status_code == 200
     assert response.json()["data"]["status"] == "done"
-    assert [t["id"] for t in client.get("/api/tasks", params={"status": "done"}).json()["data"]] == [1]
+    assert [t["id"] for t in client.get("/api/tasks", params={"status": "done"}).json()["data"]] == [task_id]
 
 
 def test_patch_status_errors(client, db):
-    assert client.patch("/api/tasks/99/status", json={"status": "done"}).status_code == 404
+    assert client.patch("/api/tasks/00000000-0000-4000-8000-000000000099/status", json={"status": "done"}).status_code == 404
     assert client.patch("/api/tasks/1/status", json={"status": "finished"}).status_code == 422
+
+
+def test_record_api_and_timeline_share_ingested_uuid_tasks(client, db):
+    from app.routes.tasks import authorize_tasks, get_task_store
+    from app.services.tasks import TaskStore
+
+    seed(db)
+    db.postgrest = SimpleNamespace(session=SimpleNamespace(close=lambda: None))
+    app.dependency_overrides[get_task_store] = lambda: TaskStore(lambda: db)
+    app.dependency_overrides[authorize_tasks] = lambda: None
+    try:
+        response = client.get("/api/tasks/records", params={"limit": 1})
+        assert response.status_code == 200
+        records = response.json()
+        assert records["meta"]["total"] == 3 and len(records["data"]) == 1
+        task_id = records["data"][0]["id"]
+        assert records["data"][0]["month_code"] == "2026-11"
+        changed = client.patch(f"/api/tasks/records/{task_id}", json={"status": "in_progress"})
+        assert changed.status_code == 200
+        [view] = client.get("/api/tasks", params={"status": "in_progress"}).json()["data"]
+        assert view["id"] == task_id
+        client.patch(f"/api/tasks/{task_id}/status", json={"status": "done"})
+        assert client.get(f"/api/tasks/records/{task_id}").json()["data"]["status"] == "done"
+    finally:
+        app.dependency_overrides.pop(get_task_store, None)
+        app.dependency_overrides.pop(authorize_tasks, None)
 
 
 def test_unconfigured_store_returns_503(client, monkeypatch):

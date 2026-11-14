@@ -1,47 +1,50 @@
-# CI/CD
+# Backend CI and image delivery
 
-Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
+`.github/workflows/backend.yml` runs on every pull request, push, merge queue,
+and manual dispatch. It deliberately has no path filters, so the required status
+is always reported, including when shared schemas or dependencies change.
 
-## What runs on every pull request
+The workflow runs:
 
-| Check | Runs | Fix it locally |
-|---|---|---|
-| `backend` | `uv sync --frozen`, `ruff check .`, `pytest` | `cd backend; uv run ruff check . --fix; uv run pytest` |
-| `frontend` | `npm ci`, `npm test`, `npm run build` | `cd frontend; npm test; npm run build` |
-| `messaging` | `npm ci`, `npm run typecheck`, `npm test` | `cd messaging; npm run typecheck; npm test` |
-| `docker-build` | builds `backend/Dockerfile` (not pushed) | `docker build backend` |
+- Python 3.13 with locked uv dependencies, Ruff, and the complete pytest suite.
+  Coverage XML and JUnit results are retained as artifacts for 14 days, including
+  on test failures. Coverage is reported without an arbitrary minimum threshold.
+- Every `supabase/tests/*.test.mjs` migration test against isolated PGlite databases.
+- Messaging TypeScript checks, tests, and build with locked npm dependencies.
+- A production Docker build and a real `/api/health` request without credentials.
 
-Common red checks:
-- `uv sync --frozen` fails: you changed `pyproject.toml` without committing the updated `uv.lock` (`cd backend; uv lock`).
-- `npm ci` fails: `package.json` and `package-lock.json` disagree; run `npm install` and commit the lockfile.
-- `docker-build` fails: the Dockerfile copies something that is not in git (for example gitignored `backend/data/*`).
+Tests use synthetic data and mocks; no Supabase, Gemini, or Photon secrets are
+needed. CI never applies migrations to a hosted database or sends messages.
 
-The checks use no secrets, so they run safely on forks.
+In GitHub repository Settings → Rules → Rulesets, require **Backend checks**
+before merging into the default branch. That aggregate check fails if any job
+fails or is cancelled. Enable GitHub Actions if it is disabled for the repository.
 
-## Deploys (push to `main`)
+After all checks pass on a push to the default branch, the workflow publishes
+`ghcr.io/<owner>/<repository>/backend:<full-commit-sha>` and `:latest` using the
+automatic GitHub token. Names are lowercased for registry compatibility. The
+repository must allow Actions to write packages. Pull requests cannot publish.
+Use the commit tag for deployments and rollback.
 
-After all four checks pass, `deploy-backend` runs `gcloud run deploy api --source backend` (existing env vars,
-secrets and scaling are kept) and then `deploy-frontend` builds the dashboard and runs
-`firebase deploy --only hosting`. Each ends with a `/api/health` smoke test. Both are skipped until the
-repository variable `GCP_WORKLOAD_IDENTITY_PROVIDER` exists, so CI is useful before deploys are enabled.
+This provides continuous integration and container delivery. Production rollout
+is not configured: the repository has Docker/Cloud Run instructions but no
+selected deployment project, service, region, or deployment identity. Configure
+that target and its credentials before adding a rollout job after `publish`.
+The backend README describes the current manual Cloud Run deployment procedure.
 
-Auth is Workload Identity Federation: no JSON key is stored anywhere. Only workflows from this repo on `main`
-can deploy.
+To reproduce checks locally:
 
-### Enable deploys (one time)
-
-1. A project owner runs `powershell -File deploy/setup-github-oidc.ps1` (use `-DryRun` first). It prints two values.
-2. A repo admin adds repository variables (Settings > Secrets and variables > Actions > Variables):
-   `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`, `VITE_API_BASE_URL` (`/api`), `VITE_SUPABASE_URL`,
-   `VITE_SUPABASE_PUBLISHABLE_KEY`. Only public values go here; the Supabase secret key and Gemini key stay in
-   Secret Manager (`deploy/set-cloud-run-env.ps1`).
-3. Create a GitHub environment named `production` (optionally require a reviewer to approve deploys).
-
-### Block broken pushes to `main` (repo admin)
-
-Settings > Branches > add a rule for `main`: require a pull request, require status checks `backend`, `frontend`,
-`messaging` and `docker-build` to pass, and disallow force pushes. Without this rule the checks only warn.
-
-## Not covered yet
-
-Authentication and rate limiting on the API, and deploying `messaging/` (a long-running service; see the deploy notes).
+```sh
+cd backend
+uv sync --locked --group dev
+uv run --no-sync ruff check .
+uv run --no-sync pytest --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml --junitxml=test-results.xml
+cd ..
+npm ci
+node --test supabase/tests/*.test.mjs
+npm --prefix messaging ci
+npm --prefix messaging run typecheck
+npm --prefix messaging test
+npm --prefix messaging run build
+docker build -t winnie-backend:local backend
+```

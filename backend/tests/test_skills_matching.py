@@ -107,7 +107,7 @@ class FakeMembers:
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, signed_in_member):
     monkeypatch.setattr(route, "load_skills", dict)
     monkeypatch.setattr(route, "load_previous_roles", dict)
     # Independent of the developer's .env: a fixed key and semester.

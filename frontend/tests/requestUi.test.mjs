@@ -26,6 +26,11 @@ await build({
         export const weekStart = () => new Date('2026-11-09T00:00:00');
         export const getCandidates = () => Promise.resolve([]);
         export const updateTaskStatus = () => Promise.resolve();
+        export const reviewHelpRequests = () => Promise.resolve([]);
+        export const decideHelpRequest = () => Promise.resolve({reply: 'Reviewed'});
+        export const getMeetings = () => Promise.resolve([]);
+        export const createMeeting = () => Promise.resolve({id: 'synthetic-meeting'});
+        export const saveAttendance = () => Promise.resolve();
       ` : args.path.includes('reassignments') ? 'export const reassignmentStore = () => ({list: () => globalThis.__dashboard.list(), review: (...a) => globalThis.__dashboard.review(...a), submit: (...a) => globalThis.__dashboard.submit(...a)});'
         : args.path.includes('supabase') ? 'export const supabase = {};'
         : 'export default function Recorder() { return null; }',

@@ -130,7 +130,7 @@ def test_insert_extracted_tasks_resolves_seat_person_and_deadline(db):
     assert task.assignee == "Bob Newman"
     assert task.deadline_raw == "by Monday noon"
     assert task.deadline_at == datetime(2026, 11, 16, 12, 0, tzinfo=NEW_YORK)
-    assert task.status == "open"
+    assert task.status == "todo"
     assert task.source_meeting_id == meeting_id
     assert task.meeting_held_at == MEETING_AT
     assert task.raw_json["assignee"] == "Bob Newman"
@@ -141,7 +141,46 @@ def test_insert_extracted_tasks_uses_one_batch_insert(db):
     tasks = [extracted(title=f"Task {n}") for n in range(3)]
     repo.insert_extracted_tasks(meeting_id, tasks, client=db)
     assert db.calls.count(("tasks", "insert")) == 1
-    assert len(db.tables["seats"]) == 1 and len(db.tables["people"]) == 1
+    assert db.tables["seats"] == [] and db.tables["people"] == []
+
+
+def test_meeting_tasks_use_canonical_fields_and_repeat_insert_is_idempotent(db):
+    from uuid import UUID
+
+    meeting = repo.create_meeting(MEETING_AT, None, None, client=db)
+    [task] = repo.insert_extracted_tasks(meeting, [extracted()], client=db)
+    [again] = repo.insert_extracted_tasks(meeting, [extracted()], client=db)
+    assert UUID(task.id) and again.id == task.id
+    assert len(db.tables["tasks"]) == 1
+    [row] = db.tables["tasks"]
+    assert row["month_code"] == "2026-11" and row["semester_code"] == "fall-2026"
+    assert row["source"] == "meeting" and row["status"] == "todo"
+    assert row["due_date"] == "2026-11-16"
+    assert row["assignee_text"] == "Bob Newman" and row["owner_code"] is None
+    assert not {"seat_id", "assignee_id", "deadline_raw"} & row.keys()
+
+
+def test_tracker_tasks_share_timeline_and_due_date_edits_override_extraction(db):
+    db.table("tasks").insert({
+        "title": "Tracker task", "month_code": "2026-11", "owner_code": "DEMO",
+        "status": "in_progress", "due_date": "2026-11-20", "source": "sheet",
+    }).execute()
+    [tracker] = repo.list_tasks(client=db)
+    assert tracker.status == "in_progress" and tracker.assignee_id == "DEMO"
+    assert tracker.deadline_at == datetime(2026, 11, 20, tzinfo=NEW_YORK)
+    meeting = repo.create_meeting(MEETING_AT, None, None, client=db)
+    [task] = repo.insert_extracted_tasks(meeting, [extracted()], client=db)
+    db.table("tasks").update({"due_date": "2026-12-01"}).eq("id", task.id).execute()
+    [changed] = repo.tasks_for_meeting(meeting, client=db)
+    assert changed.deadline_at == datetime(2026, 12, 1, tzinfo=NEW_YORK)
+    db.table("tasks").update({"due_date": None}).eq("id", task.id).execute()
+    assert repo.tasks_for_meeting(meeting, client=db)[0].deadline_at is None
+
+
+def test_legacy_open_input_is_stored_as_todo(db):
+    task = seed_three(db)[0]
+    repo.update_task_status(task.id, "done", client=db)
+    assert repo.update_task_status(task.id, "open", client=db).status == "todo"
 
 
 def test_unassigned_and_unparseable_tasks_keep_nulls(db):
@@ -218,7 +257,7 @@ def test_update_task_status_validates(db):
     with pytest.raises(ValueError):
         repo.update_task_status(task.id, "finished", client=db)
     with pytest.raises(repo.NotFound):
-        repo.update_task_status(999, "done", client=db)
+        repo.update_task_status("00000000-0000-4000-8000-000000000999", "done", client=db)
 
 
 # --- dependencies -----------------------------------------------------------------------------
@@ -245,7 +284,7 @@ def test_add_dependency_rejects_self_and_cycles(db):
 def test_add_dependency_unknown_task(db):
     a, *_ = seed_three(db)
     with pytest.raises(repo.NotFound):
-        repo.add_dependency(a.id, 999, client=db)
+        repo.add_dependency(a.id, "00000000-0000-4000-8000-000000000999", client=db)
 
 
 def test_would_create_cycle():

@@ -1,5 +1,14 @@
 # Winnie backend
 
+Meeting ingestion, tracker imports, and messaging share UUID task records.
+Existing databases need the [schema upgrade](../docs/SCHEMA_UPGRADE.md) before
+running this backend. The dashboard uses `/api/tasks/records`; `/api/tasks` is
+the timeline projection of the same records.
+
+GitHub Actions runs backend, messaging, database, and container checks and
+publishes passing default-branch images. See [CI setup](../docs/CI.md) for
+required checks, image tags, and production deployment configuration.
+
 FastAPI service managed with [uv](https://docs.astral.sh/uv/).
 
 ```bash
@@ -108,12 +117,33 @@ tracker names/emails to members. `tasks` now returns only verified assignments f
 the sender in `WINNIE_ACTIVE_SEMESTER`, ordered by deadline. Unknown members receive
 no task list. This mapping is separate from website login.
 
+[Gemini task conversations](../docs/MESSAGE_CONVERSATIONS.md) adds natural-language
+questions and completion updates, with ownership checks and atomic completion receipts.
+Apply its additional migration and enable `WINNIE_MESSAGE_AI_ENABLED` before testing
+natural-language updates. It uses the existing backend Gemini credentials/model.
+
+## Deadline reminders
+
+Two-week reminders and five-day replacement check-ins are included. See
+[help requests and approved handoffs](../docs/HELP_WORKFLOW.md) for the additional
+migrations, admin text approvals and group capability requirement.
+
+See [reminders and delivery deduplication](../docs/REMINDERS.md) for the new migration,
+recipient opt-in, read-only preview, persistent mock outbox, and automatic Photon polling.
+Reminders default to disabled/mock. The rules are seven days, three days, and the
+previous evening in New York time. Persistent claims prevent repeat sends; unknown
+provider outcomes are held for review instead of automatically retried.
+
 ## Event planning drafts
 
 `POST /api/planning/drafts` returns a historical checklist in mock mode or an
 idea-specific draft through the optional Deep Agents adapter. See the
 [planning guide](../docs/EVENT_PLANNING.md) for private context preparation,
 model setup and limitations. Drafts do not create tasks or send messages.
+
+`POST /api/planning/runs` adds durable generation, progress polling, recovery of
+completed specialist stages and a checkpointed human-review pause. See the
+[durable planning guide](../docs/PLANNING_RUNS.md). Approving a draft does not activate tasks.
 
 ## Browser recordings
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import { bridgePayload, bridgeRequest } from "../src/bridge.js";
 
 const incoming = {
+  id: "provider-message-123",
   direction: "inbound" as const,
   platform: "imessage",
   sender: { id: "+15555550123" },
@@ -13,7 +14,8 @@ test("forwards the actual platform sender and DM type with bridge authentication
   const payload = bridgePayload(incoming, "dm")!;
   const request = bridgeRequest(payload, "test-secret");
   assert.deepEqual(JSON.parse(request.body), {
-    text: "tasks", sender_id: "+15555550123", platform: "imessage", conversation_type: "dm",
+    text: "tasks", message_id: "provider-message-123", sender_id: "+15555550123",
+    platform: "imessage", conversation_type: "dm",
   });
   assert.equal(request.headers["X-Winnie-Bridge-Secret"], "test-secret");
 });

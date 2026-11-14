@@ -5,7 +5,7 @@ import { PGlite } from '@electric-sql/pglite';
 
 const ids = Object.fromEntries(['member', 'other', 'pres', 'vp', 'admin'].map((name, i) =>
   [name, `00000000-0000-4000-8000-00000000000${i + 1}`]));
-const migration = await readFile(new URL('../migrations/20261114160000_task_original_assignee_and_requests.sql', import.meta.url), 'utf8');
+const migration = await readFile(new URL('../migrations/20261114160001_task_original_assignee_and_requests.sql', import.meta.url), 'utf8');
 
 async function database() {
   const db = new PGlite();
@@ -20,7 +20,7 @@ async function database() {
       raw_user_meta_data jsonb default '{}');
   `);
   for (const name of ['20261114080000_create_tasks.sql', '20261114100000_add_tracker_context.sql',
-    '20261114120000_add_messaging_members.sql', '20261114120000_create_profiles.sql',
+    '20261114120000_add_messaging_members.sql', '20261114120001_create_profiles.sql',
     '20261114140000_link_member_roster.sql']) {
     await db.exec(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
   }

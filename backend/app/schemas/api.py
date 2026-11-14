@@ -85,20 +85,20 @@ def failure(message: str, status: int):
 class TaskView(BaseModel):
     """One task as the frontend sees it. Built from app.domain.models.Task by services/tasks.py."""
 
-    id: int
+    id: str
     title: str
     description: str | None
-    status: Literal["open", "done", "blocked"]
+    status: Literal["todo", "in_progress", "done", "blocked"]
     seat: str | None  # None when unassigned
     assignee: str | None  # the person's name; None when unassigned
-    assignee_id: int | None  # stable key for per-person colors
+    assignee_id: str | None  # display grouping key, not verified member identity
     start: datetime  # when the task was raised: the meeting time, else when it was created
     end: datetime | None  # the parsed deadline; None means unscheduled
     deadline_raw: str | None  # the deadline as spoken ("by Monday noon")
     needs_review: bool
     rationale: str | None
-    depends_on: list[int]  # ids of tasks this one waits on
+    depends_on: list[str]  # UUIDs of tasks this one waits on
 
 
 class TaskStatusUpdate(BaseModel):
-    status: Literal["open", "done", "blocked"]
+    status: Literal["todo", "in_progress", "open", "done", "blocked"]

@@ -23,7 +23,7 @@ comment of `index.ts` (messaging), instead of empty placeholder files.
 ```text
 README.md, CLAUDE.md, CONTEXT.md   Overview, agent instructions + product spec, implementation contract
 docs/                              GAMEPLAN.md (build order), API.md (proposed endpoints), architecture.md
-supabase/migrations/0001_init.sql  Postgres schema for the task store (seats, people, meetings, tasks, deps)
+supabase/migrations/              Ordered Postgres migrations for the shared UUID task store
 .env.example                       Backend settings (the backend reads the repo-root .env)
 
 backend/                           Python API. Start by reading backend/app/__init__.py
@@ -111,8 +111,9 @@ dashboard's timeline. Without Supabase settings the recorder still works, but ta
 
 1. **Create a project** at [supabase.com](https://supabase.com/dashboard) (free tier is fine).
    Note the database password you choose.
-2. **Apply the migration** `supabase/migrations/0001_init.sql`, either way:
-   - SQL editor: Dashboard -> SQL Editor -> New query, paste the file, Run.
+2. **Apply the ordered migrations** in `supabase/migrations/`. Existing databases
+   should follow the [schema upgrade guide](docs/SCHEMA_UPGRADE.md) first.
+   - SQL editor: Dashboard -> SQL Editor -> New query, apply the files in filename order.
    - CLI, from the repository root:
      ```powershell
      npx supabase login
@@ -149,10 +150,13 @@ those two endpoints. The browser never talks to Supabase directly.
 
 ## What exists today
 
-This is a development scaffold: a browser conversation recorder (audio + transcript saved as JSON), Gemini task assignment, a Supabase task store with a Gantt timeline, the API health, recordings and tasks endpoints, configuration loading, and tests. Agent planning, member persistence, approval enforcement, messaging, and reminders are planned in the linked documents; they are not implemented yet. No credentials are needed for the starter health check. Settings marked as future in `.env.example` are reserved for later phases.
+This development project includes a browser conversation recorder, Gemini task extraction,
+Supabase task storage, member profiles, Photon messaging and tests. The health endpoint
+needs no credentials. Feature guides explain which migrations and settings enable each integration.
 
-The backend also includes task imports, member messaging support and read-only event planning
-drafts (`POST /api/planning/drafts`). Proposal persistence, approval/activation and scheduled
-reminders remain planned. See the feature guides for integration setup.
+The backend includes task imports, verified personal task replies and read-only event planning
+drafts (`POST /api/planning/drafts`). [Deadline reminders](docs/REMINDERS.md) use a durable
+outbox. [Help requests](docs/HELP_WORKFLOW.md) reuse skills/workload recommendations and
+require admin approval before transferring ownership. Event-plan activation remains separate.
 
 Never commit `.env` files, actual member phone numbers, inbox contents, recordings, or private transcripts. Only `VITE_` values are exposed to browser code; put provider credentials in the backend environment.

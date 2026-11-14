@@ -7,22 +7,73 @@ Needs GEMINI_API_KEY and the Supabase settings (see app/core/settings.py).
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from google.genai import errors
-from pydantic import ValidationError
+from postgrest.exceptions import APIError
+from pydantic import BaseModel, Field, ValidationError
 
+from app.core.auth import require_admin
 from app.core.settings import Settings
+from app.integrations.supabase import StorageUnavailable
 from app.schemas.api import failure
 from app.services import meeting_ingest
 from app.services import tasks as task_service
+from app.services.attendance import AttendanceStore
 from app.services.task_assignment import EBOARD_FILE, get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/meetings", tags=["meetings"])
+
+
+def get_attendance_store():
+    return AttendanceStore()
+
+
+class MeetingInput(BaseModel):
+    title: str = Field(min_length=1, max_length=200, pattern=r"\S")
+    meeting_date: date
+
+
+class AttendanceInput(BaseModel):
+    attendees: list[str] = Field(max_length=200)
+
+
+@router.get("")
+def list_meetings(store: Annotated[AttendanceStore, Depends(get_attendance_store)]):
+    try:
+        return {"success": True, "data": store.list_meetings()}
+    except (StorageUnavailable, APIError, httpx.HTTPError):
+        return failure("Meeting storage is unavailable. Check the attendance migration.", 503)
+
+
+@router.post("", dependencies=[Depends(require_admin)])
+def create_meeting(body: MeetingInput, store: Annotated[AttendanceStore, Depends(get_attendance_store)]):
+    try:
+        # Attendance-only meetings have a date, not a supplied start time; use local noon.
+        held_at = datetime.combine(body.meeting_date, time(12), ZoneInfo("America/New_York"))
+        return {"success": True, "data": store.create(body.title.strip(), held_at)}
+    except (StorageUnavailable, APIError, httpx.HTTPError):
+        return failure("Could not create the meeting. Please try again.", 503)
+
+
+@router.patch("/{meeting_id}/attendance", dependencies=[Depends(require_admin)])
+def save_attendance(meeting_id: int, body: AttendanceInput,
+                    store: Annotated[AttendanceStore, Depends(get_attendance_store)]):
+    try:
+        store.save(meeting_id, body.attendees)
+        return {"success": True, "data": {"attendees": sorted(set(body.attendees))}}
+    except APIError as exc:
+        if exc.code in ("22023", "P0002"):
+            return failure("Select valid board members." if exc.code == "22023" else "Meeting not found.",
+                           422 if exc.code == "22023" else 404)
+        return failure("Could not save attendance. Please try again.", 503)
+    except (StorageUnavailable, httpx.HTTPError):
+        return failure("Could not save attendance. Please try again.", 503)
 
 
 @router.post("/ingest")

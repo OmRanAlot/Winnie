@@ -9,17 +9,22 @@ What is planned but not built lives in the docstrings of app/__init__.py and rou
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.auth import require_member
 from app.core.logging_config import RequestLogMiddleware, setup_logging
 from app.core.settings import Settings
+from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
+from app.routes.help_requests import internal as internal_help_router
+from app.routes.help_requests import router as help_router
 from app.routes.meetings import router as meetings_router
 from app.routes.members import router as members_router
 from app.routes.messages import router as messages_router
 from app.routes.planning import router as planning_router
 from app.routes.recordings import router as recordings_router
+from app.routes.reminders import router as reminders_router
 from app.routes.tasks import router as tasks_router
 from app.services.task_assignment import router as assign_task_router
 
@@ -36,10 +41,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health_router)
-app.include_router(recordings_router)
-app.include_router(meetings_router)
-app.include_router(assign_task_router)
-app.include_router(tasks_router)
+app.include_router(auth_router)
+app.include_router(help_router)
+app.include_router(internal_help_router)
+app.include_router(recordings_router, dependencies=[Depends(require_member)])
+app.include_router(reminders_router)
+app.include_router(meetings_router, dependencies=[Depends(require_member)])
+app.include_router(assign_task_router, dependencies=[Depends(require_member)])
+app.include_router(tasks_router, dependencies=[Depends(require_member)])
 app.include_router(messages_router)
 app.include_router(planning_router)
 app.include_router(members_router)

@@ -1,20 +1,22 @@
 // Calls to the Winnie backend (/api is proxied to localhost:8000 by vite.config.js).
 // Backend tasks are translated into the shape App.jsx's design uses, so the screens don't change.
 
-const PAGE = 100; // the backend's maximum page size for GET /api/tasks
+import { authHeaders } from './authToken.js';
+const PAGE = 100; // the backend's maximum page size for GET /api/tasks/records
 
 const STATUS_TO_UI = { todo: "Upcoming", in_progress: "In-Progress", blocked: "In-Progress", done: "Completed" };
 const STATUS_FROM_UI = { Upcoming: "todo", "In-Progress": "in_progress", Completed: "done" };
+const apiBase = (import.meta.env?.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
 async function request(path, options = {}) {
   const method = (options.method ?? "GET").toUpperCase();
-  const endpoint = `/api${path.split("?")[0]}`;
+  const endpoint = `${apiBase}${path.split("?")[0]}`;
   let response;
   try {
-    response = await fetch(`/api${path}`, {
+    response = await fetch(`${apiBase}${path}`, {
       cache: "no-store",
       ...options,
-      headers: { "Content-Type": "application/json", ...options.headers },
+      headers: { "Content-Type": "application/json", ...await authHeaders(), ...options.headers },
       signal: options.signal ?? AbortSignal.timeout(15000),
     });
   } catch {
@@ -98,6 +100,26 @@ export async function getMembers() {
   }));
 }
 
+export async function getMeetings() {
+  return (await request('/meetings')).data.map((m) => ({
+    ...m, name: m.title || 'E-Board Meeting',
+    date: new Date(m.held_at).toLocaleDateString('en-US', { timeZone: 'America/New_York' }),
+    tasks: [],
+  }));
+}
+
+export async function createMeeting(title, meeting_date) {
+  return (await request('/meetings', {
+    method: 'POST', body: JSON.stringify({ title, meeting_date }),
+  })).data;
+}
+
+export async function saveAttendance(id, attendees) {
+  return (await request(`/meetings/${encodeURIComponent(id)}/attendance`, {
+    method: 'PATCH', body: JSON.stringify({ attendees }),
+  })).data;
+}
+
 // Up to 3 members whose skills fit a pending task, lightest workload first (never the assignee).
 // [{code, name, role, fit: "strong"|"possible", reason, matched_skills, open, due_this_week}]
 export async function getCandidates(taskId) {
@@ -105,6 +127,20 @@ export async function getCandidates(taskId) {
     signal: AbortSignal.timeout(60000),
   });
   return body.data;
+}
+
+export async function getCurrentUser(signal) {
+  return (await request('/auth/me', { signal })).data;
+}
+
+export async function reviewHelpRequests() {
+  return (await request("/help-requests")).data;
+}
+
+export async function decideHelpRequest(number, revision, action) {
+  return (await request(`/help-requests/${number}/decision`, {
+    method: "POST", body: JSON.stringify({ revision, action }),
+  })).data;
 }
 
 // {task id: [member codes]} for the active semester; null = assignee cell not recognized yet.

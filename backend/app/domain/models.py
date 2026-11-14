@@ -1,9 +1,9 @@
 """Domain objects for Winnie: who is on the board, what work exists, who gets told about it.
 
 Most are plain dataclasses that validate themselves on creation and are not stored yet. The task
-models (ExtractedTask, Task, TaskDependency) are Pydantic and mirror the Supabase tables in
-supabase/migrations/0001_init.sql; app/db/repository.py reads and writes them. No business logic
-lives here; services/ does the work.
+models (ExtractedTask, Task, TaskDependency) are Pydantic and project canonical UUID task rows
+into the timeline shape; app/db/repository.py reads and writes them. Business logic lives in
+services/.
 
 Contents, in order:
     Member, Role, RoleSeat        the e-board people and their positions
@@ -93,7 +93,7 @@ class Skill:
 
 # --- Work -------------------------------------------------------------------------------------
 
-TaskStatus = Literal["open", "done", "blocked"]
+TaskStatus = Literal["todo", "in_progress", "done", "blocked"]
 TASK_STATUSES: frozenset[str] = frozenset(get_args(TaskStatus))
 
 
@@ -117,24 +117,24 @@ class ExtractedTask(BaseModel):
 
 
 class Task(BaseModel):
-    """One row of the Supabase `tasks` table (supabase/migrations/0001_init.sql).
+    """A timeline projection of a canonical UUID task record.
 
-    The single source of truth that replaces the spreadsheet, Docs and Discord. `seat` and
-    `assignee` are the joined names, filled by app/repository.list_tasks.
+    `seat` and `assignee` are display text projected by app/db/repository.py.
+    `assignee_id` groups labels for display; authorization uses verified member mappings.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    id: int
+    id: str
     title: str
     description: str | None = None
     seat_id: int | None = None
-    assignee_id: int | None = None
+    assignee_id: str | None = None
     rationale: str | None = None
     deadline_raw: str | None = None
     deadline_at: datetime | None = None
     needs_review: bool = False
-    status: TaskStatus = "open"
+    status: TaskStatus = "todo"
     source_meeting_id: int | None = None
     raw_json: dict[str, Any] | None = None
     created_at: datetime
@@ -142,7 +142,7 @@ class Task(BaseModel):
     seat: str | None = None
     assignee: str | None = None
     meeting_held_at: datetime | None = None
-    depends_on: tuple[int, ...] = ()
+    depends_on: tuple[str, ...] = ()
 
 
 class TaskDependency(BaseModel):
@@ -154,8 +154,8 @@ class TaskDependency(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    task_id: int
-    depends_on_id: int
+    task_id: str
+    depends_on_id: str
 
     @model_validator(mode="after")
     def not_self(self) -> "TaskDependency":

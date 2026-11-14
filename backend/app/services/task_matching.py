@@ -104,7 +104,8 @@ async def suggest_candidates(task: dict, members: list[dict], current: list[str]
             and not addressed_to(task.get("title") or "", m["display_name"])}
     if not pool:
         return []
-    key = (str(task["id"]), task.get("updated_at"), tuple(sorted(current)), tuple(sorted(pool)))
+    key = (str(task["id"]), task.get("updated_at"), tuple(sorted(current)),
+           json.dumps(pool, sort_keys=True), json.dumps(loads, sort_keys=True), settings.gemini_model)
     if key in _cache:
         return _cache[key]
     task_text = json.dumps({k: task.get(k) for k in ("title", "description", "event_tag", "project_name",

@@ -4,7 +4,9 @@
 format (`gbm`, `technical_workshop`, `hackathon`, `other`). It returns draft tasks,
 suggested roles, date-only deadlines, dependencies, source evidence and open questions.
 Dates have no implied time of day. These are proposals, not persisted task records.
-There is no approval/activation endpoint or messaging integration in this slice.
+The original draft routes do not persist or activate tasks. For checkpointed runs,
+progress and approve/reject review, see [PLANNING_RUNS.md](PLANNING_RUNS.md).
+Activation and messaging remain separate.
 
 ## Staged pipeline (preferred)
 
@@ -72,14 +74,36 @@ python -m app.prepare_pipeline 'C:/path/Spring Calendar.csv' --output data/plann
 Try the full pipeline from `backend/` after configuring Gemini, without a running API:
 
 ```powershell
-uv run --extra agents python -m app.cli.preview_pipeline --event 'Git workshop' --idea 'Employer-led hands-on Git exercises and Q&A' --date 2027-04-20 --semester spring-2027 --output data/planning/git-draft.json
+uv run --extra agents python -m app.cli.preview_pipeline --event 'Git workshop' --idea 'Employer-led hands-on Git exercises and Q&A' --date 2027-04-20 --semester spring-2027 --output data/planning/git-draft.json --progress --timeout 420
 ```
 
 This saves a private review artifact, including proposed Fall classifications, and
 does not write to Supabase or send messages. Historical classifications are recomputed
 each run for now; there is no reviewed persistent classification cache yet.
+`--progress` prints specialist stage names. `--timeout 420` allows seven minutes
+for the complete run without changing the API's configured timeout. The initial
+live real-history test exceeded the default 180 seconds at the timeline stage.
 
 ### Role-holder data and member pages
+
+User-confirmed rules are enforced in the planner, overriding historical guesses:
+
+- Highlander Hub event listings/posting/approval belong to the Secretary.
+- All physical-item ordering/purchasing tasks belong to the Treasurer and must
+  have deadlines **at least 21 calendar days before the event**. Receipt, packing,
+  setup and reimbursements remain separate tasks.
+- Ordering requires an itemized materials list. If needed but omitted, the backend
+  adds an explicit ordering task and a materials-list task. Existing budget approval
+  and materials-list tasks must precede ordering by at least one day.
+- Dependency and timeline specialists receive these requirements. Backend validation
+  rejects schedules that violate the ordering cutoff or prerequisite buffers and
+  sends specific feedback for bounded correction attempts.
+
+For the current demo, the local `backend/data/eboardMembers.json` Secretary entry
+(Anne, confirmed by the user) is used as a fallback when no roster for the requested
+semester is configured. This assigns Secretary proposals locally without sending
+roster contact details to the model. It does not establish future-semester appointments
+or change canonical members/profiles. An explicit semester roster takes precedence.
 
 The tracker supplies historical assignee names/emails. These establish **who was
 assigned the work**, but do not alone establish their board role. The inspected
@@ -109,7 +133,8 @@ shape (synthetic example):
 Use real verified member codes from the existing member system. Multiple people can
 hold one role and one person can hold several roles. Historical role mappings and
 current role holders are semester-specific; no Spring task tracker is required to
-maintain a Spring roster. Owner proposals remain null if a matching roster is missing.
+maintain a Spring roster. Except for the current-demo Secretary fallback above, owner
+proposals remain null if a matching roster is missing.
 The matcher does not infer availability, silently balance work, or select one of two
 coordinators. Open-task counts may be recorded but do not currently drive selection.
 
@@ -185,7 +210,8 @@ WINNIE_PLANNING_TIMEOUT_SECONDS=60
 
 Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey).
 The adapter reads `GEMINI_API_KEY` directly from the root `.env`; no shell export
-is needed. `GOOGLE_API_KEY` is also accepted and takes precedence if both are set.
+is needed. `WINNIE_GEMINI_API_KEY` and `GOOGLE_API_KEY` are also accepted;
+`GEMINI_API_KEY` takes precedence if several are set.
 The adapter explicitly selects the Gemini Developer API, so Vertex AI project,
 region and service-account setup are unnecessary for this path. Use a model ID
 enabled for your project; see [Google's model list](https://aistudio.google.com/docs/models).
@@ -222,10 +248,13 @@ dependency cycles, dependency date ordering and deadlines relative to event phas
 Missing dates stay null. Roles are proposals, with no inferred person/availability.
 Source cells are untrusted data in the model instructions. Provider failures return
 a generic error without exposing prompts or keys. Model output never becomes an
-active assignment. Runs have no durable checkpointer or cross-run memory.
+active assignment. These original draft routes have no durable checkpointer or
+cross-run memory. The `/runs` workflow adds persistent proposal/review checkpoints
+and reuse of completed specialist responses; it does not add automatic learning.
 
 ## Next integration
 
-Persist and edit proposal revisions, implement President approval, resolve roles
-against actual member capacity, then activate the exact approved tasks through the
-task service. Do not turn this draft route into a direct task writer.
+The durable run workflow persists drafts and supports exact-revision review.
+Next add editing, verified President authorization and member-capacity matching,
+then activate the exact approved tasks through the task service. Do not turn a
+draft generation route into a direct task writer.

@@ -11,6 +11,7 @@ import copy
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 from postgrest.exceptions import APIError
 
@@ -19,14 +20,14 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "people": {"aliases": []},
     "meetings": {"title": None, "transcript": None, "recording_id": None, "summary": None},
     "tasks": {
-        "description": None, "seat_id": None, "assignee_id": None, "rationale": None,
-        "deadline_raw": None, "deadline_at": None, "needs_review": False, "status": "open",
-        "source_meeting_id": None, "raw_json": None,
+        "description": "", "owner_code": None, "assignee_text": "", "seat_text": None,
+        "rationale": None, "deadline_text": "", "due_date": None, "deadline_at": None,
+        "needs_review": False, "status": "todo", "source_meeting_id": None, "raw_json": None,
     },
     "task_dependencies": {},
 }  # fmt: skip
 FOREIGN_KEYS = {
-    "tasks": {"seat_id": "seats", "assignee_id": "people", "source_meeting_id": "meetings"},
+    "tasks": {"source_meeting_id": "meetings"},
     "task_dependencies": {"task_id": "tasks", "depends_on_id": "tasks"},
 }
 
@@ -41,6 +42,8 @@ class FakeClient:
         return Query(self, name)
 
     def unique_keys(self, table: str, row: dict[str, Any]) -> list[Any]:
+        if table == "tasks":
+            return [row["id"]] if "id" in row else []
         if table == "seats":
             return [row["name"]]
         if table == "people":
@@ -63,9 +66,13 @@ class FakeClient:
             if any(k in existing for k in self.unique_keys(table, new)):
                 raise APIError({"code": "23505", "message": "duplicate key"})
             if table != "task_dependencies":
-                new["id"] = self.next_id[table]
+                new["id"] = new.get("id", str(uuid4())) if table == "tasks" else self.next_id[table]
                 self.next_id[table] += 1
             if table == "tasks":
+                forbidden = {"seat_id", "assignee_id", "deadline_raw"} & row.keys()
+                if forbidden or not row.get("month_code"):
+                    raise AssertionError(f"Noncanonical task insert: {row.keys()}")
+                new.setdefault("task_code", f"WIN-{row['month_code']}-{self.next_id[table]}")
                 now = datetime.now(UTC).isoformat()
                 new.setdefault("created_at", now)
                 new.setdefault("updated_at", now)
@@ -81,8 +88,9 @@ class Query:
         self.payload: Any = None
         self.filters: list[tuple[str, Any]] = []
         self.max_rows: int | None = None
+        self.offset = 0
 
-    def select(self, *_columns: str) -> Query:
+    def select(self, *_columns: str, **_options) -> Query:
         self.op = "select"
         return self
 
@@ -108,6 +116,11 @@ class Query:
 
     def limit(self, count: int) -> Query:
         self.max_rows = count
+        return self
+
+    def range(self, start: int, end: int) -> Query:
+        self.offset = start
+        self.max_rows = end - start + 1
         return self
 
     def order(self, column: str, *, desc: bool = False, nullsfirst: bool | None = None) -> Query:
@@ -136,6 +149,8 @@ class Query:
                              key=lambda r: r[column], reverse=desc)
             missing = [r for r in matched if r.get(column) is None]
             matched = missing + present if nulls_first else present + missing
+        count = len(matched)
+        matched = matched[self.offset:]
         if self.max_rows is not None:
             matched = matched[: self.max_rows]
-        return SimpleNamespace(data=copy.deepcopy(matched))
+        return SimpleNamespace(data=copy.deepcopy(matched), count=count)
