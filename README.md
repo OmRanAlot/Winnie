@@ -11,7 +11,7 @@ Start with [CONTEXT.md](CONTEXT.md) for product and implementation decisions, [d
 | Service | Path | Stack |
 |---|---|---|
 | API + agent logic | `backend/` | Python 3.13, uv, FastAPI |
-| DM interface | `messaging/` | Node, TypeScript, Photon (`@photon-ai/advanced-imessage`) |
+| DM interface | `messaging/` | Node, TypeScript, Photon Spectrum (`spectrum-ts`) |
 | Web dashboard (placeholder) | `frontend/` | Vite, React, TypeScript |
 
 ```text
@@ -55,6 +55,6 @@ npm --prefix frontend run build
 
 ## What exists today
 
-This is a development scaffold: a dashboard shell, a working API health endpoint, configuration loading, and a health test. Agent planning, member/task persistence, approval enforcement, messaging, and reminders are planned in the linked documents; they are not implemented yet. No credentials are needed for the starter health check. Settings marked as future in `.env.example` are reserved for later phases.
+This is a development scaffold: a dashboard shell, a working API health endpoint, configuration loading, and a health test. The [messaging service](messaging/README.md) has a Spectrum iMessage echo starter; its backend bridge is still planned. Agent planning, member/task persistence, approval enforcement, and reminders are not implemented yet. No credentials are needed for the starter health check. Settings marked as future in `.env.example` are reserved for later phases.
 
 Never commit `.env` files, actual member phone numbers, inbox contents, recordings, or private transcripts. Only `VITE_` values are exposed to browser code; put provider credentials in the backend environment.

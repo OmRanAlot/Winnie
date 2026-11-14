@@ -1,10 +1,31 @@
-// Messaging sidecar entrypoint (Node + TypeScript).
-//
-// Why this exists: Photon ships TypeScript SDKs only, so this small service owns the Photon
-// connection and the FastAPI backend owns all business logic.
-//
-// TODO:
-//   - Load config (src/config.ts).
-//   - Connect to Photon via @photon-ai/advanced-imessage.
-//   - Start a tiny HTTP server exposing POST /send (called by backend) and GET /health.
-//   - Subscribe to inbound messages -> src/inbound.ts.
+import { Spectrum } from "spectrum-ts";
+import { imessage } from "spectrum-ts/providers/imessage";
+
+const projectId = process.env.PROJECT_ID?.trim();
+const projectSecret = process.env.PROJECT_SECRET?.trim();
+
+if (!projectId || !projectSecret) {
+  console.error("Set PROJECT_ID and PROJECT_SECRET in messaging/.env before starting.");
+  process.exit(1);
+}
+
+console.log("Connecting to Photon Spectrum...");
+const app = await Spectrum({
+  projectId,
+  projectSecret,
+  providers: [imessage.config()],
+});
+
+console.log("Echo listener started. Text your Photon line from an allowed phone.");
+
+// Reply within the incoming conversation. Do not log phone numbers or text bodies.
+for await (const [space, message] of app.messages) {
+  if (message.content.type === "text") {
+    try {
+      await space.send(`echo: ${message.content.text}`);
+      console.log("Echo reply sent.");
+    } catch {
+      console.error("Echo reply failed. Check the Photon connection and project settings.");
+    }
+  }
+}
