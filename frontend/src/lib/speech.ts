@@ -1,3 +1,8 @@
+// Live speech-to-text using the browser's built-in SpeechRecognition API (no API key, no backend).
+// startTranscription() keeps recognition running through silences, reports final and interim
+// words, and returns a session whose stop() resolves with a TranscriptStatus once the last
+// words arrive. Browser support varies and some browsers send audio to their vendor's service.
+// Used by App.tsx; covered by frontend/tests/speech.test.mjs.
 export interface Recognition {
   continuous: boolean; interimResults: boolean; lang: string;
   onresult: ((event: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;

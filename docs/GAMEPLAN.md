@@ -86,12 +86,13 @@ With fewer teammates, combine domain + integration and dashboard + agent work. K
 ## Planned file ownership
 
 ```text
-backend/app/api/             members.py, events.py, transcripts.py, plans.py, tasks.py, webhooks.py
-backend/app/models/          domain.py, requests.py, responses.py
+backend/app/routes/          members.py, events.py, transcripts.py, plans.py, tasks.py, webhooks.py
+backend/app/models.py        domain dataclasses (split into a package only if it outgrows one file)
+backend/app/schemas.py       request/response shapes (same rule)
 backend/app/services/        plans.py, tasks.py, replies.py, notifications.py
 backend/app/agents/          planner.py, transcript.py, assignment.py, timeline.py, schemas.py
 backend/app/integrations/    repository.py, memory.py, cosmos.py, messaging.py, photon.py
-backend/app/jobs/            worker.py, reminders.py, delivery.py
+backend/app/jobs.py          reminders and delivery worker (becomes a jobs/ package with worker.py, reminders.py, delivery.py if it grows)
 frontend/src/features/      members/, events/, tasks/, transcripts/, approvals/
 frontend/src/components/    common UI
 frontend/src/lib/           API client and typed contracts

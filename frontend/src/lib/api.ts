@@ -1,3 +1,6 @@
+// Calls to the Winnie backend. Two endpoints so far: GET /api/health and POST /api/recordings.
+// Base URL comes from VITE_API_BASE_URL (default "/api", proxied to localhost:8000 by
+// vite.config.ts). Backend side: backend/app/routes/health.py and routes/recordings.py.
 const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 export const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 

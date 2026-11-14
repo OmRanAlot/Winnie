@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-The stack is chosen and the file structure is scaffolded, but every source file is still comment-only (no logic yet). Dependencies are installed. When integrations are actually built, replace the "Planned integrations" section with what was built.
+The stack is chosen. Built so far: the browser conversation recorder (frontend + `POST /api/recordings`) and `GET /api/health`. Everything else is planned, and is described in docstrings rather than empty placeholder files (see the repository map in `README.md`, and `backend/app/__init__.py`). When integrations are actually built, replace the "Planned integrations" section with what was built.
 
 ## Stack and layout
 
@@ -16,7 +16,7 @@ The stack is chosen and the file structure is scaffolded, but every source file 
 
 Photon ships only TypeScript SDKs (no Python), which is why `messaging/` exists. Keep business logic out of it: it forwards inbound DMs to `POST /webhooks/messaging` and exposes `POST /send` for the backend.
 
-Backend layering: `api/routes -> services -> repositories -> models`. Services call `integrations/`; routes never do. API responses use a `{success, data, error, meta}` envelope (`app/schemas/common.py`). The schemas are the contract the replacement frontend will be built against. See `docs/architecture.md` for open decisions (database, auth, inbox provider, transcription provider).
+Backend layering: `routes -> services -> integrations`, with `models.py` (domain dataclasses) and `schemas.py` (API shapes) shared. Routes never call integrations; services never import FastAPI. There is deliberately no repository layer or database module yet: add them when persistence is real. API responses use a `{success, data, error, meta}` envelope (to be added to `app/schemas.py`). The schemas are the contract the replacement frontend will be built against. To find a file, read the repository map in `README.md`; every real source file opens with a comment saying what it is. See `docs/architecture.md` for open decisions (database, auth, inbox provider, transcription provider).
 
 ## Commands
 
@@ -27,7 +27,7 @@ Each service has a `.env.example`. Copy it to `.env` in the same folder; `.env` 
 uv sync
 uv run fastapi dev app/main.py                        # once main.py has code
 uv run pytest                                         # all tests
-uv run pytest tests/unit/test_x.py::test_name         # single test
+uv run pytest tests/test_x.py::test_name              # single test
 uv run ruff check .
 
 # messaging/ and frontend/

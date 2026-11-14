@@ -1,9 +1,16 @@
+"""POST /api/recordings: receive a browser recording (audio + transcript JSON) and save it.
+
+Called by frontend/src/lib/api.ts (saveRecording). Checks the content type and the 15 MB limit
+while streaming, validates the body against schemas.Recording, then hands it to
+services/recordings.py. No authentication yet: local development only.
+"""
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from app.schemas.recording import MAX_JSON_BYTES, Recording
+from app.schemas import MAX_JSON_BYTES, Recording
 from app.services.recordings import save_recording
 
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
