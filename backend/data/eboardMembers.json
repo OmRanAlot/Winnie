@@ -1,37 +1,80 @@
 {
     "President":{
-        "name": "Jane Doe",
+        "name": "Lakshita Madhavan",
         "number": "1-123-456-7890",
-        "email" : "testexample@gmail.com"
+        "email" : "lakshita123@gmail.com",
+        "description": "Leads the E-Board and presides over all meetings. Main contact for university administration and faculty advisors, oversees planning of flagship events like GirlHacks and the WiCS Gala, and leads E-Board recruitment and transition with the VP."
     },
     "Vice President":{
-        "name": "Bob Newman",
+        "name": "Stephanie Nicolaescu",
         "number": "1-123-456-7890",
-        "email" : "testexample@gmail.com"
+        "email" : "stephanie123@gmail.com",
+        "description": "Right-hand to the President and steps in when they are absent. Oversees the committee system, checks in with E-Board members, and coordinates end-of-semester reporting and goal-setting."
     },
     "Secretary":{
-        "name": "Alice",
+        "name": "Anne Therese Argonza",
         "number": "1-123-456-7890",
-        "email" : "testexample@gmail.com"
+        "email" : "anne123@gmail.com",
+        "description": "Keeps records and communication organized: meeting minutes, action items, attendance, biweekly newsletters, the Discord server, and Highlander Hub postings. Monitors the official WiCS email, forwards inquiries to the right member, and follows up after 3 days."
     },
     "Treasurer":{
-        "name": "Sam",
+        "name": "Sharanya Raj",
         "number": "1-123-456-7890",
-        "email" : "testexample@gmail.com"
+        "email" : "sharanya123@gmail.com",
+        "description": "Owns the club's finances: drafts budgets, submits funding requests to Student Senate, processes reimbursements, and gives monthly financial reports. Tracks sponsorship funds with Industry Partnerships and buys event materials with Event Coordinators at least 3 weeks ahead."
     },
-    "Industry Partnership":{
-        "name": "Boba",
+    "Industry Partnership1":{
+        "name": "Carlin Verano",
         "number": "1-123-456-7890",
-        "email" : "testexample@gmail.com"
+        "email" : "carlin123@gmail.com",
+        "description": "Builds relationships with companies to secure sponsorships, company tours and recruiter events. Maintains the industry contact database and GirlHacks sponsorship prospectus, liaises with the YWCC GirlHacks advisor, and holds a 72-hour response standard with partners."
     },
     "PR1":{
-        "name": "Tofu",
+        "name": "Azka Faisal",
         "number": "1-123-456-7890",
-        "email" : "testexample@gmail.com"
+        "email" : "azka123@gmail.com",
+        "description": "Manages the WiCS brand and social media (Instagram, Discord, LinkedIn), designs flyers, posters and merch, runs marketing campaigns, and captures photos and recaps at events. Runs weekly PR Committee meetings."
     },
     "PR2":{
-        "name": "Luffy",
+        "name": "Caithy Liao",
         "number": "1-123-456-7890",
-        "email" : "testexample@gmail.com"
+        "email" : "caithy123@gmail.com",
+        "description": "Manages the WiCS brand and social media (Instagram, Discord, LinkedIn), designs flyers, posters and merch, runs marketing campaigns, and captures photos and recaps at events. Runs weekly PR Committee meetings."
+    },
+    "Event Co-ordinator1":{
+        "name": "Garima Thapa",
+        "number": "1-123-456-7890",
+        "email" : "garima123@gmail.com",
+        "description": "Plans and runs WiCS events: OSIL registration, room bookings, supply and catering orders, office inventory, and day-of logistics, including GirlHacks and the WiCS Gala. Runs weekly Events Committee meetings."
+    },
+    "Event Co-ordinator2":{
+        "name": "Saidarsha Karunakaran",
+        "number": "1-123-456-7890",
+        "email" : "saidarsha123@gmail.com",
+        "description": "Plans and runs WiCS events: OSIL registration, room bookings, supply and catering orders, office inventory, and day-of logistics, including GirlHacks and the WiCS Gala. Runs weekly Events Committee meetings."
+    },
+    "Technical Director":{
+        "name": "Meera James",
+        "number": "1-123-456-7890",
+        "email" : "meera123@gmail.com",
+        "description": "Leads at least 2 technical workshops per semester, maintains the WiCS website, Discord server and Linktree, builds the GirlHacks website, and provides tech support during workshops and GirlHacks."
+    }, 
+    "Industry Partnership2":{
+        "name": "Manisha Suresh",
+        "number": "1-123-456-7890",
+        "email" : "manisha123@gmail.com",
+        "description": "Builds relationships with companies to secure sponsorships, company tours and recruiter events. Maintains the industry contact database and GirlHacks sponsorship prospectus, liaises with the YWCC GirlHacks advisor, and holds a 72-hour response standard with partners."
+    }, 
+    "Membership chair":{
+        "name": "Diya Pottangadi",
+        "number": "1-123-456-7890",
+        "email" : "diya123@gmail.com",
+        "description": "Recruits and retains members: leads recruitment at involvement fairs, maintains the membership database and attendance, sends welcome emails, and organizes social events, Lounge Hours and study groups. Manages the Discord opportunities channel."
+    },
+    "Community Outreach":{
+        "name": "Priya Patel",
+        "number": "1-123-456-7890",
+        "email" : "priya123@gmail.com",
+        "description": "Connects WiCS with campus and the wider community: coordinates collaborations with other clubs, secures speakers, runs alumni relations and mentorship chats, leads tabling, and recruits GirlHacks judges, volunteers and mentors."
     }
 }
