@@ -7,6 +7,7 @@ Planned settings for the integrations are listed in app/__init__.py.
 
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # backend/app/settings.py -> repo root
@@ -23,3 +24,6 @@ class Settings(BaseSettings):
     app_name: str = "Winnie API"
     environment: str = "development"
     cors_origins: list[str] = ["http://localhost:5173"]
+    supabase_url: str = ""
+    supabase_secret_key: SecretStr = SecretStr("")
+    task_api_key: SecretStr = SecretStr("")

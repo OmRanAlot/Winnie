@@ -22,22 +22,29 @@ console.log("Echo listener started. Text your Photon line from an allowed phone.
 for await (const [space, message] of app.messages) {
   if (message.content.type === "text") {
     try {
-      const text = message.content.text.trim().toLowerCase();
+      const response = await fetch(
+        "http://localhost:8000/api/messages",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            text: message.content.text,
+          }),
+        }
+      );
 
-      if (text === "help") {
-        await space.send("Hi! I'm Winnie, the WiCS Project Manager. I help coordinate WiCS tasks and ensure nothing is falling behind. For now, try texting ping.");
+      if (!response.ok) {
+        throw new Error(`Backend request failed: ${response.status}`)
       }
 
-      else if (text === "ping") {
-        await space.send("pong 🐼🏓");
-      }
+      //Read Python's reply from the response body.
+      const data = await response.json();
 
-      else {
-        await space.send('Hey! I have not been completely developed yet. Text "help" to see what I can do and my intended purpose. ')
-      }
-      console.log("Message received. Reply sent.");
-    } catch {
-      console.error("Echo reply failed. Check the Photon connection and project settings.");
-    }
+      //Send that reply back to the original conversation via Photon
+      await space.send(data.reply);
+    } catch { console.error("Could not process the message.") }
   }
 }
+

@@ -1,0 +1,30 @@
+{
+  "name": "winnie",
+  "version": "1.0.0",
+  "description": "An iMessage-first AI coordinator for the NJIT Women in Computing Society (WiCS) e-board, built for HackPrinceton.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sharanya-Raj/Winnie.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Sharanya-Raj/Winnie/issues"
+  },
+  "homepage": "https://github.com/Sharanya-Raj/Winnie#readme",
+  "devDependencies": {
+    "supabase": "^3.1.0"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.119.0"
+  }
+}
