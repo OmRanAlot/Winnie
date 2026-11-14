@@ -2,21 +2,49 @@
 //
 // Flow: record the microphone (MediaRecorder) while live-transcribing the speech
 // (lib/speech.ts), let the user edit the transcript, then either
-//   - "Save & download JSON": POST the audio + transcript to the backend (lib/api.ts ->
-//     backend POST /api/recordings) and also download a copy, or
-//   - "Download locally": download the JSON without contacting the backend.
+// The moment recording stops, autoSave() POSTs the audio + transcript to the backend (lib/api.ts
+// -> backend POST /api/recordings, which writes the JSON and the audio file) in the background,
+// with no click and nothing waiting on it. If that fails, it downloads both files locally.
+// The buttons are for saving another copy after editing the transcript:
+//   - "Save & download JSON": POST to the backend and also download the JSON + audio, or
+//   - "Download locally": download the JSON + audio without contacting the backend.
 // The JSON shape is defined by backend/app/schemas.py (Recording); keep them in sync.
 //
 // PLACEHOLDER: the UX team's design will replace this frontend, so don't invest here.
 import { useEffect, useRef, useState } from 'react';
-import { checkHealth, MAX_AUDIO_BYTES, saveRecording } from './lib/api';
+import { assignTasks, checkHealth, MAX_AUDIO_BYTES, saveRecording } from './lib/api';
 import { browserRecognition, startTranscription, type TranscriptStatus } from './lib/speech';
 
 type Phase = 'idle' | 'starting' | 'recording' | 'stopping' | 'ready';
 interface Recording { audio: Blob; startedAt: string; durationMs: number; language: string }
+
+function readAsBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => { const url = reader.result as string; resolve(url.slice(url.indexOf(',') + 1)); };
+    reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob);
+  });
+}
+
+async function buildRecordingJson(item: Recording, title: string, transcript: string, status: TranscriptStatus) {
+  return {
+    schemaVersion: 1, title: title.trim() || 'Untitled conversation', startedAt: item.startedAt, durationMs: item.durationMs,
+    transcription: { language: item.language, text: transcript, provider: 'browser-speech-recognition', status },
+    audio: { mimeType: item.audio.type, encoding: 'base64', sizeBytes: item.audio.size, data: await readAsBase64(item.audio) },
+  };
+}
+
+function downloadFile(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a'); link.href = url; link.download = filename; link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const audioExtension = (mime: string) => ({ 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/mpeg': 'mp3' })[mime.split(';')[0]] ?? 'webm';
 const clock = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
 
 export default function App() {
+  const [taskOutput, setTaskOutput] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [apiStatus, setApiStatus] = useState('Checking API…');
   const [title, setTitle] = useState('Untitled conversation');
@@ -36,6 +64,10 @@ export default function App() {
   const started = useRef(0);
   const speech = useRef<ReturnType<typeof startTranscription> | null>(null);
   const startPending = useRef(false);
+  // Latest title/transcript for the automatic save, which runs from a recorder callback whose
+  // closure would otherwise see stale state.
+  const titleRef = useRef(title);
+  const transcriptRef = useRef('');
   const busy = !['idle', 'ready'].includes(phase);
   const canRecord = !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
 
@@ -101,13 +133,15 @@ export default function App() {
         if (!audio.size) { speech.current?.dispose(); setError('No audio was captured. Check your microphone and try again.'); setPhase('idle'); return; }
         setRecording(item);
         const status = await speech.current?.stop();
-        if (mounted.current) { setTranscriptStatus(status ?? 'unavailable'); setPhase('ready'); }
+        const finalStatus = status ?? 'unavailable';
+        if (mounted.current) { setTranscriptStatus(finalStatus); setPhase('ready'); }
+        void autoSave(item, finalStatus); // Runs in the background; nothing waits on it.
       };
       input.getAudioTracks().forEach(track => { track.onended = stop; });
       recorder.start(1000); started.current = Date.now();
-      setRecording(null); setTranscript(''); setTranscriptStatus('unavailable'); setSeconds(0); setPhase('recording');
+      transcriptRef.current = ''; setRecording(null); setTranscript(''); setTranscriptStatus('unavailable'); setSeconds(0); setPhase('recording');
       speech.current = startTranscription(browserRecognition(), language,
-        text => setTranscript(previous => `${previous} ${text}`.trim()), setInterim, setNotice);
+        text => { transcriptRef.current = `${transcriptRef.current} ${text}`.trim(); setTranscript(transcriptRef.current); }, setInterim, setNotice);
     } catch (cause) {
       stream.current?.getTracks().forEach(track => track.stop());
       setError(cause instanceof DOMException && cause.name === 'NotAllowedError' ? 'Microphone access was denied. Allow access in browser settings and try again.' : `Could not start recording: ${cause instanceof Error ? cause.message : 'check your microphone.'}`);
@@ -115,27 +149,47 @@ export default function App() {
     } finally { startPending.current = false; }
   }
 
+  // Downloads the JSON and the audio file to this device.
+  function downloadLocalCopy(item: Recording, json: unknown) {
+    const base = `conversation-${item.startedAt.replace(/[:.]/g, '-')}`;
+    downloadFile(new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' }), `${base}.json`);
+    downloadFile(item.audio, `${base}.${audioExtension(item.audio.type)}`);
+  }
+
+  // Runs as soon as a recording stops. Saves the JSON and the audio file on the backend without
+  // any click or waiting. If the backend can't be reached, the files are downloaded to this
+  // device instead so nothing is lost.
+  async function autoSave(item: Recording, status: TranscriptStatus) {
+    let json: unknown;
+    try {
+      json = await buildRecordingJson(item, titleRef.current, transcriptRef.current, status);
+      const saved = await saveRecording(json);
+      if (!mounted.current) return;
+      setNotice(`Saved automatically: ${saved.filename} and ${saved.audioFilename}`); setApiStatus('API connected');
+      setTaskOutput('Assigning tasks...');
+      try {
+        const result = await assignTasks(saved.id);
+        if (mounted.current) setTaskOutput(`Source: ${result.meta.source} transcript\n` + result.data.assignments.map(t => `${t.title} ? ${t.assignee || 'Unassigned'} (${t.seat})${t.deadline ? ` ? ${t.deadline}` : ''}\n${t.description}\n${t.rationale}${t.needs_review ? ' ? Needs review' : ''}`).join('\n\n'));
+      } catch (cause) { if (mounted.current) setTaskOutput(`Recording saved. ${cause instanceof Error ? cause.message : 'Task assignment failed'}`); }
+
+    } catch (cause) {
+      if (!mounted.current) return;
+      const reason = cause instanceof Error ? cause.message : 'Could not save to the backend.';
+      if (json) { downloadLocalCopy(item, json); setError(`${reason} Downloaded the JSON and audio to this device instead.`); }
+      else setError(`${reason} Use "Download locally" to keep this recording.`);
+    }
+  }
+
   async function download(saveToBackend: boolean) {
     if (!recording) return;
     setSaving(true); setError('');
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader(); reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error); reader.readAsDataURL(recording.audio);
-      });
-      const json = {
-        schemaVersion: 1, title: title.trim() || 'Untitled conversation', startedAt: recording.startedAt, durationMs: recording.durationMs,
-        transcription: { language: recording.language, text: transcript, provider: 'browser-speech-recognition', status: transcriptStatus },
-        audio: { mimeType: recording.audio.type, encoding: 'base64', sizeBytes: recording.audio.size, data: dataUrl.slice(dataUrl.indexOf(',') + 1) },
-      };
+      const json = await buildRecordingJson(recording, title, transcript, transcriptStatus);
       if (saveToBackend) {
-        const filename = await saveRecording(json);
-        setNotice(`Saved to backend: ${filename}`); setApiStatus('API connected');
+        const saved = await saveRecording(json);
+        setNotice(`Saved to backend: ${saved.filename} and ${saved.audioFilename}`); setApiStatus('API connected');
       }
-      const url = URL.createObjectURL(new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' }));
-      const link = document.createElement('a'); link.href = url;
-      link.download = `conversation-${recording.startedAt.replace(/[:.]/g, '-')}.json`; link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadLocalCopy(recording, json);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save. Try downloading locally.'); }
     finally { setSaving(false); }
   }
@@ -148,25 +202,26 @@ export default function App() {
       <p className="intro">Record and transcribe with your browser, then save the audio and words together.</p>
       <section className="workspace" aria-label="Conversation recorder">
         <div className="record-panel">
-          <label htmlFor="title">CONVERSATION NAME</label><input id="title" value={title} maxLength={120} onChange={e => setTitle(e.target.value)} />
+          <label htmlFor="title">CONVERSATION NAME</label><input id="title" value={title} maxLength={120} onChange={e => { titleRef.current = e.target.value; setTitle(e.target.value); }} />
           <div className={`orb ${phase === 'recording' ? 'active' : ''}`} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/></svg></div>
           <div className="timer">{clock(seconds)}</div>
           <p className="status" role="status">{({ idle: 'Ready when you are', starting: 'Waiting for microphone…', recording: 'Recording your conversation', stopping: 'Finishing recording…', ready: 'Your audio is ready' })[phase]}</p>
           <select aria-label="Transcription language" disabled={busy} value={language} onChange={e => setLanguage(e.target.value)}><option value="en-US">English</option><option value="es-ES">Spanish</option><option value="fr-FR">French</option><option value="ar-SA">Arabic</option></select>
-          {phase === 'recording' ? <button className="primary stop" onClick={stop}>■ Stop recording</button> : <button className="primary" disabled={!canRecord || busy || saving} onClick={() => void start()}>● {recording ? 'Record another conversation' : 'Start recording'}</button>}
+          {phase === 'recording' ? <button className="primary stop" onClick={stop}>■ Stop recording</button> : <button className="primary" disabled={!canRecord || busy} onClick={() => void start()}>● {recording ? 'Record another conversation' : 'Start recording'}</button>}
           <p className="small">Make sure everyone agrees to be recorded.</p>
         </div>
         <div className="transcript-panel"><div className="panel-heading"><h2>Transcript</h2><span className="badge">{phase === 'recording' ? 'LIVE' : 'BROWSER TRANSCRIPT'}</span></div>
-          <textarea aria-label="Conversation transcript" readOnly={busy} value={transcript} onChange={e => { setTranscript(e.target.value); setTranscriptStatus('manual'); }} placeholder="Your words appear here as you speak. Review and edit the transcript after recording." />
+          <textarea aria-label="Conversation transcript" readOnly={busy} value={transcript} onChange={e => { transcriptRef.current = e.target.value; setTranscript(e.target.value); setTranscriptStatus('manual'); }} placeholder="Your words appear here as you speak. Review and edit the transcript after recording." />
           <p className="interim" aria-live="polite">{interim}</p>
           <div className="transcript-footer"><span>{transcript.trim() ? transcript.trim().split(/\s+/).length : 0} words</span><span>Editable after recording</span></div>
         </div>
       </section>
+      {taskOutput && <section aria-live="polite"><h2>Proposed tasks</h2><pre style={{whiteSpace: "pre-wrap"}}>{taskOutput}</pre></section>}
       {!browserRecognition() && <p className="message">Speech recognition is unavailable in this browser. You can record audio and enter a transcript manually.</p>}
       {!canRecord && <p className="message error" role="alert">Microphone recording requires localhost or HTTPS and a browser with MediaRecorder support.</p>}
       {error && <p className="message error" role="alert">{error}</p>}{notice && <p className="message" role="status">{notice}</p>}
       <section className="export-panel"><div><h2>A conversation to keep.</h2><p>Audio + transcript. One JSON file.</p>{audioUrl && <audio controls src={audioUrl} aria-label="Recording playback" />}</div><button className="download" disabled={!recording || busy || saving} onClick={() => void download(true)}>{saving ? 'Preparing…' : 'Save & download JSON'}</button><button className="download" disabled={!recording || busy || saving} onClick={() => void download(false)}>Download locally</button></section>
-      <p className="privacy">Recording and transcription use your browser's built-in APIs. Speech recognition may use your browser vendor's online service. Save & download stores the JSON on the backend; Download locally only saves to your device. Up to 10 MB of audio per recording.</p>
+      <p className="privacy">Recording and transcription use your browser's built-in APIs. Speech recognition may use your browser vendor's online service. When you stop recording, the JSON and the audio file are saved to the backend automatically. If the backend is offline, they download to your device instead. The buttons below save another copy, for example after you edit the transcript. Up to 10 MB of audio per recording.</p>
     </main><footer><span>Made for the moments worth remembering.</span><span>WINNIE / CONVERSATIONS</span></footer>
   </div>;
 }
