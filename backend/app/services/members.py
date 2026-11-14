@@ -114,6 +114,15 @@ class MemberStore:
             self.PUBLIC_FIELDS
         ).eq("active", True).order("display_name")).data
 
+    def previous_roles(self) -> dict[str, list[str]]:
+        """{code: previous roles} from members.previous_roles; {} until that column exists
+        (supabase/migrations/20261115100000_add_member_previous_roles.sql)."""
+        try:
+            rows = self._execute("members", lambda table: table.select("code,previous_roles")).data
+        except StorageUnavailable:
+            return {}
+        return {r["code"]: r["previous_roles"] for r in rows if r.get("previous_roles")}
+
     def list_roles(self):
         """Role text used to derive skills (services/member_skills.py). No contact details."""
         return self._execute("members", lambda table: table.select(

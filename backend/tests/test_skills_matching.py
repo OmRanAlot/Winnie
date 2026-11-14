@@ -102,10 +102,14 @@ class FakeMembers:
     def list_active(self):
         return [{"code": c, **m, "role_description": "", "skills": m["skills"]} for c, m in MEMBERS.items()]
 
+    def previous_roles(self):
+        return {}
+
 
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(route, "load_skills", dict)
+    monkeypatch.setattr(route, "load_previous_roles", dict)
     # Independent of the developer's .env: a fixed key and semester.
     monkeypatch.setattr(route, "Settings", lambda: SimpleNamespace(gemini_api_key="k", active_semester="fall-2026"))
     app.dependency_overrides[route.get_member_store] = FakeMembers
