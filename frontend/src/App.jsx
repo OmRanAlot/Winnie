@@ -19,7 +19,19 @@ const TASKS = [
   { id: 4, title: "Design GBM 1 flyer", assigned: "11/03/2026", start: "11/10/2026", due: "11/12/2026", finished: "", assignee: 7, status: "In-Progress", dep: null, day: 1, len: 2, notes: "" },
   { id: 5, title: "Post flyer on socials", assigned: "11/04/2026", start: "11/12/2026", due: "11/14/2026", finished: "", assignee: 8, status: "Upcoming", dep: 4, day: 3, len: 1.6, notes: "" },
   { id: 6, title: "Order snacks", assigned: "11/04/2026", start: "11/13/2026", due: "11/15/2026", finished: "", assignee: 6, status: "Upcoming", dep: 3, day: 4, len: 1.8, notes: "" },
+  { id: 7, title: "Draft RSVP form", assigned: "11/04/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 4, status: "Upcoming", dep: 1, day: 1, len: 1, notes: "" },
+  { id: 8, title: "Share RSVP form", assigned: "11/05/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 8, status: "Upcoming", dep: 7, day: 2, len: 1.2, notes: "" },
+  { id: 9, title: "Prepare event layout", assigned: "11/05/2026", start: "11/12/2026", due: "11/14/2026", finished: "", assignee: 5, status: "Upcoming", dep: 2, day: 3, len: 1.5, notes: "" },
+  { id: 10, title: "Print GBM 1 flyers", assigned: "11/06/2026", start: "11/12/2026", due: "11/13/2026", finished: "", assignee: 7, status: "Upcoming", dep: 4, day: 3, len: 1.2, notes: "" },
+  { id: 11, title: "Confirm catering delivery", assigned: "11/06/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 6, status: "Upcoming", dep: 6, day: 5, len: 1.5, notes: "" },
+  { id: 12, title: "Confirm GBM 1 event plan", assigned: "11/06/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 1, status: "Upcoming", dep: 1, day: 2, len: 1, notes: "" },
+  { id: 13, title: "Review final event budget", assigned: "11/07/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 1, status: "Upcoming", dep: 3, day: 4, len: 1, notes: "" },
+  { id: 14, title: "Prepare opening remarks", assigned: "11/07/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 2, status: "Upcoming", dep: 1, day: 2, len: 1, notes: "" },
+  { id: 15, title: "Send GBM 1 reminder", assigned: "11/08/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 4, len: 1, notes: "" },
+  { id: 16, title: "Review room layout", assigned: "11/08/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 9, day: 5, len: 1, notes: "" },
+  { id: 17, title: "Collect final RSVP count", assigned: "11/09/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 5, len: 1, notes: "" },
 ];
+const DUE_SOON_IDS = TASKS.filter((t) => t.status !== "Completed").map((t) => t.id);
 const MEETINGS = [
   { id: 1, date: "11/13/26", name: "Fall 2026 E-Board Meeting", tasks: [[ "Allocate budget for GBM 1", 3], ["Design GBM 1 flyer", 7]] },
   { id: 2, date: "11/10/26", name: "Finance Logistics Meeting", tasks: [["Book GBM 1 room", 5]] },
@@ -34,13 +46,17 @@ const task = (id) => TASKS.find((t) => t.id === id);
 /* ---------- Styles (palette pulled from the logo) ---------- */
 const CSS = `
 :root{--ink:#3a1410;--maroon:#5a0d05;--rust:#b5472a;--paper:#f3ebe2;--surface:#eadfd2;--hover:#e0d0bf;--line:#d6c4b2;--muted:#7a6459;--sun:#e0b25a;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--r:6px;--frame-band:clamp(12px,6.6vw,96px)}
+html{scrollbar-gutter:stable both-edges}
 *{box-sizing:border-box}
 body{margin:0;background:var(--maroon);color:var(--ink);font-family:"Kabel","Josefin Sans","Hanken Grotesk","Segoe UI",system-ui,sans-serif;font-size:16px;line-height:1.5}
-h1,h2,h3,h4,.big{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif;letter-spacing:2px}
-button.btn,button.pill,button.link,button.bell,button.back,button.chev,button.rb,.nav button,.hub button{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif}
+a{color:var(--maroon)}
+a:hover{color:var(--rust)}
+h1,h2,h3,h4,.big{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif;letter-spacing:.07em}
+button.btn,button.pill,button.link,button.bell,button.back,button.chev,button.rb,.nav button,.hub button{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif;letter-spacing:.07em}
 .app{max-width:calc(1120px + var(--frame-band) + var(--frame-band));width:calc(100% - var(--frame-band) - var(--frame-band));margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:var(--s5) var(--s6) 0;background:var(--paper);border-left:var(--frame-band) solid var(--rust);border-right:var(--frame-band) solid var(--rust)}
+.page-content{display:flex;flex:1;flex-direction:column;min-width:0;padding-bottom:48px}
 .top{display:flex;align-items:center;gap:var(--s4);min-height:56px;margin-bottom:var(--s4)}
-.top h1{flex:1;text-align:center;font-size:28px;margin:0;font-weight:700;letter-spacing:2px}
+.top h1{flex:1;text-align:center;font-size:28px;margin:0;font-weight:700;letter-spacing:.07em}
 .top .greeting{text-align:left;font-size:40px;font-weight:600}
 .top .sp{width:44px}
 .back{border:1.5px solid var(--ink);background:transparent;color:var(--ink);width:44px;height:44px;border-radius:50%;cursor:pointer;display:grid;place-items:center}
@@ -54,7 +70,7 @@ button{font-family:inherit}
 .link{background:none;border:0;color:var(--ink);text-decoration:underline;text-underline-offset:4px;font-size:16px;cursor:pointer;margin-top:var(--s2)}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
 .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s4);padding-bottom:var(--s6)}
-.center h2{font-size:40px;margin:0;font-weight:700;letter-spacing:2px;border-bottom:2px solid var(--ink);padding:0 var(--s6) var(--s3);width:min(640px,100%);text-align:center}
+.center h2{font-size:40px;margin:0;font-weight:700;letter-spacing:.07em;border-bottom:2px solid var(--ink);padding:0 var(--s6) var(--s3);width:min(640px,100%);text-align:center}
 .logo{width:132px;height:132px;object-fit:contain}
 .form{display:grid;grid-template-columns:auto 280px;gap:var(--s3) var(--s4);align-items:center;text-align:right;font-weight:600}
 .field{border:1px solid var(--line);background:#f9f4ee;border-radius:var(--r);padding:var(--s3) var(--s4);font-size:16px;color:var(--ink);font-family:inherit;width:100%}
@@ -80,30 +96,40 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .home{display:grid;grid-template-columns:1fr 320px;gap:var(--s6);flex:1;min-width:0}
 .home>div,.gantt{min-width:0;width:100%}
 .home h3{font-size:22px;margin:0 0 var(--s3);font-weight:650}
-.nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:var(--s5) calc(var(--s6) * -1) 0;padding:var(--s4) var(--s6);position:sticky;bottom:0}
+.gantt-controls{display:flex;align-items:center;justify-content:flex-end;gap:var(--s3);flex-wrap:wrap}
+.gantt-controls.admin-controls{justify-content:space-between}
+.nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:0 calc(var(--s6) * -1);padding:var(--s4) var(--s6);position:sticky;bottom:0}
 .nav button{border:1px solid var(--line);background:var(--paper);border-radius:var(--r);padding:var(--s3);font-size:20px;font-weight:600;color:var(--ink);cursor:pointer}
 .nav button:hover{background:var(--ink);color:var(--paper)}
 .bell{position:relative;background:none;border:0;color:var(--ink);cursor:pointer;padding:var(--s2);display:grid}
 .bell b{position:absolute;right:0;top:0;background:var(--rust);color:#fff;border-radius:50%;width:18px;height:18px;font-size:11px;display:grid;place-items:center}
 .due{display:flex;align-items:center;gap:var(--s3);margin-bottom:var(--s2)}
 .due .pill{flex:1;min-width:0}
-.st{font-size:13px;font-weight:650;padding-bottom:2px;border-bottom:3px solid var(--c);white-space:nowrap}
 .status-action{padding:var(--s2) var(--s3);font-size:13px;white-space:nowrap}
+.due-task{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status-switch{display:inline-flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s3);border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);font-size:12px;white-space:nowrap;cursor:pointer}
+.status-switch-track{position:relative;display:inline-block;width:34px;height:20px;flex:none;border-radius:999px;background:var(--line)}
+.status-switch-track i{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--ink);transition:left .15s}
+.status-switch.on .status-switch-track{background:var(--rust)}
+.status-switch.on .status-switch-track i{left:17px;background:#fff8f0}
 .gantt{background:var(--surface);border-radius:var(--r);overflow:hidden;font-size:13px}
 .gh,.gr{display:grid;grid-template-columns:150px 84px 84px 84px 1fr;align-items:center}
 .gh{background:var(--hover);font-weight:700;padding:var(--s2) var(--s3);gap:var(--s1)}
 .gr{padding:var(--s1) var(--s3);gap:var(--s1);height:40px;border-top:1px solid var(--line);cursor:pointer}
 .gr:hover{background:#f1e7dc}
+.gr.context{background:#f4e3d7;border-left:3px solid var(--rust)}
+.gr.context:hover{background:#ead2c1}
 .gr span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-weight:700}
 .lane{position:relative;height:100%;background:repeating-linear-gradient(90deg,transparent 0 calc(100%/7 - 1px),var(--line) calc(100%/7 - 1px) calc(100%/7))}
 .bar{position:absolute;top:10px;height:20px;border-radius:3px}
-.tog{display:flex;align-items:center;gap:var(--s2);justify-content:flex-end;font-size:14px;margin-bottom:var(--s2);cursor:pointer}
+.tog{display:flex;align-items:center;gap:var(--s2);justify-content:flex-end;font-size:14px;margin-bottom:var(--s2);padding:0;border:0;background:transparent;color:inherit;cursor:pointer}
 .sw{width:40px;height:22px;border-radius:99px;background:var(--line);position:relative}
 .sw i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--ink);transition:left .15s}
 .sw.on{background:var(--rust)}.sw.on i{left:21px;background:#fff8f0}
 .legend{display:flex;gap:var(--s4);margin-top:var(--s3);font-size:14px}
 .legend i{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:var(--s2);vertical-align:-2px}
+.legend .related-swatch{background:#f4e3d7;border:1px solid var(--rust)}
 .sec{font-size:22px;margin:var(--s5) 0 var(--s2);font-weight:650}
 .sum{display:grid;grid-template-columns:1fr 240px;gap:var(--s2) var(--s4);align-items:center;max-width:960px;margin:0 auto;width:100%}
 .sum .pill{display:flex;justify-content:space-between;align-items:center;width:100%;cursor:pointer}
@@ -134,7 +160,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 @media(max-width:800px){
   .app{padding:var(--s4)}
-  .nav{margin:var(--s4) calc(var(--s4) * -1) 0;padding:var(--s3) var(--s4);gap:var(--s2)}
+  .nav{margin:0 calc(var(--s4) * -1);padding:var(--s3) var(--s4);gap:var(--s2)}
   .home,.two,.cols,.score,.hub{grid-template-columns:1fr}
   .home,.home>div,.gantt,.gh,.gr{min-width:0;width:100%}
   .meeting-layout{grid-template-columns:1fr!important}
@@ -153,7 +179,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .top{gap:var(--s2);min-height:44px}
   .top .sp{width:20px}
   .top h1{font-size:clamp(16px,5vw,21px);letter-spacing:1px}
-  .top .greeting{font-size:clamp(21px,7vw,30px);letter-spacing:1px}
+  .top .greeting{font-size:clamp(21px,7vw,30px);letter-spacing:.07em}
   .adm{min-width:0;font-size:11px}
   .back{width:38px;height:38px}
   .center h2{font-size:clamp(24px,8vw,34px);padding-right:var(--s3);padding-left:var(--s3)}
@@ -163,6 +189,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .avatar.lg{width:80px;height:80px;font-size:26px}
   .id h2{font-size:clamp(21px,7vw,28px);overflow-wrap:anywhere}
   .home h3{font-size:19px}
+  .gantt-controls,.gantt-controls.admin-controls{align-items:flex-start;flex-direction:column}
   .nav{gap:var(--s1);padding:var(--s2)}
   .nav button{min-width:0;padding:var(--s2) 4px;font-size:clamp(12px,3.7vw,16px)}
   .due{gap:var(--s2)}
@@ -188,34 +215,56 @@ const Icon = ({ n, s = 22 }) => <svg width={s} height={s} viewBox="0 0 24 24" fi
 const Avatar = ({ p, cls = "", ...r }) => <button className={`avatar ${cls}`} title={p.name} aria-label={p.name} {...r}>{ini(p.name)}</button>;
 
 /* ---------- Gantt ---------- */
-function Gantt({ tasks, onOpen }) {
+function Gantt({ tasks, allTasks, isAdminView, onOpen }) {
   const [deps, setDeps] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const H = 40, W = 700, cw = W / 7;
-  const idx = Object.fromEntries(tasks.map((t, i) => [t.id, i]));
+  const baseTasks = isAdminView && showAll ? allTasks : tasks;
+  const taskIds = new Set(baseTasks.map((t) => t.id));
+  const ownTaskIds = new Set(tasks.map((t) => t.id));
+  const chartTasks = deps
+    ? allTasks.filter((t) => taskIds.has(t.id) || baseTasks.some((ownTask) => ownTask.dep === t.id || t.dep === ownTask.id))
+    : baseTasks;
+  const idx = Object.fromEntries(chartTasks.map((t, i) => [t.id, i]));
   return (
     <div>
-      <label className="tog" onClick={() => setDeps(!deps)}>Toggle dependency view <span className={`sw ${deps ? "on" : ""}`}><i /></span></label>
+      <div className={`gantt-controls${isAdminView ? " admin-controls" : ""}`}>
+        {isAdminView && (
+          <button type="button" className="tog" aria-pressed={showAll} aria-label={`Gantt view: ${showAll ? "all E-board tasks" : "my tasks"}. Switch view.`}
+            onClick={() => setShowAll((visible) => !visible)}>
+            {showAll ? "All E-board tasks" : "My tasks"} <span className={`sw ${showAll ? "on" : ""}`} aria-hidden="true"><i /></span>
+          </button>
+        )}
+        <button type="button" className="tog" aria-pressed={deps} onClick={() => setDeps((visible) => !visible)}>
+          Show linked tasks <span className={`sw ${deps ? "on" : ""}`} aria-hidden="true"><i /></span>
+        </button>
+      </div>
       <div className="gantt">
         <div className="gh"><span>Task title</span><span>Start date</span><span>Due date</span><span>Date finished</span>
           <div className="days">{DAYS.map((d) => <span key={d}>{d}</span>)}</div></div>
         <div style={{ position: "relative" }}>
-          {tasks.map((t) => (
-            <div className="gr" key={t.id} onClick={() => onOpen(t.id)}>
-              <span>{t.title}</span><span>{t.start.slice(0, 5)}</span><span>{t.due.slice(0, 5)}</span><span>{t.finished ? t.finished.slice(0, 5) : "—"}</span>
+          {chartTasks.map((t) => {
+            const isRelated = !taskIds.has(t.id);
+            const ownerName = person(t.assignee)?.name;
+            const showOwner = isRelated || (isAdminView && showAll && !ownTaskIds.has(t.id));
+            return (
+            <div className={`gr${isRelated ? " context" : ""}`} key={t.id} onClick={() => onOpen(t.id)}>
+              <span title={showOwner ? `${t.title} — ${ownerName}` : t.title}>{t.title}{showOwner && ownerName ? ` · ${ownerName}` : ""}</span><span>{t.start.slice(0, 5)}</span><span>{t.due.slice(0, 5)}</span><span>{t.finished ? t.finished.slice(0, 5) : "—"}</span>
               <div className="lane"><div className="bar" style={{ left: `${(t.day / 7) * 100}%`, width: `${(t.len / 7) * 100}%`, background: COLORS[t.status] }} /></div>
             </div>
-          ))}
+            );
+          })}
           {deps && (
-            <svg className="dependency-lines" viewBox={`0 0 ${W} ${tasks.length * H}`} preserveAspectRatio="none" style={{ height: tasks.length * H }}>
-              {tasks.filter((t) => t.dep && idx[t.dep] !== undefined).map((t) => {
-                const a = task(t.dep), x1 = (a.day + a.len) * cw, y1 = idx[a.id] * H + H / 2, x2 = (t.day + 0.1) * cw, y2 = idx[t.id] * H + 9;
+            <svg className="dependency-lines" viewBox={`0 0 ${W} ${chartTasks.length * H}`} preserveAspectRatio="none" style={{ height: chartTasks.length * H }}>
+              {chartTasks.filter((t) => t.dep && idx[t.dep] !== undefined).map((t) => {
+                const a = chartTasks.find((item) => item.id === t.dep), x1 = (a.day + a.len) * cw, y1 = idx[a.id] * H + H / 2, x2 = (t.day + 0.1) * cw, y2 = idx[t.id] * H + 9;
                 return <path key={t.id} d={`M${x1} ${y1} H${x1 + 8} V${y2 - 4} H${x2} V${y2}`} fill="none" stroke="#4a1109" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />;
               })}
             </svg>
           )}
         </div>
       </div>
-      <div className="legend">{Object.entries(COLORS).map(([k, c]) => <span key={k}><i style={{ background: c }} />{k}</span>)}</div>
+      <div className="legend">{Object.entries(COLORS).map(([k, c]) => <span key={k}><i style={{ background: c }} />{k}</span>)}{deps && !showAll && <span><i className="related-swatch" />Related task</span>}{isAdminView && showAll && <span><i className="related-swatch" />Other E-board tasks</span>}</div>
     </div>
   );
 }
@@ -298,24 +347,29 @@ export default function App() {
       page = (<div className="center"><h2 style={{ lineHeight: 1.3 }}>Your account has been successfully registered!</h2><p style={{ fontSize: 20, margin: 0 }}>You can now login with your registered credentials.</p><button className="link" onClick={home}>Back to Home</button></div>);
       break;
     case "dash": {
-      const mine = viewAs ? tasks.filter((t) => t.assignee === viewAs) : isAdminView ? tasks : tasks.filter((t) => t.assignee === 2 || t.dep);
-      const soon = tasks.filter((t) => t.status !== "Completed").slice(0, isAdminView ? 3 : 4);
+      const mine = tasks.filter((t) => t.assignee === me.id);
+      const soon = DUE_SOON_IDS.slice(0, isAdminView ? 3 : 4).map((id) => tasks.find((t) => t.id === id));
       page = (<>
         <div className="top"><h1 className="greeting">Hey {me.name.split(" ")[0]}!</h1>
           {viewAs ? <button className="btn alt" onClick={() => { setViewAs(null); setStack([{ n: "dash" }, { n: "admin" }]); }}>BACK TO ADMIN</button>
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
             : <button className="bell" aria-label="Notifications" onClick={() => setModal("notif")}><Icon n="bell" s={26} /><b>1</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
-        <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} onOpen={(id) => go("task", { id })} /></div>
+        <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} allTasks={tasks} isAdminView={isAdminView} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
             {isAdminView && <Avatar p={person(t.assignee)} cls="sm" onClick={() => go("profile", { id: t.assignee })} />}
-            <button className="pill" onClick={() => go("task", { id: t.id })}>{t.title}</button>
-            {!isAdminView && <span className="st" style={{ "--c": COLORS[t.status] }}>{t.status}</span>}
-            <button className="btn alt status-action" aria-label={`Mark ${t.title} ${t.status === "Upcoming" ? "in progress" : "completed"}`}
-              onClick={() => setTaskStatus(t.id, t.status === "Upcoming" ? "In-Progress" : "Completed")}>
-              {t.status === "Upcoming" ? "Start" : "Complete"}
-            </button></div>))}</div></div>
-        <Nav /></>);
+            <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
+            {t.status === "Upcoming"
+              ? <button className="btn alt status-action" aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>Start</button>
+              : <button type="button" role="switch" className={`status-switch ${t.status === "Completed" ? "on" : ""}`}
+                aria-checked={t.status === "Completed"}
+                aria-label={`Mark ${t.title} ${t.status === "Completed" ? "in progress" : "completed"}`}
+                onClick={() => setTaskStatus(t.id, t.status === "Completed" ? "In-Progress" : "Completed")}>
+                <span className="status-switch-track" aria-hidden="true"><i /></span>
+                {t.status === "Completed" ? "Completed" : "In progress"}
+              </button>}
+          </div>))}</div></div>
+      </>);
       break;
     }
     case "meetings":
@@ -435,7 +489,7 @@ export default function App() {
 
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
-    <div className="app"><style>{CSS}</style>{page}
+    <div className="app"><style>{CSS}</style><main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
       {modal === "notif" && (<div className="modal"><div className="box"><h4>Incoming task from Sam Rivera:</h4>Task Reassignment Request:<br />Sam Rivera → {me.name}<br />“Allocate Budget for GBM 1”
         <div className="acts"><button className="btn out" onClick={() => { setModal(null); say("Task accepted"); }}>Accept</button><button className="btn out" onClick={() => { setModal(null); say("Task declined"); }}>Decline</button></div></div></div>)}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
