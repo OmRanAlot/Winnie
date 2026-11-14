@@ -1,7 +1,11 @@
-import { useState, Fragment } from "react";
+import { useState, useEffect, Fragment } from "react";
+import { getAssignments, getMembers, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
+import Recorder from "./Recorder.jsx";
 
 /* ---------- Placeholder data (replace with backend responses) ---------- */
-const PEOPLE = [
+// Sample people: shown when the backend is unreachable, and still used by the sample
+// Meetings / Requests screens. Real members come from GET /api/members.
+const SAMPLE_PEOPLE = [
   { id: 1, name: "Maya Patel", role: "President", skills: ["Leadership", "Public speaking", "Budgeting"] },
   { id: 2, name: "Jordan Lee", role: "Vice President", skills: ["Planning", "Outreach", "Docs"] },
   { id: 3, name: "Sam Rivera", role: "Treasurer", skills: ["Budgeting", "Spreadsheets", "Sponsorship"] },
@@ -11,8 +15,9 @@ const PEOPLE = [
   { id: 7, name: "Riley Chen", role: "PR Chair", skills: ["Design", "Social media", "Writing"] },
   { id: 8, name: "Taylor Brooks", role: "PR Chair", skills: ["Photography", "Writing", "Outreach"] },
 ];
+// Sample tasks, shown only when the backend can't be reached. Real tasks come from GET /api/tasks.
 // day = start column (0 = Mon), len = days wide, dep = id of task it depends on
-const TASKS = [
+const SAMPLE_TASKS = [
   { id: 1, title: "Draft GBM 1 agenda", assigned: "11/02/2026", start: "11/09/2026", due: "11/10/2026", finished: "11/10/2026", assignee: 2, status: "Completed", dep: null, day: 0, len: 1.2, notes: "" },
   { id: 2, title: "Book GBM 1 room", assigned: "11/02/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 5, status: "In-Progress", dep: 1, day: 1, len: 1.2, notes: "Waiting on facilities reply." },
   { id: 3, title: "Allocate budget for GBM 1", assigned: "11/03/2026", start: "11/11/2026", due: "11/13/2026", finished: "", assignee: 3, status: "Upcoming", dep: 2, day: 2, len: 2, notes: "" },
@@ -40,8 +45,16 @@ const MEETINGS = [
 const REQUESTS = [{ id: 1, task: 3, from: 3, to: 1 }, { id: 2, task: 5, from: 8, to: 7 }, { id: 3, task: 6, from: 6, to: 5 }];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
-const person = (id) => PEOPLE.find((p) => p.id === id);
-const task = (id) => TASKS.find((t) => t.id === id);
+// Kept in sync with App's state so the helpers below see live data; sample ids still resolve
+// for the screens that are not connected yet.
+let currentPeople = SAMPLE_PEOPLE;
+let currentTasks = SAMPLE_TASKS;
+const person = (id) => currentPeople.find((p) => p.id === id) ?? SAMPLE_PEOPLE.find((p) => p.id === id);
+const task = (id) => currentTasks.find((t) => t.id === id) ?? SAMPLE_TASKS.find((t) => t.id === id);
+const owns = (t, id) => t.assignee === id || (t.assignees ?? []).includes(id);
+const seedOf = (id) => [...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0);
+// Live tasks have no member link yet: fall back to the tracker's assignee cell.
+const who = (t) => person(t.assignee) ?? { id: null, name: t.assigneeText ? t.assigneeText.split("\n")[0] : "Unassigned" };
 
 /* ---------- Styles (palette pulled from the logo) ---------- */
 const CSS = `
@@ -215,19 +228,38 @@ const Icon = ({ n, s = 22 }) => <svg width={s} height={s} viewBox="0 0 24 24" fi
 const Avatar = ({ p, cls = "", ...r }) => <button className={`avatar ${cls}`} title={p.name} aria-label={p.name} {...r}>{ini(p.name)}</button>;
 
 /* ---------- Gantt ---------- */
-function Gantt({ tasks, allTasks, isAdminView, onOpen }) {
+function Gantt({ tasks: all, allTasks = all, isAdminView = false, onOpen, who: owner }) {
   const [deps, setDeps] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [week, setWeek] = useState(0); // 0 = this week, -1 = last week, 1 = next week
   const H = 40, W = 700, cw = W / 7;
-  const baseTasks = isAdminView && showAll ? allTasks : tasks;
+  // Live tasks carry a real due date: place each one on the selected week's Mon..Sun columns.
+  // Sample tasks (no dueIso) keep their hand-set day/len.
+  const dated = all.some((t) => t.dueIso);
+  const monday = weekStart();
+  monday.setDate(monday.getDate() + 7 * week);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  const fmt = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const weekTasks = (list) => !dated ? list : list
+    .filter((t) => t.dueIso)
+    .map((t) => ({ ...t, day: Math.round((new Date(`${t.dueIso}T00:00:00`) - monday) / 86400000), len: 1 }))
+    .filter((t) => t.day >= 0 && t.day < 7)
+    .sort((a, b) => a.day - b.day);
+  const baseTasks = weekTasks(isAdminView && showAll ? allTasks : all);
   const taskIds = new Set(baseTasks.map((t) => t.id));
-  const ownTaskIds = new Set(tasks.map((t) => t.id));
+  const ownTaskIds = new Set(weekTasks(all).map((t) => t.id));
+  const weeklyAllTasks = weekTasks(allTasks);
   const chartTasks = deps
-    ? allTasks.filter((t) => taskIds.has(t.id) || baseTasks.some((ownTask) => ownTask.dep === t.id || t.dep === ownTask.id))
+    ? weeklyAllTasks.filter((t) => taskIds.has(t.id) || baseTasks.some((ownTask) => ownTask.dep === t.id || t.dep === ownTask.id))
     : baseTasks;
   const idx = Object.fromEntries(chartTasks.map((t, i) => [t.id, i]));
   return (
     <div>
+      {dated && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 6 }}>
+        <button className="btn alt" style={{ padding: "4px 14px" }} aria-label="Previous week" onClick={() => setWeek(week - 1)}>◀</button>
+        <b>{fmt(monday)} – {fmt(sunday)}{week === 0 ? " (this week)" : ""}</b>
+        <button className="btn alt" style={{ padding: "4px 14px" }} aria-label="Next week" onClick={() => setWeek(week + 1)}>▶</button>
+      </div>}
       <div className={`gantt-controls${isAdminView ? " admin-controls" : ""}`}>
         {isAdminView && (
           <button type="button" className="tog" aria-pressed={showAll} aria-label={`Gantt view: ${showAll ? "all E-board tasks" : "my tasks"}. Switch view.`}
@@ -254,6 +286,8 @@ function Gantt({ tasks, allTasks, isAdminView, onOpen }) {
             </div>
             );
           })}
+          {!baseTasks.length && <p style={{ textAlign: "center", padding: "18px 0", margin: 0 }}>
+            No tasks due {owner ? `for ${owner} ` : ""}this week. Use ◀ ▶ to see other weeks.</p>}
           {deps && (
             <svg className="dependency-lines" viewBox={`0 0 ${W} ${chartTasks.length * H}`} preserveAspectRatio="none" style={{ height: chartTasks.length * H }}>
               {chartTasks.filter((t) => t.dep && idx[t.dep] !== undefined).map((t) => {
@@ -277,19 +311,49 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState("");
   const [reqs, setReqs] = useState(REQUESTS);
-  const [tasks, setTasks] = useState(TASKS);
   const [open, setOpen] = useState({});
   const [notes, setNotes] = useState({});
+  const [recorder, setRecorder] = useState(null); // meeting kind being recorded, or null
+  const [TASKS, setTasks] = useState(SAMPLE_TASKS);
+  const [PEOPLE, setPeople] = useState(SAMPLE_PEOPLE);
+  const tasks = TASKS; // the redesign's screens read `tasks`; same live list
+  const [source, setSource] = useState("Loading tasks…");
+  const live = source.startsWith("Live");
+  currentTasks = TASKS;
+  currentPeople = PEOPLE;
+  useEffect(() => {
+    Promise.all([getTasks(), getMembers(), getAssignments().catch(() => null)])
+      .then(([ts, people, assignments]) => {
+        const byTask = assignments?.byTask ?? {};
+        // First recognized member is the "assignee" the design shows; all of them can see the task.
+        setTasks(ts.map((t) => ({ ...t, assignees: byTask[t.id] ?? [], assignee: byTask[t.id]?.[0] ?? null })));
+        if (people.length) setPeople(people);
+        const linked = Object.values(byTask).filter((c) => c && c.length).length;
+        setSource(`Live: ${ts.length} tasks, ${people.length} members, ${linked} tasks linked to people`);
+      })
+      .catch((e) => setSource(`Sample data (${e.message})`));
+  }, []);
+  const changeStatus = async (t, status) => {
+    if (!live) { say("Sample data: start the backend to save changes"); return; }
+    const before = TASKS;
+    setTasks(TASKS.map((x) => (x.id === t.id ? { ...x, status } : x)));
+    try {
+      const saved = await updateTaskStatus(t.id, status);
+      setTasks((ts) => ts.map((x) => (x.id === t.id ? saved : x)));
+      say(`Saved: “${t.title}” is ${status}`);
+    } catch (e) { setTasks(before); say(`Not saved: ${e.message}`); }
+  };
   const p = stack[stack.length - 1];
   const go = (n, x = {}) => setStack((s) => [...s, { n, ...x }]);
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   const home = () => { setStack([{ n: "landing" }]); setViewAs(null); setAdmin(false); };
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
-  const setTaskStatus = (id, status) => {
-    setTasks((current) => current.map((t) => t.id === id ? { ...t, status } : t));
-  };
+  // Status buttons in the redesign: save through the same path as the task page.
+  const setTaskStatus = (id, status) => { const t = task(id); if (t) changeStatus(t, status); };
   const isAdminView = admin && !viewAs;
-  const me = viewAs ? person(viewAs) : person(isAdminView ? 1 : 2);
+  // No real login yet: admins see the President's view, everyone else the Vice President's.
+  const byRole = (role) => PEOPLE.find((q) => q.role === role);
+  const me = (viewAs ? person(viewAs) : live ? byRole(isAdminView ? "President" : "Vice President") : person(isAdminView ? 1 : 2)) ?? PEOPLE[0];
 
   const Top = ({ title, tag, noBack }) => (
     <div className="top">
@@ -303,9 +367,9 @@ export default function App() {
   const Grid = ({ title, tag, onPick, extra }) => (
     <>
       <Top title={title} tag={tag} />
-      <div className="grid2"><div className="divider" />
-        {PEOPLE.map((q, i) => (
-          <div className="row" key={q.id} style={{ gridColumn: i < 4 ? 1 : 3, gridRow: (i % 4) + 1 }}>
+      <div className="grid2"><div className="divider" style={{ gridRow: `1/${Math.ceil(PEOPLE.length / 2) + 1}` }} />
+        {PEOPLE.map((q, i, all) => (
+          <div className="row" key={q.id} style={{ gridColumn: i < Math.ceil(all.length / 2) ? 1 : 3, gridRow: (i % Math.ceil(all.length / 2)) + 1 }}>
             <Avatar p={q} onClick={() => onPick(q)} /><button className="pill" onClick={() => onPick(q)}>{q.name} | {q.role}</button>
           </div>
         ))}
@@ -347,17 +411,20 @@ export default function App() {
       page = (<div className="center"><h2 style={{ lineHeight: 1.3 }}>Your account has been successfully registered!</h2><p style={{ fontSize: 20, margin: 0 }}>You can now login with your registered credentials.</p><button className="link" onClick={home}>Back to Home</button></div>);
       break;
     case "dash": {
-      const mine = tasks.filter((t) => t.assignee === me.id);
-      const soon = DUE_SOON_IDS.slice(0, isAdminView ? 3 : 4).map((id) => tasks.find((t) => t.id === id));
+      // Live: the Gantt picks the week itself; admins see everyone's tasks, members their own.
+      const mine = live ? TASKS.filter((t) => isAdminView || owns(t, me.id))
+        : viewAs ? TASKS.filter((t) => t.assignee === viewAs) : isAdminView ? TASKS : TASKS.filter((t) => t.assignee === 2 || t.dep);
+      const pending = TASKS.filter((t) => t.status !== "Completed");
+      const soon = (live ? [...pending].sort((a, b) => (a.dueIso ?? "9999").localeCompare(b.dueIso ?? "9999")) : pending).slice(0, isAdminView ? 3 : 4);
       page = (<>
         <div className="top"><h1 className="greeting">Hey {me.name.split(" ")[0]}!</h1>
           {viewAs ? <button className="btn alt" onClick={() => { setViewAs(null); setStack([{ n: "dash" }, { n: "admin" }]); }}>BACK TO ADMIN</button>
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
             : <button className="bell" aria-label="Notifications" onClick={() => setModal("notif")}><Icon n="bell" s={26} /><b>1</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
-        <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} allTasks={tasks} isAdminView={isAdminView} onOpen={(id) => go("task", { id })} /></div>
+        <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} allTasks={TASKS} isAdminView={isAdminView} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
-            {isAdminView && <Avatar p={person(t.assignee)} cls="sm" onClick={() => go("profile", { id: t.assignee })} />}
+            {isAdminView && <Avatar p={who(t)} cls="sm" onClick={() => t.assignee && go("profile", { id: t.assignee })} />}
             <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
             {t.status === "Upcoming"
               ? <button className="btn alt status-action" aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>Start</button>
@@ -369,15 +436,15 @@ export default function App() {
                 {t.status === "Completed" ? "Completed" : "In progress"}
               </button>}
           </div>))}</div></div>
-      </>);
+        <Nav /></>);
       break;
     }
     case "meetings":
       page = (<><Top title="Meetings" /><div style={{ textAlign: "right", marginTop: -50, marginBottom: 20, fontSize: 20, pointerEvents: "none" }}>11/14/2026</div>
         <div className="two meeting-layout" style={{ gridTemplateColumns: "180px 1fr", gap: 24 }}>
-          <div className="side panel">{["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" onClick={() => say(`${k} recording started (placeholder)`)}>{k}</button>)}</div>
+          <div className="side panel">{["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" onClick={() => setRecorder(k)}>{k}</button>)}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            {["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" style={{ padding: 28, display: "flex", alignItems: "center", gap: 10 }} onClick={() => say(`New ${k.toLowerCase()} recording — backend will store notes & transcript`)}><Icon n="mic" />Create a new recording</button>)}
+            {["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" style={{ padding: 28, display: "flex", alignItems: "center", gap: 10 }} onClick={() => setRecorder(k)}><Icon n="mic" />Create a new {k.toLowerCase()} recording</button>)}
             <button className="btn alt" style={{ alignSelf: "flex-end" }} onClick={() => go("past")}>Past Meetings</button></div></div></>);
       break;
     case "past":
@@ -398,19 +465,22 @@ export default function App() {
       page = <Grid title="Profiles" onPick={(q) => go("profile", { id: q.id })} />;
       break;
     case "profile": {
-      const q = person(p.id), ts = tasks.filter((t) => t.assignee === q.id);
+      const q = person(p.id), ts = TASKS.filter((t) => owns(t, q.id));
       page = (<><Top title="Profile" tag={isAdminView} />
         <div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div><h2 style={isAdminView ? { cursor: "pointer" } : {}} onClick={() => isAdminView && setModal({ view: q })}>{q.name}</h2><p>{q.role}</p></div></div>
         <div className="two"><div className="panel"><h3>Tasks</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.title}</a> ({t.status})</li>)}{!ts.length && <li className="none">No tasks assigned yet.</li>}</ul></div>
-          <div className="panel"><h3>Skills</h3><ul>{q.skills.map((s) => <li key={s}>{s}</li>)}</ul></div></div></>);
+          <div className="panel"><h3>Skills</h3><ul>{q.skills.map((s) => <li key={s}>{s}</li>)}{!q.skills.length && <li>No skills listed yet</li>}</ul>
+            {q.description && <p style={{ fontSize: 15, lineHeight: 1.5 }}>{q.description}</p>}</div></div></>);
       break;
     }
     case "task": {
-      const t = tasks.find((item) => item.id === p.id), dep = t.dep ? tasks.find((item) => item.id === t.dep) : null;
-      const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due], ["Assignee", person(t.assignee).name], ["Status", t.status], ["Dependency", dep ? `Depends on “${dep.title}” (${person(dep.assignee).name})` : "None"]];
+      const t = task(p.id);
+      if (!t) { page = (<><Top title="Task not found" /><p style={{ textAlign: "center", fontSize: 20 }}>This task isn’t in the current data (meeting links still use sample tasks).</p></>); break; }
+      const dep = t.dep ? task(t.dep) : null;
+      const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due], ["Assignee", t.assigneeText || who(t).name], ["Status", t.status], ["Dependency", dep ? `Depends on “${dep.title}” (${who(dep).name})` : "None"]];
       page = (<><Top title={t.title} /><div className="two" style={{ maxWidth: 960, margin: "10px auto" }}>
         <div className="panel"><div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
-          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} onChange={(e) => setTaskStatus(t.id, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
+          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
         <div className="panel"><h3>Notes</h3><textarea className="field" style={{ minHeight: 200 }} placeholder="Add notes for yourself or an admin…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
           <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" onClick={() => say("Notes saved (placeholder)")}>Save notes</button></div></div></div></>);
       break;
@@ -421,8 +491,8 @@ export default function App() {
         {tasks.filter((t) => t.status === st).map((t) => (<Fragment key={t.id}>
           <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
-          <div className="row" style={{ gap: 8 }}>{avs && PEOPLE.filter((q) => q.id !== t.assignee && q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />)}</div>
-          {open[t.id] && <div className="det">Assignee: {person(t.assignee).name} · Status: {t.status} · Assigned {t.assigned}</div>}</Fragment>))}{!tasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
+          <div className="row" style={{ gap: 8 }}>{avs && PEOPLE.filter((q) => !owns(t, q.id) && (!q.skills.length || q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s)))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />)}</div>
+          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!tasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
@@ -439,7 +509,7 @@ export default function App() {
     case "edit": {
       const q = person(p.id);
       page = (<><Top title="Edit Profile" tag /><div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div style={{ flex: 1 }}><input className="field" defaultValue={q.name} aria-label="Name" style={{ maxWidth: 500, fontSize: 26 }} /><input className="field" defaultValue={q.role} aria-label="Position" style={{ maxWidth: 500, marginTop: 8 }} /></div></div>
-        <div className="two"><div className="panel"><h3>Edit Tasks</h3><ul>{tasks.filter((t) => t.assignee === q.id).map((t) => <li key={t.id}>{t.title} ({t.status})</li>)}</ul></div>
+        <div className="two"><div className="panel"><h3>Edit Tasks</h3><ul>{TASKS.filter((t) => owns(t, q.id)).map((t) => <li key={t.id}>{t.title} ({t.status})</li>)}</ul></div>
           <div className="panel"><h3>Edit Skills</h3><ul>{q.skills.map((s) => <li key={s}><input className="field" defaultValue={s} style={{ padding: "4px 12px", width: "80%" }} /></li>)}</ul></div></div>
         <div style={{ textAlign: "center", marginTop: 18 }}><button className="btn" onClick={() => say("Profile saved (placeholder)")}>Save changes</button></div></>);
       break;
@@ -448,7 +518,7 @@ export default function App() {
       page = <Grid title="Performance Evaluations" tag onPick={(q) => go("eval", { id: q.id })} />;
       break;
     case "eval": {
-      const q = person(p.id), seed = q.id * 7;
+      const q = person(p.id), seed = seedOf(q.id) * 7;
       const M = [["On-time task completion", 70 + (seed % 28)], ["Meeting attendance", 66 + ((seed * 3) % 32)], ["Task follow-through (not reassigned)", 74 + ((seed * 5) % 24)], ["Deadline buffer (avg. early completion)", 55 + ((seed * 2) % 40)]];
       const overall = Math.round(M.reduce((a, b) => a + b[1], 0) / M.length);
       page = (<><Top title={`${q.name}'s Evaluation`} tag /><Ident q={q} />
@@ -461,7 +531,7 @@ export default function App() {
       page = <Grid title="Task Metrics" tag onPick={(q) => go("tm", { id: q.id })} extra={<div style={{ textAlign: "center", marginTop: 20 }}><button className="btn alt" onClick={() => go("reassigned")}>Tasks Re-assigned</button></div>} />;
       break;
     case "tm": {
-      const q = person(p.id), done = tasks.filter((t) => t.status === "Completed");
+      const q = person(p.id), done = TASKS.filter((t) => t.status === "Completed" && (!live || owns(t, q.id)));
       page = (<><Top title={`${q.name}'s Task Metrics`} tag /><Ident q={q} /><h3 style={{ textAlign: "center", fontSize: 26, margin: "0 0 10px" }}>Tasks Completed: {done.length}</h3>
         {done.map((t) => <div className="due" key={t.id}><span style={{ width: 110, fontSize: 18 }}>{t.finished}:</span><button className="pill" onClick={() => go("task", { id: t.id })}>{t.title}</button></div>)}</>);
       break;
@@ -496,7 +566,9 @@ export default function App() {
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
       {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br /><small>Your request goes to an admin for approval.</small>
         <div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button><button className="btn" onClick={() => { setModal(null); say("Reassignment request sent to admin"); }}>Send request</button></div></div></div>)}
+      {recorder && <Recorder kind={recorder} onClose={() => setRecorder(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
+      <div role="status" style={{ position: "fixed", top: 8, right: 12, fontSize: 12, padding: "4px 10px", borderRadius: 999, background: live ? "#7fb08a" : "#e8a36b", color: "#fff", fontWeight: 700 }}>{source}</div>
     </div>
   );
 }
