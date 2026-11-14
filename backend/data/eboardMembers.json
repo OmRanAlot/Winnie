@@ -1,0 +1,37 @@
+{
+    "President":{
+        "name": "Jane Doe",
+        "number": "1-123-456-7890",
+        "email" : "testexample@gmail.com"
+    },
+    "Vice President":{
+        "name": "Bob Newman",
+        "number": "1-123-456-7890",
+        "email" : "testexample@gmail.com"
+    },
+    "Secretary":{
+        "name": "Alice",
+        "number": "1-123-456-7890",
+        "email" : "testexample@gmail.com"
+    },
+    "Treasurer":{
+        "name": "Sam",
+        "number": "1-123-456-7890",
+        "email" : "testexample@gmail.com"
+    },
+    "Industry Partnership":{
+        "name": "Boba",
+        "number": "1-123-456-7890",
+        "email" : "testexample@gmail.com"
+    },
+    "PR1":{
+        "name": "Tofu",
+        "number": "1-123-456-7890",
+        "email" : "testexample@gmail.com"
+    },
+    "PR2":{
+        "name": "Luffy",
+        "number": "1-123-456-7890",
+        "email" : "testexample@gmail.com"
+    }
+}
