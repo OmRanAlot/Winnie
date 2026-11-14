@@ -77,7 +77,7 @@ $projectRoles = @(
     "roles/run.admin",                         # deploy the service
     "roles/cloudbuild.builds.editor",          # build the image from source
     "roles/artifactregistry.writer",           # push it
-    "roles/storage.objectAdmin",               # upload the source archive
+    "roles/storage.admin",                     # create/read the run-sources bucket and upload the source archive
     "roles/logging.viewer",                    # stream build logs
     "roles/serviceusage.serviceUsageConsumer", # use project APIs
     "roles/firebasehosting.admin"              # firebase deploy --only hosting
