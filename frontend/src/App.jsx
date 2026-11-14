@@ -102,7 +102,7 @@ const compareByDueDate = (a, b) => {
 const who = (t) => person(t.assignee) ?? { id: null, name: t.assigneeText ? t.assigneeText.split("\n")[0] : "Unassigned" };
 
 /* ---------- Styles (palette pulled from the logo) ---------- */
-const CSS = `
+export const CSS = `
 :root{--ink:#3a1410;--maroon:#5a0d05;--rust:#b5472a;--paper:#f3ebe2;--surface:#eadfd2;--hover:#e0d0bf;--line:#d6c4b2;--muted:#7a6459;--sun:#e0b25a;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--r:6px;--frame-band:clamp(12px,6.6vw,96px)}
 html{scrollbar-gutter:stable both-edges}
 *{box-sizing:border-box}
