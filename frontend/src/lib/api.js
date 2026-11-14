@@ -87,7 +87,7 @@ export async function getMembers() {
   return body.data.map((m) => ({
     id: m.code,
     name: m.display_name,
-    role: m.board_role,
+    role: m.board_role === "PR Chair" ? "Public Relations Chair" : m.board_role,
     description: m.role_description,
     skills: m.skills ?? [],
     technical: m.technical_skills ?? [],
