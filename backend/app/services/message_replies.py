@@ -1,0 +1,58 @@
+"""Personal task replies for authenticated direct messages; no identity self-enrollment."""
+
+from app.services.members import AliasConflict, assignment_members, normalize_sender
+
+MENU = (
+    "Hi! I am Winnie. Choose an option:\n"
+    "1. Show my five earliest-due unfinished tasks\n"
+    "2. Check who I am linked to\n"
+    "You can also text tasks, whoami, or ping."
+)
+
+
+def personal_reply(message, members, tasks, semester_code: str) -> str:
+    command = message.text.strip().lower()
+    if message.conversation_type != "dm":
+        return "Please text me in a direct conversation to view your identity or personal tasks."
+    if message.platform != "imessage" or not message.sender_id:
+        return "I could not identify the sender. Please use your registered iMessage account."
+    member = members.resolve(message.platform, message.sender_id)
+    if command in ("2", "whoami"):
+        if member:
+            return f"You are linked to {member['display_name']} ({member['code']})."
+        return (
+            "Your messaging account is not linked to a member yet. Ask the project admin to link:\n"
+            f"Platform: {message.platform}\nSender ID: {normalize_sender(message.sender_id)}"
+        )
+    if not member:
+        return "Your messaging account is not linked yet. Text whoami for setup details."
+    aliases = members.aliases(semester_code)
+    selected, unresolved = [], False
+    for task in tasks.unfinished_for_semester(semester_code):
+        try:
+            assigned = assignment_members(task.get("assignee_text", ""), aliases)
+        except AliasConflict:
+            return "Member assignment setup needs review. Please contact the project admin."
+        if assigned is None:
+            unresolved = True
+        elif member["code"] in assigned:
+            selected.append(task)
+    # Sort again for deterministic results even if a test/store adapter returns unsorted data.
+    selected.sort(key=lambda task: (
+        task.get("due_date") is None, task.get("due_date") or "", str(task.get("id", "")),
+    ))
+    if not selected:
+        reply = f"No unfinished tasks matched your verified assignments for {semester_code}."
+    else:
+        lines = [f"{member['display_name']}, your earliest-due unfinished tasks ({semester_code}):"]
+        for number, task in enumerate(selected[:5], 1):
+            deadline = task.get("due_date") or "No fixed deadline"
+            title = " ".join(task["title"].split())
+            if len(title) > 160:
+                title = title[:157] + "..."
+            status = task["status"].replace("_", " ")
+            lines.append(f"{number}. {title} - {deadline} [{status}]")
+        reply = "\n".join(lines)
+    if unresolved:
+        reply += "\nSome tracker assignments still need member mapping; this list may be incomplete."
+    return reply
