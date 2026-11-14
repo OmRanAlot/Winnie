@@ -1,4 +1,10 @@
-"""Validate self-contained recordings produced by the browser."""
+"""API request/response shapes: what crosses HTTP between the frontend and the backend.
+
+Currently contains only the browser Recording (audio + transcript saved as one JSON file).
+Used by routes/recordings.py. The planned {success, data, error, meta} envelope and per-feature
+shapes are described in app/__init__.py. These shapes are the contract the replacement frontend
+is built against, so change them deliberately.
+"""
 
 import base64
 import binascii

@@ -60,7 +60,7 @@ def test_missing_fields_and_non_json(client):
 
 
 def test_body_limit(client, monkeypatch):
-    monkeypatch.setattr("app.api.routes.recordings.MAX_JSON_BYTES", 10)
+    monkeypatch.setattr("app.routes.recordings.MAX_JSON_BYTES", 10)
     assert client.post("/api/recordings", json=payload()).status_code == 413
 
 
@@ -68,7 +68,7 @@ def test_storage_failure(client, monkeypatch):
     def fail(*args):
         raise OSError("disk full")
 
-    monkeypatch.setattr("app.api.routes.recordings.save_recording", fail)
+    monkeypatch.setattr("app.routes.recordings.save_recording", fail)
     response = client.post("/api/recordings", json=payload())
     assert response.status_code == 503
     assert "download locally" in response.json()["error"]["message"]

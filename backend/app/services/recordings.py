@@ -1,7 +1,13 @@
+"""Save a validated browser recording to disk as one JSON file.
+
+Files go to backend/data/recordings/conversation-<uuid>.json (gitignored: they contain private
+audio and transcripts). Called by routes/recordings.py.
+"""
+
 from pathlib import Path
 from uuid import uuid4
 
-from app.schemas.recording import Recording
+from app.schemas import Recording
 
 RECORDINGS_DIR = Path(__file__).resolve().parents[2] / "data" / "recordings"
 

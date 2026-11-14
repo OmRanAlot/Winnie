@@ -1,3 +1,13 @@
+// The whole app: a single-page conversation recorder.
+//
+// Flow: record the microphone (MediaRecorder) while live-transcribing the speech
+// (lib/speech.ts), let the user edit the transcript, then either
+//   - "Save & download JSON": POST the audio + transcript to the backend (lib/api.ts ->
+//     backend POST /api/recordings) and also download a copy, or
+//   - "Download locally": download the JSON without contacting the backend.
+// The JSON shape is defined by backend/app/schemas.py (Recording); keep them in sync.
+//
+// PLACEHOLDER: the UX team's design will replace this frontend, so don't invest here.
 import { useEffect, useRef, useState } from 'react';
 import { checkHealth, MAX_AUDIO_BYTES, saveRecording } from './lib/api';
 import { browserRecognition, startTranscription, type TranscriptStatus } from './lib/speech';
