@@ -37,10 +37,20 @@ administrator workflow. The import sends no invitations and does not create Auth
 accounts, messaging identities, or member aliases. Invitation/password-setup UI is
 still separate work. Role changes do not grant admin privileges.
 
-The supplied Technical Director and Membership Chair descriptions appear swapped.
-Their original descriptions are preserved with `delegation_context_verified=false`;
-future delegation code must skip these descriptions until reviewed. The spelling
-`Industry Partnernships Chair` is normalized to `Industry Partnerships Chair`.
+The example export swapped the Technical Director and Membership Chair descriptions.
+The user supplied corrected definitions on November 14, 2026. The importer uses those
+verified definitions from `backend/app/services/role_definitions.py`: Membership Chair
+owns recruitment, retention and community engagement (10 responsibilities); Technical
+Director owns technical workshops and digital resources (5 responsibilities). Both are
+marked `delegation_context_verified=true`. The original TSV is unchanged. These role
+responsibilities do not establish individual skills. The spelling `Industry
+Partnernships Chair` is normalized to `Industry Partnerships Chair`.
+
+If a roster was already imported before this correction, preview and rerun the same
+`app.import_roster PATH --apply` command to update these fields while preserving member
+codes. If using prepared SQL, regenerate it from the corrected importer rather than
+running an older bundle. Once the roster-link migration is applied, use the importer
+with `--apply`, not a schema-plus-roster bundle that would rerun the migration.
 
 Roster imports update the supplied name, role, contact, major, and graduation fields.
 They preserve existing user-edited profile skills because this export has no skills.

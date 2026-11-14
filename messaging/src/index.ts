@@ -1,10 +1,12 @@
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { bridgePayload, bridgeRequest } from "./bridge.js";
+import { startReminderPolling } from "./reminders.js";
 
 const projectId = process.env.PROJECT_ID?.trim();
 const projectSecret = process.env.PROJECT_SECRET?.trim();
 const bridgeSecret = process.env.MESSAGING_BRIDGE_SECRET?.trim();
+const backendUrl = (process.env.BACKEND_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
 if (!projectId || !projectSecret) {
   console.error("Set PROJECT_ID and PROJECT_SECRET in messaging/.env before starting.");
@@ -25,6 +27,19 @@ const app = await Spectrum({
 
 console.log("Winnie listener started. Text help, whoami, or tasks from an allowed phone.");
 
+startReminderPolling(backendUrl, bridgeSecret, async (recipient, text) => {
+  const im = imessage(app);
+  const user = await im.user(recipient);
+  const dm = await im.space.create(user);
+  if (dm.type !== "dm") throw new Error("Reminder target is not a direct conversation.");
+  const sent = await dm.send(text);
+  if (!sent?.id || ("isSent" in sent && sent.isSent === false) ||
+      ("sendErrorCode" in sent && sent.sendErrorCode)) {
+    throw new Error("Photon did not confirm the reminder send.");
+  }
+  return sent.id;
+});
+
 // Reply within the incoming conversation. Do not log phone numbers or text bodies.
 for await (const [space, message] of app.messages) {
   const payload = bridgePayload(message, "type" in space ? space.type : undefined);
@@ -33,10 +48,10 @@ for await (const [space, message] of app.messages) {
     let httpStatus: number | undefined;
     try {
       const response = await fetch(
-        "http://localhost:8000/api/messages",
+        `${backendUrl}/api/messages`,
         {
           ...bridgeRequest(payload, bridgeSecret),
-          signal: AbortSignal.timeout(15_000),
+          signal: AbortSignal.timeout(30_000),
         }
       );
       httpStatus = response.status;

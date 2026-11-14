@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     task_api_key: SecretStr = SecretStr("")
     messaging_bridge_secret: SecretStr = SecretStr("")
     active_semester: str = "fall-2026"
+    message_ai_enabled: bool = False
+    message_ai_model: str = ""  # Empty uses the existing GEMINI_MODEL setting.
+    message_ai_timeout_seconds: float = Field(default=10, gt=0, le=20)
+    message_ai_max_tasks: int = Field(default=60, ge=1, le=100)
+    reminders_enabled: bool = False
+    reminder_transport: Literal["mock", "photon"] = "mock"
+    reminder_timezone: str = "America/New_York"
+    reminder_daytime_hour: int = Field(default=9, ge=0, le=23)
+    reminder_evening_hour: int = Field(default=18, ge=0, le=23)
     planning_mode: Literal["mock", "deepagents"] = "mock"
     planning_model: str = ""
     planning_knowledge_path: Path = Path("backend/data/planning/fall-2026.json")

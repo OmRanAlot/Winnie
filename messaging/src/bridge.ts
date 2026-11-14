@@ -1,5 +1,6 @@
 // Build the backend request from Photon metadata, never from claims in message text.
 type BridgeMessage = {
+  id: string;
   direction: "inbound" | "outbound";
   platform: string;
   sender?: { id: string; kind?: string };
@@ -15,6 +16,7 @@ export function bridgePayload(message: BridgeMessage, spaceType: unknown) {
   }
   return {
     text: message.content.text,
+    message_id: message.id,
     sender_id: message.sender?.id ?? null,
     platform: message.platform,
     conversation_type: spaceType === "dm" || spaceType === "group" ? spaceType : "unknown",

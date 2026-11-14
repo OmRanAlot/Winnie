@@ -77,6 +77,19 @@ tracker names/emails to members. `tasks` now returns only verified assignments f
 the sender in `WINNIE_ACTIVE_SEMESTER`, ordered by deadline. Unknown members receive
 no task list. This mapping is separate from website login.
 
+[Gemini task conversations](../docs/MESSAGE_CONVERSATIONS.md) adds natural-language
+questions and completion updates, with ownership checks and atomic completion receipts.
+Apply its additional migration and enable `WINNIE_MESSAGE_AI_ENABLED` before testing
+natural-language updates. It uses the existing backend Gemini credentials/model.
+
+## Deadline reminders
+
+See [reminders and delivery deduplication](../docs/REMINDERS.md) for the new migration,
+recipient opt-in, read-only preview, persistent mock outbox, and automatic Photon polling.
+Reminders default to disabled/mock. The rules are seven days, three days, and the
+previous evening in New York time. Persistent claims prevent repeat sends; unknown
+provider outcomes are held for review instead of automatically retried.
+
 ## Event planning drafts
 
 `POST /api/planning/drafts` returns a historical checklist in mock mode or an

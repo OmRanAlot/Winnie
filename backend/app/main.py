@@ -16,6 +16,7 @@ from app.logging_config import RequestLogMiddleware, setup_logging
 from app.routes.health import router as health_router
 from app.routes.members import router as members_router
 from app.routes.recordings import router as recordings_router
+from app.routes.reminders import router as reminders_router
 from app.routes.tasks import router as tasks_router
 from app.routes.planning import router as planning_router
 from app.settings import Settings
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 app.include_router(health_router)
 app.include_router(recordings_router)
+app.include_router(reminders_router)
 app.include_router(tasks_router)
 app.include_router(messages_router)
 app.include_router(planning_router)

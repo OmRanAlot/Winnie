@@ -112,3 +112,9 @@ class TaskStore:
             if len(page) < 500:
                 return tasks
             offset += 500
+
+    def by_task_code(self, task_code: str, semester_code: str):
+        result = self._execute(lambda table: table.select("*").eq(
+            "task_code", task_code
+        ).eq("semester_code", semester_code))
+        return result.data[0] if len(result.data) == 1 else None
