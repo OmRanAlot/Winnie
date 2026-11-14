@@ -11,7 +11,7 @@ Start with [CONTEXT.md](CONTEXT.md) for product and implementation decisions, [d
 | Service | Path | Stack |
 |---|---|---|
 | API + agent logic | `backend/` | Python 3.13, uv, FastAPI |
-| DM interface | `messaging/` | Node, TypeScript, Photon (`@photon-ai/advanced-imessage`) |
+| DM interface | `messaging/` | Node, TypeScript, Photon Spectrum (`spectrum-ts`) |
 | Web dashboard (placeholder) | `frontend/` | Vite, React, TypeScript |
 
 ### Repository map

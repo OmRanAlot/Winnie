@@ -1,20 +1,21 @@
 {
   "name": "winnie-messaging",
   "version": "1.0.0",
-  "description": "Winnie messaging sidecar (Photon iMessage <-> FastAPI backend)",
+  "description": "Winnie Photon Spectrum iMessage echo connection",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "node --env-file=.env --import tsx --watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node --env-file=.env --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
   },
   "type": "module",
-  "private": "true",
+  "private": true,
   "dependencies": {
-    "@photon-ai/advanced-imessage": "^2.5.0"
+    "spectrum-ts": "^12.16.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.6",
-    "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5"
   }
 }

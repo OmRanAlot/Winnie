@@ -15,8 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.logging_config import RequestLogMiddleware, setup_logging
 from app.routes.health import router as health_router
 from app.routes.recordings import router as recordings_router
-from app.services.task_assignment import router as assign_task_router
+from app.routes.tasks import router as tasks_router
 from app.settings import Settings
+# pyrefly: ignore[missing-import]
+from app.routes.messages import router as messages_router
 
 settings = Settings()
 setup_logging(settings.log_level)
@@ -27,18 +29,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 app.include_router(health_router)
 app.include_router(recordings_router)
-app.include_router(assign_task_router)
-
-logger.info(
-    "Winnie API starting: env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s",
-    settings.environment, settings.log_level, settings.task_transcript_source,
-    "set" if settings.gemini_api_key else "MISSING",
-    settings.gemini_model,
-)
-if not settings.gemini_api_key:
-    logger.warning("GEMINI_API_KEY is not set: task assignment will return 503")
+app.include_router(tasks_router)
+app.include_router(messages_router)
