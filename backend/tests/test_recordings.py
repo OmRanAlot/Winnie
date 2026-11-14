@@ -44,6 +44,13 @@ def test_save_audio_and_browser_transcript(client, tmp_path):
     assert base64.b64decode(saved["audio"]["data"]) == b"audio"
 
 
+def test_audio_is_saved_as_its_own_file(client, tmp_path):
+    data = client.post("/api/recordings", json=payload()).json()["data"]
+    assert data["audioFilename"].endswith(".webm")
+    assert data["audioFilename"].removesuffix(".webm") == data["filename"].removesuffix(".json")
+    assert (tmp_path / data["audioFilename"]).read_bytes() == b"audio"
+
+
 @pytest.mark.parametrize(
     "field,value", [("data", "!bad!"), ("sizeBytes", 6), ("mimeType", "text/html")]
 )

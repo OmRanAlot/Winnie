@@ -69,3 +69,5 @@ If Photon uses streaming, the integration bridge calls an authenticated internal
 ```
 
 Dates, identities, IDs, and quotes above are synthetic contract examples. An agent's rationale is advisory; backend rules and President approval decide activation. The approval request should include `expected_revision` and return the activated event/task references. Repeating approval for the same approved revision returns that same result.
+
+Recording saves now return `data.id`. POST `/api/recordings/{id}/assignments` generates and persists proposed assignments alongside the recording. `meta.source` identifies example or recording input. Configure `WINNIE_TASK_TRANSCRIPT_SOURCE=example|recording` (default example). Gemini failure leaves saved audio and transcript intact.

@@ -7,9 +7,12 @@ To add an endpoint group, create routes/<feature>.py and include its router belo
 What is planned but not built lives in the docstrings of app/__init__.py and routes/__init__.py.
 """
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.logging_config import RequestLogMiddleware, setup_logging
 from app.routes.health import router as health_router
 from app.routes.recordings import router as recordings_router
 from app.routes.tasks import router as tasks_router
@@ -18,7 +21,10 @@ from app.settings import Settings
 from app.routes.messages import router as messages_router
 
 settings = Settings()
+setup_logging(settings.log_level)
+logger = logging.getLogger(__name__)
 app = FastAPI(title=settings.app_name, version="0.1.0")
+app.add_middleware(RequestLogMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,

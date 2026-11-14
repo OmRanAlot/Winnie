@@ -18,3 +18,5 @@ uv run ruff check .              # lint
 The frontend performs recording and transcription with browser APIs. No transcription provider or API key is used by the backend.
 
 `POST /api/recordings` accepts the self-contained JSON documented in `frontend/README.md`, validates base64 audio and metadata, and saves a uniquely named file under `backend/data/recordings/`. The success envelope returns `data.filename`. Audio is limited to 10 MB and JSON requests to 15 MB. Saved files are gitignored. This is local development storage; the endpoint has no authentication and should not be exposed publicly without access controls.
+
+Gemini task extraction uses low thinking for Gemini 3 models, one attempt, and a 45-second HTTP timeout to reduce interactive latency. Failures can be retried by the caller; saved recordings remain intact. Token usage logs include thinking tokens. To try a lighter extraction model, set `GEMINI_MODEL=gemini-3.1-flash-lite`; validate assignments on representative meetings before switching permanently.
