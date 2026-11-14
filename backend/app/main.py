@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.logging_config import RequestLogMiddleware, setup_logging
 from app.routes.health import router as health_router
+from app.routes.members import router as members_router
 from app.routes.recordings import router as recordings_router
 from app.routes.tasks import router as tasks_router
 from app.routes.planning import router as planning_router
@@ -38,3 +39,4 @@ app.include_router(recordings_router)
 app.include_router(tasks_router)
 app.include_router(messages_router)
 app.include_router(planning_router)
+app.include_router(members_router)
