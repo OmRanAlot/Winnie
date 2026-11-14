@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes.recordings import router as recordings_router
 from app.core.config import Settings
 
 settings = Settings()
@@ -9,14 +10,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+app.include_router(recordings_router)
 
 
 @app.get("/api/health", tags=["health"])
 def health() -> dict[str, str]:
-    """Report process health; no provider integrations are connected yet."""
+    """Report process health."""
     return {"status": "ok", "service": "winnie-api"}
 
 

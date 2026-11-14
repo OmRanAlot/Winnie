@@ -1,29 +1,36 @@
 # Winnie conversation recorder
 
-React + TypeScript frontend using browser getUserMedia, MediaRecorder, and Web Speech APIs. No backend or API key required.
+Browser-native recording (`MediaRecorder`) and live transcription (`SpeechRecognition` / `webkitSpeechRecognition`). No Gemini integration or API key is used. FastAPI only stores the completed audio/transcript JSON.
+
+Start both services in separate terminals:
 
 ```bash
+cd backend
+uv run fastapi dev app/main.py
+```
+
+```bash
+cd frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173, name the conversation, choose a language, and click **Start recording**. Allow microphone access, then **Stop recording** when finished. Listen back, edit the transcript, and **Download JSON**. Download before starting another recording or closing the page: recordings are held in memory, not persisted.
+Open http://localhost:5173. Choose the spoken language, click **Start recording**, and allow microphone/speech access. Live words appear while recording. Click **Stop recording**, review playback, and edit the transcript.
 
-Microphone capture requires localhost or HTTPS. Live transcription requires SpeechRecognition or webkitSpeechRecognition support and may require internet access. The browser's speech service may receive audio. If recognition is unavailable or fails, audio capture remains available and the transcript can be entered manually. Only finalized recognition results are retained; review the transcript for omissions. This captures microphone input, not system audio, and does not identify speakers.
+- **Save & download JSON** sends the JSON through Vite's `/api` proxy to `POST /api/recordings`. The backend saves it under `backend/data/recordings/` (gitignored), and the browser downloads a copy.
+- **Download locally** downloads without contacting the backend, including when the API is offline.
 
-JSON fields:
-- schemaVersion: 1
-- title: conversation name
-- startedAt: ISO timestamp
-- durationMs: recording duration
-- transcription: { language, text }
-- audio: { mimeType, encoding: "base64", sizeBytes, data }
+Browser speech recognition can use the browser vendor's online service. It is not guaranteed offline and availability varies by browser. Use localhost or HTTPS. Unsupported browsers, denied permission, and network errors show actionable messages while preserving audio. The app restarts recognition after silence, waits for final words on stop, and marks incomplete transcripts accordingly. Browser recognition cannot retrospectively transcribe captured audio; missing words can be entered manually.
 
-Audio is embedded as base64 so the JSON is self-contained. To play it elsewhere, construct `data:${audio.mimeType};base64,${audio.data}` as an audio element's source. Long recordings consume memory, and base64 increases file size.
+The JSON contains `schemaVersion`, `title`, `startedAt`, `durationMs`, `transcription: { language, text, provider, status }`, and `audio: { mimeType, encoding: "base64", sizeBytes, data }`. Play exported audio with `data:${audio.mimeType};base64,${audio.data}`. Audio is limited to 10 MB per recording. Download or save before closing the page.
+
+`VITE_API_BASE_URL` defaults to `/api`. For a separate backend host, include the path, e.g. `http://localhost:8000/api`. Production hosting must forward `/api` to FastAPI or configure this URL plus backend CORS.
+
+Checks:
 
 ```bash
 npm run build
-npm run preview
+node --experimental-strip-types --test tests/speech.test.mjs
 ```
 
-Manual verification: record a spoken sentence, stop, check playback, correct the transcript, download JSON, and verify its embedded audio plays. Also check denied microphone permission, unavailable recognition, and a second recording. Real microphone and speech-service behavior requires an interactive browser session.
+Backend: `uv run pytest`. Speech tests simulate browser events (final/interim results, silence restart, network errors, unsupported browsers, and stop timeout); actual microphone capture and recognition accuracy must be tested interactively in the intended browser.
