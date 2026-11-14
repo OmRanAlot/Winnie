@@ -9,7 +9,7 @@
 param(
     [string]$ProjectId = "hack-princeton-514716",
     [string]$Region = "us-east1",
-    [string]$Repo = "Sharanya-Raj/Winnie",
+    [string]$Repo = "OmRanAlot/Winnie",
     [string]$PoolId = "github",
     [string]$ProviderId = "github-actions",
     [string]$DeployerName = "github-deployer",
@@ -60,6 +60,11 @@ if (-not (Test-Gcloud iam workload-identity-pools providers describe $ProviderId
         --issuer-uri "https://token.actions.githubusercontent.com" `
         --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" `
         --attribute-condition $condition
+} else {
+    # Provider already exists: re-point its condition at $Repo (e.g. after the repo moved/was renamed).
+    Invoke-Gcloud iam workload-identity-pools providers update-oidc $ProviderId `
+        --workload-identity-pool $PoolId --location global --project $ProjectId `
+        --attribute-condition $condition
 }
 
 # 3. Let identities from that repo impersonate the deployer.
@@ -72,7 +77,7 @@ $projectRoles = @(
     "roles/run.admin",                         # deploy the service
     "roles/cloudbuild.builds.editor",          # build the image from source
     "roles/artifactregistry.writer",           # push it
-    "roles/storage.objectAdmin",               # upload the source archive
+    "roles/storage.admin",                     # create/read the run-sources bucket and upload the source archive
     "roles/logging.viewer",                    # stream build logs
     "roles/serviceusage.serviceUsageConsumer", # use project APIs
     "roles/firebasehosting.admin"              # firebase deploy --only hosting
