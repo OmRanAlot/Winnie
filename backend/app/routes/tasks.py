@@ -1,10 +1,10 @@
 """Task endpoints, in two groups on one /api/tasks router.
 
-Timeline compatibility view, UUID ids, no auth yet:
+Timeline compatibility view, UUID ids, approved Supabase membership required:
     GET   /api/tasks?status=&assignee=&seat=   every task, ordered by deadline (unscheduled last)
     PATCH /api/tasks/{task_id}/status          body {"status": "todo" | "in_progress" | "done" | "blocked"}
 
-Task records (CRUD for backend clients), uuid ids, require the X-Winnie-Api-Key header:
+Task records (CRUD for backend clients), uuid ids, verified Bearer token or scoped server key:
     POST/GET /api/tasks/records, GET/PATCH/DELETE /api/tasks/records/{task_id}
 
 Thin: validates input, calls services/tasks.py, wraps results in the {success, data, error, meta}
@@ -12,13 +12,12 @@ envelope.
 """
 
 import logging
-from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
-from app.core.settings import Settings
+from app.core.auth import require_admin, require_member
 from app.db import repository
 from app.integrations.supabase import StorageUnavailable
 from app.schemas.api import TaskStatusUpdate, failure
@@ -74,15 +73,7 @@ def update_status(task_id: UUID, body: TaskStatusUpdate):
 # --- Task records ---------------------------------------------------------
 
 
-def authorize_tasks(x_winnie_api_key: str = Header(default="")):
-    settings = Settings()
-    expected = settings.task_api_key.get_secret_value()
-    if not expected:
-        if settings.environment != "development":
-            raise HTTPException(503, "Configure WINNIE_TASK_API_KEY before exposing tasks.")
-        return
-    if not compare_digest(x_winnie_api_key.encode(), expected.encode()):
-        raise HTTPException(401, "Invalid task API key.")
+authorize_tasks = require_member
 
 
 records = APIRouter(prefix="/records", dependencies=[Depends(authorize_tasks)])
@@ -108,7 +99,7 @@ def run_operation(operation, meta=None):
         return failure("Task storage is unavailable. Check Supabase configuration.", 503)
 
 
-@records.post("", status_code=201)
+@records.post("", status_code=201, dependencies=[Depends(require_admin)])
 def create_task(task: TaskCreate, store: Store):
     return run_operation(lambda: store.create(task))
 
@@ -147,7 +138,7 @@ def update_task(task_id: UUID, changes: TaskUpdate, store: Store):
     return run_operation(lambda: store.update(task_id, changes))
 
 
-@records.delete("/{task_id}")
+@records.delete("/{task_id}", dependencies=[Depends(require_admin)])
 def delete_task(task_id: UUID, store: Store):
     def operation():
         store.delete(task_id)

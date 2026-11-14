@@ -13,7 +13,8 @@ MENU = (
 def verified_personal_tasks(candidates, aliases, member_code):
     selected, unresolved = [], False
     for task in candidates:
-        assigned = assignment_members(task.get("assignee_text", ""), aliases)
+        assigned = ({task["owner_code"]} if task.get("owner_code")
+                    else assignment_members(task.get("assignee_text", ""), aliases))
         if assigned is None:
             unresolved = True
         elif member_code in assigned:

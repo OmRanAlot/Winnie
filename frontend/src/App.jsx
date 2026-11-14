@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { getAssignments, getCandidates, getMembers, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
+import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
 import Recorder from "./Recorder.jsx";
+import Attendance from "./Attendance.jsx";
 import HelpReview from "./HelpReview.jsx";
 import { supabase } from "./lib/supabase";
 import { reassignmentStore } from "./lib/reassignments.js";
 const requestsStore = reassignmentStore(supabase);
 
-// Meeting previews remain separate from the live task and request data.
 /* ---------- Placeholder data (replace with backend responses) ---------- */
 // Sample people: shown when the backend is unreachable, and still used by the sample
-// Meetings / Requests screens. Real members come from GET /api/members.
+// Requests screens. Real members come from GET /api/members; meetings use GET /api/meetings.
 const SAMPLE_PEOPLE = [
   { id: 1, name: "Lakshita Madhavan", role: "President", skills: ["Leadership", "Public speaking", "Budgeting"] },
   { id: 2, name: "Stephanie Nicolaescu", role: "Vice President", skills: ["Planning", "Outreach", "Docs"] },
@@ -62,11 +62,7 @@ const SAMPLE_TASKS = [
     ];
   }),
 ].map((t) => ({ ...t, initialAssignee: t.initialAssignee ?? t.assignee, priority: t.priority ?? "normal" }));
-const MEETINGS = [
-  { id: 1, date: "11/13/26", name: "Fall 2026 E-Board Meeting", attendees: [1, 2, 3, 5, 7], tasks: [[ "Allocate budget for GBM 1", 3], ["Design GBM 1 flyer", 7]] },
-  { id: 2, date: "11/10/26", name: "Finance Logistics Meeting", attendees: [1, 3, 5], tasks: [["Book GBM 1 room", 5]] },
-  { id: 3, date: "11/06/26", name: "P/VP Transition Meeting", attendees: [1, 2, 4], tasks: [["Draft GBM 1 agenda", 2]] },
-];
+
 const REQUESTS = [
   { id: 1, task: 3, from: 3, to: 1, reason: "I have a schedule conflict and need someone else to handle the budget.", status: "pending", requestedAt: "11/13/2026" },
   { id: 2, task: 5, from: 8, to: 7, reason: "I need support finishing the social media posts before the deadline.", status: "pending", requestedAt: "11/12/2026" },
@@ -506,10 +502,18 @@ export default function App({ profile, admin, signOut }) {
   const [planError, setPlanError] = useState("");
   const [reqs, setReqs] = useState(REQUESTS);
   const [reassignmentReason, setReassignmentReason] = useState("");
-  const [attendanceByMeeting, setAttendanceByMeeting] = useState(() =>
-    Object.fromEntries(MEETINGS.map((meeting) => [meeting.id, meeting.attendees])),
-  );
-  const [attendanceMeetingId, setAttendanceMeetingId] = useState(MEETINGS[0]?.id ?? "");
+  const [MEETINGS, setMeetings] = useState([]);
+  const [meetingError, setMeetingError] = useState('');
+  const [meetingsLoading, setMeetingsLoading] = useState(true);
+  const reloadMeetings = useCallback(async () => {
+    setMeetingsLoading(true);
+    try { setMeetings(await getMeetings()); setMeetingError(''); }
+    catch (e) { setMeetingError(e.message); throw e; }
+    finally { setMeetingsLoading(false); }
+  }, []);
+  useEffect(() => { reloadMeetings().catch(() => {}); }, [reloadMeetings]);
+  const attendanceSaved = (id, attendees) => setMeetings(current => current.map(m =>
+    m.id === id ? { ...m, attendees, attendance_recorded_at: new Date().toISOString() } : m));
   const [profileDrafts, setProfileDrafts] = useState({});
   const [open, setOpen] = useState({});
   const [notes, setNotes] = useState({});
@@ -608,6 +612,9 @@ export default function App({ profile, admin, signOut }) {
     } catch (e) { say(`Could not refresh or save: ${e.message}`); }
   };
   const p = stack[stack.length - 1];
+  useEffect(() => {
+    if (['attendance', 'past', 'mm', 'memberStatus'].includes(p.n)) reloadMeetings().catch(() => {});
+  }, [p.n, reloadMeetings]);
   const go = (n, x = {}) => setStack((s) => [...s, { n, ...x }]);
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
@@ -650,13 +657,6 @@ export default function App({ profile, admin, signOut }) {
       request.id === requestId ? { ...request, status: decision } : request,
     ));
     say(`Request ${decision} in sample data for this session only.`);
-  };
-  const saveMeetingAttendance = () => {
-    if (live) {
-      say("Meeting attendance is not connected to the backend yet; nothing was saved.");
-      return;
-    }
-    say("Attendance updated in sample data for this session only.");
   };
   const openTaskCreator = (form, generated = false) => {
     const initialForm = { ...form };
@@ -778,9 +778,9 @@ export default function App({ profile, admin, signOut }) {
   // Status buttons in the redesign: save through the same path as the task page.
   const setTaskStatus = (id, status) => { const t = task(id); if (t) changeStatus(t, status); };
   const isAdminView = admin && !viewAs;
-  // No real login yet: admins see the President's view, everyone else the Vice President's.
-  const byRole = (role) => PEOPLE.find((q) => q.role === role);
-  const me = (viewAs ? person(viewAs) : live ? byRole(isAdminView ? "President" : "Vice President") : person(isAdminView ? 1 : 2)) ?? PEOPLE[0];
+  const ownProfile = { id: profile.member_code, name: profile.name || profile.email,
+    role: profile.role, skills: profile.skills || [] };
+  const me = (admin && viewAs ? person(viewAs) : ownProfile) || ownProfile;
   const sameMember = (left, right) => left != null && right != null && String(left) === String(right);
   const currentOwner = (t) => t.currentAssignee ?? t.current_assignee_code ?? t.assignee;
   const initialOwner = (t) => t.initialAssignee ?? t.initial_assignee_code ?? t.owner_code;
@@ -889,9 +889,13 @@ export default function App({ profile, admin, signOut }) {
       break;
     case "meeting": {
       const m = MEETINGS.find((x) => x.id === p.id);
+      if (!m) { page = <p>Meeting unavailable.</p>; break; }
       page = (<><Top title={m.name} /><p style={{ textAlign: "center", margin: "0 0 18px", fontSize: 20 }}>{m.date}</p>
-        <div className="cols"><div className="panel"><h3>Notes:</h3><p>{"• Reviewed GBM 1 timeline\n• Confirmed budget owner\n• Flyer due before Thursday\n• Next meeting TBD"}</p></div>
-          <div className="panel"><h3>Transcript:</h3><p>{"[00:00] Welcome everyone…\n[00:42] First item is the GBM agenda…\n[03:10] Who can take the budget?…"}</p></div>
+        <p style={{ textAlign: "center" }}>{m.attendance_recorded_at
+          ? `Attendees (${m.attendees.length}): ${m.attendees.map(code => person(code)?.name || code).join(', ') || 'None'}`
+          : 'Attendance not recorded'}</p>
+        <div className="cols"><div className="panel"><h3>Notes:</h3><p>{m.summary || "No meeting notes recorded."}</p></div>
+          <div className="panel"><h3>Transcript:</h3><p>{m.transcript || "No transcript recorded."}</p></div>
           <div><h3 style={{ textAlign: "center", fontSize: 24, marginTop: 0 }}>Delegated Tasks:</h3>
             {m.tasks.map(([t, a]) => <div className="due" key={t}><Icon n="arrow" s={18} /><button className="pill" style={{ flex: 1, textAlign: "center" }} onClick={() => go("task", { id: TASKS.find((x) => x.title === t)?.id || 1 })}>{t}<br /><small>Assignee: {person(a)?.name || "Not linked"}</small></button></div>)}</div></div></>);
       break;
@@ -903,6 +907,12 @@ export default function App({ profile, admin, signOut }) {
       const q = person(p.id) ?? me, ts = TASKS.filter((t) => owns(t, q.id));
       page = (<><Top title="Profile" tag={isAdminView} />
         <div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div><h2 style={isAdminView ? { cursor: "pointer" } : {}} onClick={() => isAdminView && setModal({ view: q })}>{q.name}</h2><p>{q.role}</p></div></div>
+        {p.id === profile.member_code && <div className="panel" style={{marginBottom:18}}>
+          <h3>Your account</h3><p>Email: {profile.email}</p><p>Phone: {profile.phone_number || 'Not provided'}</p>
+          <p>Major: {profile.major || 'Not provided'}</p><p>Graduation: {profile.graduation_date || 'Not provided'}</p>
+          <p>GirlHacks title: {profile.girlhacks_title || 'Not provided'}</p>
+          <p>Personal skills: {profile.skills?.length ? profile.skills.join(', ') : 'Not provided'}</p>
+        </div>}
         <div className="two"><div className="panel"><h3>Tasks</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.title}</a> ({t.status})</li>)}{!ts.length && <li className="none">No tasks assigned yet.</li>}</ul></div>
           <div className="panel"><h3>Skills</h3>
             {q.technical?.length || q.soft?.length ? (<>
@@ -1163,9 +1173,9 @@ export default function App({ profile, admin, signOut }) {
       const status = getMemberStatus(member);
       const reassignment = getReassignmentCounts(member);
       const highestReassignment = Math.max(1, reassignment.requested, reassignment.approved, reassignment.received);
-      const attended = live ? null : MEETINGS.filter((meeting) =>
-        (attendanceByMeeting[meeting.id] ?? []).some((id) => sameMember(id, member.id)),
-      ).length;
+      const recordedMeetings = MEETINGS.filter(m => m.attendance_recorded_at);
+      const attended = meetingsLoading || meetingError ? null : recordedMeetings.filter(meeting =>
+        meeting.attendees.some(id => sameMember(id, member.id))).length;
       const groups = [
         ["Completed", status.completed],
         ["Pending", status.pending],
@@ -1175,7 +1185,7 @@ export default function App({ profile, admin, signOut }) {
       page = (<><Top title="Current Member Status" tag /><Ident q={member} />
         <div className="metrics-stat-grid">
           {groups.map(([label, items]) => <div className="metrics-stat" key={label}><strong>{items.length}</strong><span>{label}</span></div>)}
-          <div className="metrics-stat"><strong>{attended === null ? "—" : `${attended}/${MEETINGS.length}`}</strong><span>Meetings Attended</span></div>
+          <div className="metrics-stat"><strong>{attended === null ? "—" : `${attended}/${recordedMeetings.length}`}</strong><span>Meetings Attended</span></div>
         </div>
         <div className="panel" style={{ marginBottom: 18 }}>
           <h3 style={{ marginTop: 0 }}>Reassignment Activity</h3>
@@ -1200,34 +1210,11 @@ export default function App({ profile, admin, signOut }) {
       break;
     }
     case "attendance": {
-      const meeting = MEETINGS.find((item) => sameMember(item.id, attendanceMeetingId)) ?? MEETINGS[0];
-      const attendees = attendanceByMeeting[attendanceMeetingId] ?? [];
-      page = (<><Top title="Meeting Attendance" tag />
-        <div className="panel" style={{ maxWidth: 820, width: "100%", margin: "0 auto" }}>
-          <label style={{ display: "grid", gap: 8, fontWeight: 700 }}>Meeting
-            <select className="field" value={attendanceMeetingId} onChange={(event) => setAttendanceMeetingId(event.target.value)}>
-              {MEETINGS.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.date}</option>)}
-            </select>
-          </label>
-          {meeting && <><h3>{meeting.name}</h3><p className="metrics-note">Select the board members who attended this meeting.</p>
-            <div className="attendance-list">{PEOPLE.map((member) => <label className="attendance-member" key={member.id}>
-              <input type="checkbox" checked={attendees.some((id) => sameMember(id, member.id))}
-                onChange={(event) => setAttendanceByMeeting((current) => {
-                  const selected = current[attendanceMeetingId] ?? [];
-                  const next = event.target.checked
-                    ? [...selected, member.id]
-                    : selected.filter((id) => !sameMember(id, member.id));
-                  return { ...current, [attendanceMeetingId]: [...new Set(next)] };
-                })} />
-              <span>{member.name} <small>{member.role}</small></span>
-            </label>)}</div>
-            <div style={{ textAlign: "center", marginTop: 18 }}><button className="btn" onClick={saveMeetingAttendance}>Save Attendance</button></div>
-          </>}
-          <p className="metrics-note">{live
-            ? "Meetings and attendance are sample data; changes are not persisted to the backend."
-            : "Attendance changes stay in this session only."}</p>
-        </div>
-      </>);
+      page = <><Top title="Meeting Attendance" tag />
+        {meetingsLoading && <p role="status">Loading meetings…</p>}
+        {meetingError ? <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry</button></p>
+          : <Attendance meetings={MEETINGS} members={PEOPLE} loading={meetingsLoading} onReload={reloadMeetings} onSaved={attendanceSaved} />}
+      </>;
       break;
     }
     case "editlist":
@@ -1289,7 +1276,6 @@ export default function App({ profile, admin, signOut }) {
         {done.map((t) => <div className="due" key={t.id}><span style={{ width: 110, fontSize: 18 }}>{t.finished}:</span><button className="pill" onClick={() => go("task", { id: t.id })}>{t.title}</button></div>)}</>);
       break;
     }
-    case "reassigned":
       case "reassigned":
       case "review": {
         const approvedOnly = p.n === "reassigned";
@@ -1304,7 +1290,7 @@ export default function App({ profile, admin, signOut }) {
             <small>{new Date(r.created_at).toLocaleString()} ? {r.status}</small>
             {r.review_note && <p>Review: {r.review_note}</p>}
           </div>
-          {admin && r.status === "pending"" && <>
+          {admin && r.status === "pending" && <>
             <button className="btn" disabled={requestBusy || !!dataError} onClick={() => decideRequest(r, "approved")}>Approve</button>
             <button className="btn alt" disabled={requestBusy || !!dataError} onClick={() => decideRequest(r, "rejected")}>Deny</button>
           </>}
@@ -1318,15 +1304,14 @@ export default function App({ profile, admin, signOut }) {
         </>;
         break;
       }
-      break;
-    }
     case "meetmetrics":
       page = <Grid title="Meeting Attendance" tag description="Select a member to see the meetings they attended." onPick={(q) => go("mm", { id: q.id })} />;
       break;
     case "mm": {
       const q = person(p.id);
-      page = (<><Top title={`${q.name}'s Meeting Attendance`} tag /><Ident q={q} /><h3 style={{ textAlign: "center", fontSize: 26, margin: "0 0 10px" }}>Meetings Attended: {MEETINGS.length}</h3>
-        {MEETINGS.map((m) => <div className="due" key={m.id}><span style={{ width: 110, fontSize: 18 }}>{m.date}:</span><button className="pill" style={{ textAlign: "center" }} onClick={() => go("meeting", { id: m.id })}>Review</button></div>)}</>);
+      const attendedMeetings = MEETINGS.filter(m => m.attendance_recorded_at && m.attendees.includes(q.id));
+      page = (<><Top title={`${q.name}'s Meeting Attendance`} tag /><Ident q={q} /><h3 style={{ textAlign: "center", fontSize: 26, margin: "0 0 10px" }}>Meetings Attended: {meetingError || meetingsLoading ? "—" : attendedMeetings.length}</h3>
+        {attendedMeetings.map((m) => <div className="due" key={m.id}><span style={{ width: 110, fontSize: 18 }}>{m.date}:</span><button className="pill" style={{ textAlign: "center" }} onClick={() => go("meeting", { id: m.id })}>Review</button></div>)}</>);
       break;
     }
     default: page = null;
@@ -1336,10 +1321,11 @@ export default function App({ profile, admin, signOut }) {
   return (
     <div className="app"><style>{CSS}</style><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
         <button className="link" onClick={() => go("review")}>Requests ({reqs.filter(r => r.status === "pending").length})</button>
-        <button className="link" onClick={signOut}>Sign out</button>
+        <button className="link" onClick={() => signOut().catch(e => say(e.message))}>Sign out</button>
       </header>
       {dataError && <div role="alert">Could not refresh Supabase data: {dataError} <button onClick={() => refresh().catch(() => {})}>Retry</button></div>}
       {loading && <p role="status">Loading tasks and requests?</p>}
+      {meetingError && ['past', 'meeting', 'mm', 'memberStatus'].includes(p.n) && <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry meetings</button></p>}
       <main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
@@ -1353,7 +1339,7 @@ export default function App({ profile, admin, signOut }) {
         {requestError && <p role="alert">{requestError}</p>}
         {!profile.member_code && <p role="alert">Your account must be linked to the member roster before requesting a reassignment.</p>}
         <div className="acts"><button className="btn alt" disabled={requestBusy} onClick={() => setModal(null)}>Cancel</button><button className="btn" disabled={requestBusy || !profile.member_code || !live} onClick={sendRequest}>{requestBusy ? "Saving?" : "Send request"}</button></div></div></div>)}
-      {recorder && <Recorder kind={recorder} onClose={() => setRecorder(null)} />}
+      {recorder && <Recorder kind={recorder} onClose={() => { setRecorder(null); reloadMeetings().catch(() => {}); }} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <div role="status" style={{ position: "fixed", top: 8, right: 12, fontSize: 12, padding: "4px 10px", borderRadius: 999, background: live ? "#7fb08a" : "#e8a36b", color: "#fff", fontWeight: 700 }}>{source}</div>
     </div>

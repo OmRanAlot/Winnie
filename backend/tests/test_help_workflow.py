@@ -219,7 +219,7 @@ async def test_natural_completion_in_group_uses_only_bound_task_and_notifies_adm
 def test_admin_approval_api_has_no_development_auth_bypass(monkeypatch):
     monkeypatch.setenv("WINNIE_HELP_ADMIN_API_KEY", "")
     with TestClient(app) as client:
-        assert client.get("/api/help-requests").status_code == 503
+        assert client.get("/api/help-requests").status_code == 401
     monkeypatch.setenv("WINNIE_HELP_ADMIN_API_KEY", "test-admin-key")
     with TestClient(app) as client:
         assert client.get("/api/help-requests").status_code == 401

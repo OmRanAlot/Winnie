@@ -64,7 +64,7 @@ class Store:
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, signed_in_member):
     monkeypatch.setattr(route, "load_skills", lambda: SKILLS)
     monkeypatch.setattr(route, "load_previous_roles", lambda: HISTORY)
     app.dependency_overrides[route.get_member_store] = Store

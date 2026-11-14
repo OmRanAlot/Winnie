@@ -9,7 +9,7 @@ from app.services import recordings
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, signed_in_member):
     monkeypatch.setattr(recordings, "RECORDINGS_DIR", tmp_path)
     with TestClient(app) as client:
         yield client

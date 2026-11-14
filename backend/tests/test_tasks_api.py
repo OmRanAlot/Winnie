@@ -30,7 +30,7 @@ def db(monkeypatch) -> FakeClient:
 
 
 @pytest.fixture
-def client():
+def client(signed_in_member):
     with TestClient(app) as test_client:
         yield test_client
 

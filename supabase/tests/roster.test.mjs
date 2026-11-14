@@ -10,6 +10,7 @@ const migrations = await Promise.all([
   '20261114120000_add_messaging_members.sql',
   '20261114120001_create_profiles.sql',
   '20261114140000_link_member_roster.sql',
+  '20261115020000_finalize_authentication.sql',
 ].map(name => readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8')));
 
 const record = {
@@ -30,7 +31,7 @@ async function database() {
       select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
     $$;
     create table auth.users (
-      id uuid primary key, email text, email_confirmed_at timestamptz,
+      id uuid primary key, email text, email_confirmed_at timestamptz, encrypted_password text,
       raw_user_meta_data jsonb default '{}'
     );
   `);
@@ -41,6 +42,25 @@ async function database() {
 async function importRows(db, records) {
   await db.query('select public.import_member_roster($1::jsonb)', [JSON.stringify(records)]);
 }
+
+test('password completion follows Auth, rejects browser changes, and supports migration reapplication', async () => {
+  const db = await database();
+  try {
+    await importRows(db, [record]);
+    await db.query('insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) values($1,$2,now(),$3)',
+      [alice, record.email, { password_setup_complete: true }]);
+    assert.equal((await db.query('select password_setup_complete from profiles where id=$1', [alice])).rows[0].password_setup_complete, false);
+    await db.query("select set_config('request.jwt.claim.sub',$1,false)", [alice]);
+    await db.exec('set role authenticated');
+    await assert.rejects(db.exec('update profiles set password_setup_complete=true'), /permission denied/);
+    await db.exec('reset role');
+    await db.query("update auth.users set encrypted_password='synthetic-hash' where id=$1", [alice]);
+    assert.equal((await db.query('select password_setup_complete from profiles where id=$1', [alice])).rows[0].password_setup_complete, true);
+    await db.query('update profiles set password_setup_complete=false where id=$1', [alice]);
+    await db.exec(migrations.at(-1));
+    assert.equal((await db.query('select password_setup_complete from profiles where id=$1', [alice])).rows[0].password_setup_complete, true);
+  } finally { await db.close(); }
+});
 
 test('roster-first invitation links only after Auth confirms exact email', async () => {
   const db = await database();

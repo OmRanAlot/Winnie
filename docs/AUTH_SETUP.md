@@ -1,5 +1,9 @@
 # Supabase login and profiles
 
+For the completed invitation/login flow and remaining hosted setup, follow
+[authentication finalization](AUTH_FINALIZATION.md). The sections below document
+the earlier profile and roster implementation.
+
 ## WiCS roster and consent
 
 `members` is the existing roster used by messaging; `profiles` belongs to Auth
@@ -133,8 +137,8 @@ Fetch profiles outside the `onAuthStateChange` callback, for example in a separa
 React effect keyed by the session user ID. Clear cached profiles when the user changes
 or signs out. Always display query errors in the UI.
 
-This profile table does not secure FastAPI task/recording endpoints. Backend token
-verification and board membership checks are separate work.
+FastAPI now verifies Supabase tokens and approved roster membership. See the current
+[API access policy](AUTH_FINALIZATION.md#api-access) before exposing the service.
 
 ## Verify the migration locally
 

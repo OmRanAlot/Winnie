@@ -21,7 +21,7 @@ async function database() {
     create function auth.uid() returns uuid language sql stable as $$
       select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
     $$;
-    create table auth.users(id uuid primary key, email text,
+    create table auth.users(id uuid primary key, email text, encrypted_password text,
       email_confirmed_at timestamptz, raw_user_meta_data jsonb default '{}');
   `);
   return db;
@@ -51,6 +51,32 @@ test('migration versions are unique and the complete fresh chain applies', async
     await db.exec('reset role; set role anon');
     await assert.rejects(db.query('select * from meetings'));
     await assert.rejects(db.query('select * from task_dependencies'));
+  } finally { await db.close(); }
+});
+
+test('direct browser RPCs require consent and actual password setup, even for a president', async () => {
+  const db = await database();
+  const id = '33333333-3333-4333-8333-333333333333';
+  try {
+    for (const name of names) await db.exec(sql[name]);
+    await db.query(`insert into members(code,display_name,email,contact_consent,board_role)
+      values('ALICE','Alice','alice@example.com',true,'President')`);
+    await db.query('insert into auth.users(id,email,email_confirmed_at) values($1,$2,now())', [id, 'alice@example.com']);
+    await db.query("select set_config('request.jwt.claim.sub',$1,false)", [id]);
+    await db.exec('set role authenticated');
+    assert.equal((await db.query('select public.current_board_member_code() as code')).rows[0].code, null);
+    assert.equal((await db.query('select public.can_review_task_requests() as allowed')).rows[0].allowed, false);
+    await assert.rejects(db.query("select public.submit_task_reassignment($1,'OTHER','test')", [id]), /completed password setup/);
+    await db.exec('reset role');
+    await db.query("update auth.users set encrypted_password='synthetic-password-hash' where id=$1", [id]);
+    await db.exec('set role authenticated');
+    assert.equal((await db.query('select public.current_board_member_code() as code')).rows[0].code, 'ALICE');
+    assert.equal((await db.query('select public.can_review_task_requests() as allowed')).rows[0].allowed, true);
+    await db.exec('reset role');
+    await db.query("update members set email=null,contact_consent=false where code='ALICE'");
+    await db.exec('set role authenticated');
+    assert.equal((await db.query('select public.current_board_member_code() as code')).rows[0].code, null);
+    assert.equal((await db.query('select public.can_review_task_requests() as allowed')).rows[0].allowed, false);
   } finally { await db.close(); }
 });
 
@@ -91,6 +117,7 @@ test('existing UUID tasks retain IDs, codes and ownership without the legacy boo
     for (const name of names.filter(name => name >= canonical && name < '20261115000001')) {
       await db.exec(sql[name]);
     }
+    await db.exec("insert into public.members(code,display_name) values('DEMO','Demo')");
     const { rows: [before] } = await db.query(`insert into tasks(title,month_code,owner_code,
       assignee_text,status) values ('Existing tracker task','2026-11','DEMO','Demo','in_progress') returning *`);
     await db.exec(sql['0001_init.sql']); // Historical bootstrap is safe on an existing UUID store.

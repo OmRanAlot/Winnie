@@ -81,7 +81,7 @@ def configure():
 
 
 @pytest.fixture
-def client(configure):
+def client(configure, signed_in_member):
     with TestClient(app) as test_client:
         yield test_client
 
@@ -299,6 +299,10 @@ def test_phone_numbers_and_emails_never_reach_gemini(client, monkeypatch, gemini
         {"President": {"name": "Jane Doe", "number": PHONE, "email": EMAIL}},
     )
     monkeypatch.undo()  # restore the real load_eboard, then point it at the temp roster
+    from app.core.auth import Principal, get_principal
+    monkeypatch.setitem(app.dependency_overrides, get_principal, lambda: Principal(
+        "synthetic", {"is_admin": True, "password_setup_complete": True}
+    ))
     monkeypatch.setattr(route, "gemini_client", lambda api_key: gemini)
     monkeypatch.setattr(route, "EBOARD_FILE", path)
 

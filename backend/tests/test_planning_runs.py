@@ -180,10 +180,10 @@ async def test_concurrent_execution_is_not_duplicated(configured):
             await worker
 
 
-def test_api_generation_progress_and_protected_review(configured, monkeypatch):
+def test_api_generation_progress_and_protected_review(configured, monkeypatch, signed_in_member):
     service = PlanningRuns(configured, runner_factory=lambda model: FakeRunner())
     app.dependency_overrides[get_planning_runs] = lambda: service
-    app.dependency_overrides[authorize_tasks] = lambda: None
+    app.dependency_overrides[authorize_tasks] = lambda: signed_in_member
     monkeypatch.setenv("WINNIE_PLANNING_REVIEW_API_KEY", "")
     try:
         with TestClient(app) as client:
@@ -194,10 +194,8 @@ def test_api_generation_progress_and_protected_review(configured, monkeypatch):
             assert ready["status"] == "waiting_for_review"
             body = {"decision": "approve", "expected_revision": ready["revision"]}
             url = f"/api/planning/runs/{run_id}/review"
-            assert client.post(url, json=body).status_code == 503
-            monkeypatch.setenv("WINNIE_PLANNING_REVIEW_API_KEY", "test-review-key")
-            assert client.post(url, json=body).status_code == 401
-            headers = {"X-Winnie-Planning-Review-Key": "test-review-key"}
+            # Review uses the same verified administrator identity as the dashboard.
+            headers = {}
             stale = {**body, "expected_revision": "0" * 64}
             assert client.post(url, json=stale, headers=headers).status_code == 409
             approved = client.post(url, json=body, headers=headers)

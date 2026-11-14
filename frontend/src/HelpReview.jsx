@@ -1,33 +1,30 @@
 import { useState } from "react";
 import { reviewHelpRequests, decideHelpRequest } from "./lib/api.js";
 
-// Keep the operator's key in memory only. The UI's admin toggle grants no API authority.
+// Uses the signed-in administrator's verified access token.
 export default function HelpReview({ people = [] }) {
-  const [key, setKey] = useState("");
   const [requests, setRequests] = useState(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const name = code => people.find(person => person.id === code)?.name || code;
   async function load() {
     setBusy(true); setMessage("");
-    try { setRequests(await reviewHelpRequests(key)); }
+    try { setRequests(await reviewHelpRequests()); }
     catch (error) { setRequests(null); setMessage(error.message); }
     finally { setBusy(false); }
   }
   async function decide(request, action) {
     setBusy(true); setMessage("");
     try {
-      const result = await decideHelpRequest(key, request.request_no, request.revision, action);
+      const result = await decideHelpRequest(request.request_no, request.revision, action);
       setMessage(result.reply);
-      setRequests(await reviewHelpRequests(key));
+      setRequests(await reviewHelpRequests());
     } catch (error) { setMessage(error.message); }
     finally { setBusy(false); }
   }
   return <section>
     <p>Review ownership transfers requested through Winnie.</p>
-    <label>Admin access key <input type="password" autoComplete="off" value={key}
-      onChange={event => { setKey(event.target.value); setRequests(null); }} /></label>{" "}
-    <button className="btn" disabled={busy || !key} onClick={load}>Load requests</button>
+    <button className="btn" disabled={busy} onClick={load}>Load requests</button>
     <p role="status">{message}</p>
     {requests?.map(request => <div className="panel" key={request.request_no}>
       <h3>HELP-{request.request_no}: {request.task?.title || "Task reassignment"}</h3>

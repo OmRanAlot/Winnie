@@ -1,12 +1,12 @@
 // The design's landing and login pages, signing in with the real Supabase email/password account.
 // Shown by SessionGate when there is no session. Accounts are created by an admin in Supabase.
 import { useState, type FormEvent } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase.js';
 import { Shell } from './Shell';
 
 type Page = 'landing' | 'login' | 'reset';
 
-export default function Login() {
+export default function Login({ sessionNotice = '' }: { sessionNotice?: string }) {
     const [page, setPage] = useState<Page>('landing');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -39,11 +39,12 @@ export default function Login() {
 
     function reset(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        run(() => supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin }),
+        run(() => supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/auth/set-password` }),
             'If that email has an account, a reset link is on its way.');
     }
 
     const messages = <>
+        {sessionNotice && <p role="status">{sessionNotice}</p>}
         {error && <p role="alert" style={{ margin: 0 }}>{error}</p>}
         {notice && <p role="status" style={{ margin: 0 }}>{notice}</p>}
     </>;
@@ -58,6 +59,7 @@ export default function Login() {
             <img className="logo" src="/wics-logo.png" alt="WiCS logo"
                 onError={event => { event.currentTarget.style.display = 'none'; }} />
             <h2>Ask Winnie!</h2>
+            {messages}
             <button className="btn" style={{ width: 260, fontSize: 24 }} onClick={() => go('login')}>Login</button>
             <p style={{ margin: 0 }}>No account yet? Ask the President or an admin to add you.</p>
         </div></Shell>;

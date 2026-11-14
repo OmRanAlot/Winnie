@@ -1,12 +1,12 @@
 """Durable generation/status/review endpoints mounted under /api/planning/runs."""
 
 import logging
-from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
+from app.core.auth import require_admin
 from app.core.settings import Settings
 from app.integrations.planning_runs import RunConflict, RunNotFound
 from app.routes.tasks import envelope
@@ -25,12 +25,7 @@ def get_planning_runs():
 Runs = Annotated[PlanningRuns, Depends(get_planning_runs)]
 
 
-def authorize_review(x_winnie_planning_review_key: str = Header(default="")):
-    expected = Settings().planning_review_api_key.get_secret_value()
-    if not expected:
-        raise HTTPException(503, "Configure WINNIE_PLANNING_REVIEW_API_KEY to enable review.")
-    if not compare_digest(expected.encode(), x_winnie_planning_review_key.encode()):
-        raise HTTPException(401, "Invalid planning review key.")
+authorize_review = require_admin
 
 
 def operation(call):

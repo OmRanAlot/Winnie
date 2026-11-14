@@ -9,11 +9,13 @@ What is planned but not built lives in the docstrings of app/__init__.py and rou
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.auth import require_member
 from app.core.logging_config import RequestLogMiddleware, setup_logging
 from app.core.settings import Settings
+from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
 from app.routes.help_requests import internal as internal_help_router
 from app.routes.help_requests import router as help_router
@@ -39,13 +41,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(help_router)
 app.include_router(internal_help_router)
-app.include_router(recordings_router)
+app.include_router(recordings_router, dependencies=[Depends(require_member)])
 app.include_router(reminders_router)
-app.include_router(meetings_router)
-app.include_router(assign_task_router)
-app.include_router(tasks_router)
+app.include_router(meetings_router, dependencies=[Depends(require_member)])
+app.include_router(assign_task_router, dependencies=[Depends(require_member)])
+app.include_router(tasks_router, dependencies=[Depends(require_member)])
 app.include_router(messages_router)
 app.include_router(planning_router)
 app.include_router(members_router)

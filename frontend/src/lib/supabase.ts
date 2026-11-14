@@ -1,6 +1,2 @@
-import { createClient } from '@supabase/supabase-js';
-
-export const supabase = createClient(
-    import.meta.env.VITE_SUPABASE_URL,
-    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-);
+// Compatibility export: all screens use one Auth client instance.
+export { supabase } from "./supabase.js";

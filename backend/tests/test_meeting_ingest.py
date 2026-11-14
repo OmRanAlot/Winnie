@@ -59,7 +59,7 @@ def db(monkeypatch):
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, signed_in_member):
     monkeypatch.setattr(recordings, "RECORDINGS_DIR", tmp_path)
     app.dependency_overrides[task_assignment.get_settings] = lambda: Settings(
         GEMINI_API_KEY="test-key", GEMINI_MODEL="test-model", _env_file=None
