@@ -10,6 +10,8 @@ const migrations = await Promise.all([
   "20261114080000_create_tasks.sql", "20261114100000_add_tracker_context.sql",
   "20261114120000_add_messaging_members.sql", "20261114160000_message_task_completions.sql",
   "20261114180000_deadline_reminders.sql",
+  "20261114190000_help_checkin_schedule.sql",
+  "20261114200000_help_handoffs.sql",
 ].map(name => readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8")));
 
 async function database() {
@@ -50,6 +52,108 @@ async function finish(db, item, outcome="sent", providerId="provider-1") {
 async function status(db, id) {
   return (await db.query("select status,reason from public.reminder_deliveries where id=$1",[id])).rows[0];
 }
+
+async function helpRequest(db, event="help-1") {
+  const task = (await db.query("select * from public.tasks where id=$1",[taskId])).rows[0];
+  return (await db.query(`select public.request_task_help('imessage',$1,'+15555550123','ONE',$2,
+    $3,$4,'Demo One','spring-2027') as result`,[event,"a".repeat(64),taskId,task.updated_at])).rows[0].result;
+}
+async function transition(db, number, action, actor="ONE", revision=1, selected=null, assignee=null) {
+  const candidates = JSON.stringify([{code:"TWO",name:"Demo Two",reason:"Relevant skills",open:1}]);
+  return (await db.query(`select public.help_transition($1,$2,$3,$4,$5,$6,$7) as result`,
+    [number,revision,action,actor,candidates,selected,assignee])).rows[0].result;
+}
+async function helpPeople(db) {
+  await db.exec(`insert into public.members(code,display_name,messaging_admin) values
+   ('TWO','Demo Two',false),('ADMIN','Demo Admin',true);
+   insert into public.member_identities(platform,sender_id,member_code,reminders_enabled) values
+   ('imessage','+15555550124','TWO',true),('imessage','+15555550125','ADMIN',true);`);
+}
+
+test("help requests deduplicate event and repeated requests, and only an admin transfers ownership", async () => {
+ const db=await database();
+ try {
+  await helpPeople(db);
+  const request=await helpRequest(db);
+  assert.equal((await helpRequest(db)).replayed,true);
+  assert.equal((await helpRequest(db,"help-2")).request_no,request.request_no);
+  await transition(db,request.request_no,"candidates");
+  await transition(db,request.request_no,"select","ONE",1,"TWO");
+  assert.equal((await db.query("select assignee_text from tasks where id=$1",[taskId])).rows[0].assignee_text,"Demo One");
+  await assert.rejects(transition(db,request.request_no,"approve","ONE",2,null,"Demo Two"),/Not a messaging admin/);
+  await assert.rejects(transition(db,request.request_no,"approve","ADMIN",1,null,"Demo Two"),/Request changed/);
+  await transition(db,request.request_no,"approve","ADMIN",2,null,"Demo Two");
+  assert.equal((await db.query("select assignee_text from tasks where id=$1",[taskId])).rows[0].assignee_text,"Demo Two");
+  assert.equal((await db.query("select status from task_help_requests")).rows[0].status,"approved_group_pending");
+  await assert.rejects(transition(db,request.request_no,"approve","ADMIN",2,null,"Demo Two"),/Task or request changed/);
+ } finally {await db.close();}
+});
+
+test("new reminder kinds are accepted and stale tasks invalidate pending help requests",async()=>{
+ const db=await database();
+ try {
+  for(const kind of ["fourteen_day","five_day_help"]) {
+   await db.query(`select queue_deadline_reminder($1,'ONE','2027-01-20',$2,'mock',
+    '2027-01-01T14:00Z','2027-01-19T14:00Z','+15555550123','Demo One','Test',$3)`,[taskId,kind,now]);
+  }
+  await helpRequest(db);
+  await db.exec("update tasks set due_date='2027-01-21'");
+  assert.equal((await db.query("select status from task_help_requests")).rows[0].status,"cancelled");
+ }finally{await db.close();}
+});
+
+test("admin texts deduplicate and shared-number mode leaves group creation pending",async()=>{
+ const db=await database();
+ try {
+  await helpPeople(db);
+  const r=await helpRequest(db);
+  await transition(db,r.request_no,"candidates");
+  await transition(db,r.request_no,"select","ONE",1,"TWO");
+  const item=(await db.query("select claim_help_notification(false) as item")).rows[0].item;
+  assert.equal(item.recipient,"+15555550125");
+  assert.match(item.text,/approve HELP-1 v2/);
+  assert.equal((await db.query("select claim_help_notification(false) as item")).rows[0].item,null);
+  await db.query("select finish_help_notification($1,$2,'sent','admin-text-1')",[item.id,item.claim_token]);
+  await transition(db,r.request_no,"approve","ADMIN",2,null,"Demo Two");
+  const decision=(await db.query("select claim_help_notification(false) as item")).rows[0].item;
+  assert.equal(decision.kind,"dm");
+  await db.query("select finish_help_notification($1,$2,'sent','decision-text')",[decision.id,decision.claim_token]);
+  const newOwner=(await db.query("select claim_help_notification(false) as item")).rows[0].item;
+  assert.equal(newOwner.kind,"dm");
+  assert.deepEqual(new Set([decision.recipient,newOwner.recipient]),new Set(['+15555550123','+15555550124']));
+  await db.query("select finish_help_notification($1,$2,'sent','new-owner-text')",[newOwner.id,newOwner.claim_token]);
+  assert.equal((await db.query("select claim_help_notification(false) as item")).rows[0].item,null);
+  const group=(await db.query("select claim_help_notification(true) as item")).rows[0].item;
+  assert.equal(group.kind,"group");
+  await assert.rejects(db.query("select finish_help_notification($1,$2,'sent','group-123')",[group.id,group.claim_token]),/must be bound/);
+  await db.query("select bind_help_group($1,$2,'group-123')",[group.id,group.claim_token]);
+  await db.query("select bind_help_group($1,$2,'group-123')",[group.id,group.claim_token]);
+  await db.query("select finish_help_notification($1,$2,'sent','group-123')",[group.id,group.claim_token]);
+  await db.query("select finish_help_notification($1,$2,'sent','group-123')",[group.id,group.claim_token]);
+  assert.equal((await db.query("select group_id from task_help_requests")).rows[0].group_id,"group-123");
+  await db.query("select report_help_group(1,'imessage','update-1','TWO','Waiting for room confirmation')");
+  await db.query("select report_help_group(1,'imessage','update-1','TWO','Waiting for room confirmation')");
+  assert.equal((await db.query("select count(*)::int n from help_notifications where dedupe_key like 'update:%'")).rows[0].n,1);
+  await assert.rejects(db.query("select report_help_group(1,'imessage','foreign','ADMIN','Nope')"),/Not a handoff participant/);
+  await db.exec("update tasks set status='done'; update tasks set status='done'");
+  assert.equal((await db.query("select count(*)::int n from help_notifications where dedupe_key='completed:1:ADMIN'")).rows[0].n,1);
+ }finally{await db.close();}
+});
+
+test("group actions with an uncertain outcome cannot be sent or created twice",async()=>{
+ const db=await database();
+ try {
+  await helpPeople(db); const r=await helpRequest(db);
+  await transition(db,r.request_no,"candidates"); await transition(db,r.request_no,"select","ONE",1,"TWO");
+  await transition(db,r.request_no,"approve","ADMIN",2,null,"Demo Two");
+  await db.exec("update help_notifications set status='cancelled' where kind='dm'");
+  const group=(await db.query("select claim_help_notification(true) as item")).rows[0].item;
+  await db.query("select finish_help_notification($1,$2,'uncertain',null)",[group.id,group.claim_token]);
+  assert.equal((await db.query("select claim_help_notification(true) as item")).rows[0].item,null);
+  await db.exec("set role authenticated");
+  await assert.rejects(db.query("select claim_help_notification(true)"),/permission denied/);
+ }finally{await db.close();}
+});
 
 test("repeat scans and competing workers produce one send, including after restart", async () => {
   const db = await database();

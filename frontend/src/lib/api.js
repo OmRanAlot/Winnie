@@ -98,6 +98,16 @@ export async function getCandidates(taskId) {
   return body.data;
 }
 
+export async function reviewHelpRequests(key) {
+  return (await request("/help-requests", { headers: { "X-Winnie-Api-Key": key } })).data;
+}
+
+export async function decideHelpRequest(key, number, revision, action) {
+  return (await request(`/help-requests/${number}/decision`, {
+    method: "POST", headers: { "X-Winnie-Api-Key": key }, body: JSON.stringify({ revision, action }),
+  })).data;
+}
+
 // {task id: [member codes]} for the active semester; null = assignee cell not recognized yet.
 export async function getAssignments() {
   const body = await request("/members/assignments");

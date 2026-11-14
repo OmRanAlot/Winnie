@@ -1,6 +1,7 @@
 import { useState, useEffect, Fragment } from "react";
 import { getAssignments, getCandidates, getMembers, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
 import Recorder from "./Recorder.jsx";
+import HelpReview from "./HelpReview.jsx";
 
 /* ---------- Placeholder data (replace with backend responses) ---------- */
 // Sample people: shown when the backend is unreachable, and still used by the sample
@@ -357,7 +358,6 @@ export default function App() {
   const [adminShowAllGantt, setAdminShowAllGantt] = useState(false);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState("");
-  const [reqs, setReqs] = useState(REQUESTS);
   const [open, setOpen] = useState({});
   const [notes, setNotes] = useState({});
   const [recorder, setRecorder] = useState(null); // meeting kind being recorded, or null
@@ -608,10 +608,7 @@ export default function App() {
       page = (<><Top title={`Tasks Re-assigned: ${REQUESTS.length}`} tag />{REQUESTS.map((r) => <div className="due" key={r.id}><span style={{ width: 110, fontSize: 18 }}>11/1{r.id}/2026:</span><button className="pill" onClick={() => go("task", { id: r.task })}>{task(r.task).title}</button><span style={{ fontSize: 18, width: 230 }}>Assignee: {person(r.to).name}</span></div>)}</>);
       break;
     case "review":
-      page = (<><Top title="Review Pending Task Re-assignments" tag />{reqs.map((r) => (<div className="req" key={r.id}><div className="panel">Task Re-assignment Request:<br />“{task(r.task).title}”<br />{person(r.from).name} → {person(r.to).name}</div>
-        <button className="rb" style={{ background: "#5f7a3d" }} aria-label="Approve" onClick={() => { setReqs(reqs.filter((x) => x.id !== r.id)); say("Approved — recipient will be notified"); }}><Icon n="check" s={24} /></button>
-        <button className="rb" style={{ background: "#b5472a" }} aria-label="Deny" onClick={() => { setReqs(reqs.filter((x) => x.id !== r.id)); say("Request denied"); }}><Icon n="x" s={24} /></button></div>))}
-        {!reqs.length && <p className="empty">No pending requests. New ones will appear here.</p>}</>);
+      page = (<><Top title="Review Pending Task Re-assignments" tag /><HelpReview people={PEOPLE} /></>);
       break;
     case "meetmetrics":
       page = <Grid title="Meeting Metrics" tag onPick={(q) => go("mm", { id: q.id })} />;
@@ -635,8 +632,8 @@ export default function App() {
       {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />
         {modal.reassign[2] && <small style={{ display: "block", margin: "6px 0" }}><b>{modal.reassign[2].fit === "strong" ? "Strong fit" : "Possible fit"}:</b> {modal.reassign[2].reason}<br />
           Skills: {modal.reassign[2].matched_skills.join(", ")} · {modal.reassign[2].due_this_week} due this week, {modal.reassign[2].open} open</small>}
-        <small>Your request goes to an admin for approval.</small>
-        <div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button><button className="btn" onClick={() => { setModal(null); say("Reassignment request sent to admin"); }}>Send request</button></div></div></div>)}
+        <small>To request a transfer, text Winnie from your linked account: help {modal.reassign[0].code}. Choose a suggestion there to request admin approval.</small>
+        <div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Close</button></div></div></div>)}
       {recorder && <Recorder kind={recorder} onClose={() => setRecorder(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <div role="status" style={{ position: "fixed", top: 8, right: 12, fontSize: 12, padding: "4px 10px", borderRadius: 999, background: live ? "#7fb08a" : "#e8a36b", color: "#fff", fontWeight: 700 }}>{source}</div>

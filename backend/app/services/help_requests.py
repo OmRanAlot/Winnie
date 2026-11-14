@@ -8,12 +8,13 @@ from app.services.reminders import utc_now
 from app.services.tasks import TaskNotFound
 
 HELP_COMMAND = re.compile(r"(?:help|need help)\s+(WIN-[0-9]{6}-[0-9]+)", re.IGNORECASE)
-YES = {"yes", "yes please", "yeah", "yep", "i need help", "i could use help"}
+YES = {"yes", "yes please", "yeah", "yea", "yep", "sure", "i need help", "i could use help",
+       "yes i need help", "yeah i need help", "yea i need help", "yes i'd like suggestions"}
 NO = {"no", "no thanks", "not now"}
 
 
 def help_request_reply(message, members, tasks, store, semester, clock=utc_now):
-    text = message.text.strip().lower().rstrip(".! ")
+    text = message.text.strip().lower().replace(",", "").rstrip(".! ")
     command = HELP_COMMAND.fullmatch(text)
     if not command and text not in YES | NO:
         return None

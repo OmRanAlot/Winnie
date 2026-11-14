@@ -1,5 +1,9 @@
 # Winnie backend
 
+GitHub Actions runs backend, messaging, database, and container checks and
+publishes passing default-branch images. See [CI setup](../docs/CI.md) for
+required checks, image tags, and production deployment configuration.
+
 FastAPI service managed with [uv](https://docs.astral.sh/uv/).
 
 ```bash
@@ -115,6 +119,10 @@ natural-language updates. It uses the existing backend Gemini credentials/model.
 
 ## Deadline reminders
 
+Two-week reminders and five-day replacement check-ins are included. See
+[help requests and approved handoffs](../docs/HELP_WORKFLOW.md) for the additional
+migrations, admin text approvals and group capability requirement.
+
 See [reminders and delivery deduplication](../docs/REMINDERS.md) for the new migration,
 recipient opt-in, read-only preview, persistent mock outbox, and automatic Photon polling.
 Reminders default to disabled/mock. The rules are seven days, three days, and the
@@ -127,6 +135,10 @@ provider outcomes are held for review instead of automatically retried.
 idea-specific draft through the optional Deep Agents adapter. See the
 [planning guide](../docs/EVENT_PLANNING.md) for private context preparation,
 model setup and limitations. Drafts do not create tasks or send messages.
+
+`POST /api/planning/runs` adds durable generation, progress polling, recovery of
+completed specialist stages and a checkpointed human-review pause. See the
+[durable planning guide](../docs/PLANNING_RUNS.md). Approving a draft does not activate tasks.
 
 ## Browser recordings
 

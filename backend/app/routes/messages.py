@@ -4,16 +4,17 @@ from secrets import compare_digest
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from app.agents.message_interpreter import GeminiMessageInterpreter
-from app.integrations.message_completion import CompletionStore
-from app.integrations.help_requests import HelpRequestStore
 from app.core.settings import Settings
+from app.integrations.help_requests import HelpRequestStore
+from app.integrations.message_completion import CompletionStore
 from app.integrations.supabase import StorageUnavailable
 from app.services.conversation import conversation_reply
-from app.services.help_requests import help_request_reply
-from app.services.members import MemberStore
+from app.services.help_workflow import group_reply, help_workflow_reply
+from app.services.members import AliasConflict, MemberStore
 from app.services.message_replies import MENU, personal_reply
 from app.services.tasks import TaskStore
 
@@ -26,6 +27,7 @@ class IncomingMessage(BaseModel):
     platform: str | None = Field(default=None, max_length=50)
     conversation_type: Literal["dm", "group", "unknown"] = "unknown"
     message_id: str | None = Field(default=None, min_length=1, max_length=500)
+    space_id: str | None = Field(default=None, min_length=1, max_length=500)
 
 
 def get_member_store():
@@ -49,7 +51,7 @@ def get_help_request_store():
 
 
 @router.post("/messages")
-def handle_message(
+async def handle_message(
     message: IncomingMessage,
     members: Annotated[MemberStore, Depends(get_member_store)],
     tasks: Annotated[TaskStore, Depends(get_task_store)],
@@ -59,9 +61,9 @@ def handle_message(
     x_winnie_bridge_secret: str = Header(default=""),
 ):
     text = message.text.strip().lower()
-    if text == "ping":
+    if text == "ping" and message.conversation_type != "group":
         return {"reply": "pong 🏓"}
-    if text in ("", "help", "menu", "start"):
+    if text in ("", "help", "menu", "start") and message.conversation_type != "group":
         return {"reply": MENU}
     settings = Settings()
     expected = settings.messaging_bridge_secret.get_secret_value()
@@ -70,13 +72,18 @@ def handle_message(
     if not compare_digest(x_winnie_bridge_secret.encode(), expected.encode()):
         raise HTTPException(401, "Invalid messaging bridge credentials.")
     try:
-        if text in ("1", "tasks", "my tasks", "2", "whoami"):
-            reply = personal_reply(message, members, tasks, settings.active_semester)
+        if message.conversation_type == "group":
+            reply = await group_reply(message, members, tasks, completions, interpreter, help_requests, settings)
+            return {"reply": reply}
+        elif text in ("1", "tasks", "my tasks", "2", "whoami"):
+            reply = await run_in_threadpool(personal_reply, message, members, tasks, settings.active_semester)
         else:
-            reply = help_request_reply(message, members, tasks, help_requests, settings.active_semester)
+            reply = await help_workflow_reply(message, members, tasks, help_requests, settings)
             if reply is None:
-                reply = conversation_reply(message, members, tasks, completions, interpreter, settings)
+                reply = await run_in_threadpool(conversation_reply, message, members, tasks, completions, interpreter, settings)
     except StorageUnavailable:
         reply = "I couldn't load member or task data right now. Please try again later."
+    except AliasConflict:
+        reply = "Member aliases need admin review before this task can be changed."
     return {"reply": reply}
 

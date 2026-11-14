@@ -14,7 +14,9 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
 COPY app ./app
-COPY data ./data
+# Only the versioned runtime fixture belongs in the image. Local data may contain
+# recordings, credentials, virtual environments, or database state.
+COPY data/eboardMembers.json ./data/eboardMembers.json
 
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/data/recordings \

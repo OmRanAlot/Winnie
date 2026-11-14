@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.settings import REPO_ROOT, Settings
+from app.routes.planning_runs import router as runs_router
 from app.routes.tasks import authorize_tasks, envelope
 from app.schemas.pipeline import PipelineRequest
 from app.schemas.planning import PlanningDraft, PlanningRequest
@@ -11,6 +12,7 @@ from app.services.planning_pipeline import run_pipeline
 
 router = APIRouter(prefix="/api/planning", tags=["planning"],
                    dependencies=[Depends(authorize_tasks)])
+router.include_router(runs_router)
 
 
 @router.post("/drafts")

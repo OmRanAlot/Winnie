@@ -3,12 +3,12 @@
 import argparse
 import json
 
+from app.core.settings import Settings
 from app.integrations.reminders import ReminderStore
 from app.integrations.supabase import StorageUnavailable
 from app.services.members import MemberStore
 from app.services.reminders import instant, next_reminder, scan_reminders, utc_now
 from app.services.tasks import TaskStore
-from app.settings import Settings
 
 
 def main():

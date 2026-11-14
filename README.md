@@ -149,10 +149,13 @@ those two endpoints. The browser never talks to Supabase directly.
 
 ## What exists today
 
-This is a development scaffold: a browser conversation recorder (audio + transcript saved as JSON), Gemini task assignment, a Supabase task store with a Gantt timeline, the API health, recordings and tasks endpoints, configuration loading, and tests. Agent planning, member persistence, approval enforcement, messaging, and reminders are planned in the linked documents; they are not implemented yet. No credentials are needed for the starter health check. Settings marked as future in `.env.example` are reserved for later phases.
+This development project includes a browser conversation recorder, Gemini task extraction,
+Supabase task storage, member profiles, Photon messaging and tests. The health endpoint
+needs no credentials. Feature guides explain which migrations and settings enable each integration.
 
-The backend also includes task imports, member messaging support and read-only event planning
-drafts (`POST /api/planning/drafts`). Proposal persistence, approval/activation and scheduled
-reminders remain planned. See the feature guides for integration setup.
+The backend includes task imports, verified personal task replies and read-only event planning
+drafts (`POST /api/planning/drafts`). [Deadline reminders](docs/REMINDERS.md) use a durable
+outbox. [Help requests](docs/HELP_WORKFLOW.md) reuse skills/workload recommendations and
+require admin approval before transferring ownership. Event-plan activation remains separate.
 
 Never commit `.env` files, actual member phone numbers, inbox contents, recordings, or private transcripts. Only `VITE_` values are exposed to browser code; put provider credentials in the backend environment.

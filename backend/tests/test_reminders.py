@@ -32,9 +32,11 @@ def settings(**changes):
     })
 
 
-def test_three_reminder_windows_are_local_calendar_times_and_do_not_overlap():
+def test_five_reminder_windows_are_local_calendar_times_and_do_not_overlap():
     expected = [
+        ("2026-11-06T14:00:00+00:00", "fourteen_day"),
         ("2026-11-13T14:00:00+00:00", "seven_day"),
+        ("2026-11-15T14:00:00+00:00", "five_day_help"),
         ("2026-11-17T14:00:00+00:00", "three_day"),
         ("2026-11-19T23:00:00+00:00", "previous_evening"),
     ]
@@ -44,7 +46,7 @@ def test_three_reminder_windows_are_local_calendar_times_and_do_not_overlap():
         assert slots[0]["kind"] == kind
         assert slots[0]["scheduled_at"] == stamp
     assert not reminder_slots(task(), at("2026-11-20T05:00:00+00:00"))
-    assert not reminder_slots(task(), at("2026-11-12T14:00:00+00:00"))
+    assert not reminder_slots(task(), at("2026-11-05T14:00:00+00:00"))
 
 
 def test_dst_changes_use_calendar_days_not_24_hour_subtraction():
@@ -110,6 +112,7 @@ class Store:
             return None
         self.items[key] = {
             **recipient, "task_id": source["id"], "id": str(len(self.items)), "claim_token": "token",
+            "kind": slot["kind"],
             "transport": transport, "body": body, "status": "pending",
         }
         return self.items[key]["id"]
@@ -177,6 +180,17 @@ def test_assignment_is_checked_again_after_claim():
     result = next_reminder(store, tasks, Members(), settings(), clock=lambda: now, scan=False)
     assert result["delivery"] is None
     assert next(iter(store.items.values()))["status"] == "cancelled"
+
+
+def test_old_seven_day_queue_cannot_send_during_the_new_help_window():
+    store, tasks, members = Store(), Tasks(), Members()
+    scan_reminders(store, tasks, members, settings(), at("2026-11-13T14:00:00+00:00"), write=True)
+    config = settings(reminder_transport="photon")
+    now = at("2026-11-15T14:00:00+00:00")
+    assert next_reminder(store, tasks, members, config, clock=lambda: now, scan=False)["delivery"] is None
+    assert next(iter(store.items.values()))["status"] == "cancelled"
+    text = next_reminder(store, tasks, members, config, clock=lambda: now)["delivery"]["text"]
+    assert "suggestions" in text and "help WIN-202610-1" in text and "admin approval" in text
 
 
 def test_internal_routes_require_bridge_auth_even_when_disabled(monkeypatch):

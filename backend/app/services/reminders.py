@@ -75,7 +75,7 @@ def scan_reminders(store, tasks, members, settings, now, *, write=False):
                             f"Your deadline for {task['title']}{event} ({task['task_code']}) "
                             f"is getting close: {task['due_date']}. Now is a good time to ask for help. "
                             "Would you like suggestions for someone we could reach out to? "
-                            f"Reply help {task['task_code']}."
+                            f"Reply help {task['task_code']}. Transfers need admin approval."
                         )
                     else:
                         body = (
@@ -106,6 +106,10 @@ def next_reminder(store, tasks, members, settings, clock=utc_now, *, scan=True):
             authorized = (
                 task.get("semester_code") == settings.active_semester
                 and assigned is not None and item["member_code"] in assigned
+                and any(slot["kind"] == item["kind"] for slot in reminder_slots(
+                    task, clock(), timezone_name=settings.reminder_timezone,
+                    daytime_hour=settings.reminder_daytime_hour, evening_hour=settings.reminder_evening_hour,
+                ))
             )
         except (TaskNotFound, AliasConflict):
             pass

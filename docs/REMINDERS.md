@@ -9,7 +9,9 @@ direct messages. Both programs must be running for automatic delivery.
 
 | Reminder | Local time in America/New_York |
 |---|---|
+| Fourteen days before the deadline | 9:00 AM |
 | Seven days before the deadline | 9:00 AM |
+| Five days before: offer replacement suggestions | 9:00 AM |
 | Three days before the deadline | 9:00 AM |
 | Previous evening | 6:00 PM |
 
@@ -35,6 +37,11 @@ SQL Editor, after the existing task/member migrations. It adds:
 - `tasks.reminder_schedule_started_at`: tracks schedule resets after deadline or
   assignment changes. Existing tasks are initialized from their creation time.
 - Server-only queue/claim/begin/result functions and a cancellation trigger.
+
+Then apply `20261114190000_help_checkin_schedule.sql` for the two added reminder
+stages and saved help requests, and `20261114200000_help_handoffs.sql` for recommendations,
+approval, transfers and handoff notifications. See [help workflow](HELP_WORKFLOW.md).
+Run each migration once, in order; installing it does not enable message delivery.
 
 Installing the migration does not send messages. Task status, titles and deadlines
 are preserved; backfilling schedule metadata updates task modification timestamps.

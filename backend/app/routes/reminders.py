@@ -7,12 +7,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.settings import Settings
 from app.integrations.reminders import ReminderStore
 from app.integrations.supabase import StorageUnavailable
 from app.services.members import MemberStore
 from app.services.reminders import next_reminder, utc_now
 from app.services.tasks import TaskStore
-from app.settings import Settings
 
 
 def authorize_reminder_bridge(x_winnie_bridge_secret: str = Header(default="")):

@@ -7,7 +7,7 @@ type BridgeMessage = {
   content: { type: string; text?: unknown };
 };
 
-export function bridgePayload(message: BridgeMessage, spaceType: unknown) {
+export function bridgePayload(message: BridgeMessage, spaceType: unknown, spaceId?: string) {
   if (
     message.direction !== "inbound" || message.sender?.kind === "agent" ||
     message.content.type !== "text" || typeof message.content.text !== "string"
@@ -20,6 +20,7 @@ export function bridgePayload(message: BridgeMessage, spaceType: unknown) {
     sender_id: message.sender?.id ?? null,
     platform: message.platform,
     conversation_type: spaceType === "dm" || spaceType === "group" ? spaceType : "unknown",
+    ...(spaceId ? { space_id: spaceId } : {}),
   };
 }
 

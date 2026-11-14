@@ -40,3 +40,30 @@ class HelpRequestStore:
             "p_expected_updated_at": task["updated_at"],
             "p_expected_assignee_text": task["assignee_text"], "p_semester": semester,
         }))
+
+    def rpc(self, name, **values):
+        return self._execute(lambda client: client.rpc(name, values))
+
+    def get(self, number):
+        rows = self._execute(lambda client: client.table("task_help_requests").select("*").eq("request_no", number))
+        return rows[0] if rows else None
+
+    def is_admin(self, member_code):
+        rows = self._execute(lambda client: client.table("members").select("code").eq(
+            "code", member_code).eq("active", True).eq("messaging_admin", True))
+        return len(rows) == 1
+
+    def receipt(self, message):
+        rows = self._execute(lambda client: client.table("task_help_request_messages").select("request_no").eq(
+            "platform", message.platform).eq("message_id", message.message_id))
+        return self.get(rows[0]["request_no"]) if rows else None
+
+    def pending(self):
+        return self._execute(lambda client: client.table("task_help_requests").select(
+            "request_no,task_id,requester_code,selected_code,status,revision,candidates,task:tasks(title,task_code)"
+        ).eq("status", "pending_approval").order("request_no").limit(100))
+
+    def group(self, group_id):
+        rows = self._execute(lambda client: client.table("task_help_requests").select("*").eq(
+            "group_id", group_id).eq("status", "group_active"))
+        return rows[0] if rows else None

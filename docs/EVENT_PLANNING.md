@@ -4,7 +4,9 @@
 format (`gbm`, `technical_workshop`, `hackathon`, `other`). It returns draft tasks,
 suggested roles, date-only deadlines, dependencies, source evidence and open questions.
 Dates have no implied time of day. These are proposals, not persisted task records.
-There is no approval/activation endpoint or messaging integration in this slice.
+The original draft routes do not persist or activate tasks. For checkpointed runs,
+progress and approve/reject review, see [PLANNING_RUNS.md](PLANNING_RUNS.md).
+Activation and messaging remain separate.
 
 ## Staged pipeline (preferred)
 
@@ -246,10 +248,13 @@ dependency cycles, dependency date ordering and deadlines relative to event phas
 Missing dates stay null. Roles are proposals, with no inferred person/availability.
 Source cells are untrusted data in the model instructions. Provider failures return
 a generic error without exposing prompts or keys. Model output never becomes an
-active assignment. Runs have no durable checkpointer or cross-run memory.
+active assignment. These original draft routes have no durable checkpointer or
+cross-run memory. The `/runs` workflow adds persistent proposal/review checkpoints
+and reuse of completed specialist responses; it does not add automatic learning.
 
 ## Next integration
 
-Persist and edit proposal revisions, implement President approval, resolve roles
-against actual member capacity, then activate the exact approved tasks through the
-task service. Do not turn this draft route into a direct task writer.
+The durable run workflow persists drafts and supports exact-revision review.
+Next add editing, verified President authorization and member-capacity matching,
+then activate the exact approved tasks through the task service. Do not turn a
+draft generation route into a direct task writer.

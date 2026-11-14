@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     reminder_timezone: str = "America/New_York"
     reminder_daytime_hour: int = Field(default=9, ge=0, le=23)
     reminder_evening_hour: int = Field(default=18, ge=0, le=23)
+    help_workflow_enabled: bool = False
+    help_groups_enabled: bool = False  # Enable only with a group-capable Photon number.
+    help_admin_api_key: SecretStr = SecretStr("")
     planning_mode: Literal["mock", "deepagents"] = "mock"
     planning_model: str = ""
     planning_knowledge_path: Path = Path("backend/data/planning/fall-2026.json")
@@ -51,6 +54,8 @@ class Settings(BaseSettings):
     planning_history_semester: str = "fall-2026"
     planning_timeout_seconds: float = Field(default=60, gt=0, le=180)
     planning_pipeline_timeout_seconds: float = Field(default=180, gt=0, le=600)
+    planning_runs_path: Path = Path("backend/data/planning/runs.sqlite3")
+    planning_review_api_key: SecretStr = SecretStr("")
 
     # Gemini (services/task_assignment.py). Read from the unprefixed names used in
     # .env.example; the WINNIE_-prefixed names also work.

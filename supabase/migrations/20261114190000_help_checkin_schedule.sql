@@ -15,7 +15,7 @@ create table public.task_help_requests (
     created_at timestamptz not null default now()
 );
 create unique index task_one_active_help_request_idx
-    on public.task_help_requests(task_id,requester_code) where status <> 'cancelled';
+    on public.task_help_requests(task_id,requester_code) where status not in ('cancelled','denied');
 
 create table public.task_help_request_messages (
     platform text not null,
@@ -59,12 +59,12 @@ begin
         or task.assignee_text is distinct from p_expected_assignee_text
         then raise exception 'Task changed or unavailable'; end if;
     select * into request from public.task_help_requests where task_id=p_task_id
-        and requester_code=p_member_code and status <> 'cancelled' for update;
+        and requester_code=p_member_code and status not in ('cancelled','denied') for update;
     if not found then
         insert into public.task_help_requests(task_id,requester_code,task_version)
         values (p_task_id,p_member_code,task.updated_at) returning * into request;
     end if;
-    response := format('Saved help request HELP-%s for "%s" (%s). No helper has been assigned. Helper recommendations are not connected yet.',
+    response := format('Saved help request HELP-%s for "%s" (%s). Ownership has not changed.',
         request.request_no,task.title,task.task_code);
     insert into public.task_help_request_messages(platform,message_id,sender_id,requester_code,request_hash,request_no,reply)
     values (p_platform,p_message_id,p_sender_id,p_member_code,p_request_hash,request.request_no,response);

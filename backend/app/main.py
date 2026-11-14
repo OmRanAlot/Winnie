@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.logging_config import RequestLogMiddleware, setup_logging
 from app.core.settings import Settings
 from app.routes.health import router as health_router
+from app.routes.help_requests import internal as internal_help_router
+from app.routes.help_requests import router as help_router
 from app.routes.meetings import router as meetings_router
 from app.routes.members import router as members_router
 from app.routes.messages import router as messages_router
@@ -37,6 +39,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health_router)
+app.include_router(help_router)
+app.include_router(internal_help_router)
 app.include_router(recordings_router)
 app.include_router(reminders_router)
 app.include_router(meetings_router)
