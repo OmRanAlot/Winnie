@@ -24,7 +24,14 @@ from app.schemas import TaskStatusUpdate, failure
 from app.services import tasks as task_service
 from app.services.tasks import TaskNotFound, TaskStore
 from app.settings import Settings
-from app.task_schemas import MonthCode, StakeholderCode, TaskCreate, TaskStatus, TaskUpdate
+from app.task_schemas import (
+    MonthCode,
+    SemesterCode,
+    StakeholderCode,
+    TaskCreate,
+    TaskStatus,
+    TaskUpdate,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -110,6 +117,7 @@ def create_task(task: TaskCreate, store: Store):
 def list_task_records(
     store: Store,
     month_code: MonthCode | None = None,
+    semester_code: SemesterCode | None = None,
     status: TaskStatus | None = None,
     stakeholder_code: StakeholderCode | None = None,
     limit: int = Query(default=50, ge=1, le=100),
@@ -119,7 +127,8 @@ def list_task_records(
 
     def operation():
         tasks, total = store.list(
-            month_code=month_code, status=status, stakeholder_code=stakeholder_code,
+            month_code=month_code, semester_code=semester_code,
+            status=status, stakeholder_code=stakeholder_code,
             limit=limit, offset=offset,
         )
         meta["total"] = total

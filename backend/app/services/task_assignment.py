@@ -298,7 +298,8 @@ async def assign_tasks(body: AssignRequest, settings: Annotated[Settings, Depend
         return failure("The e-board roster could not be loaded.", 503)
     try:
         assignments = await get_assignments(
-            body.transcript, eboard, settings.gemini_api_key, settings.gemini_model
+            body.transcript, eboard, settings.gemini_api_key.get_secret_value(),
+            settings.gemini_model,
         )
     except (errors.APIError, httpx.HTTPError):
         logger.exception("Gemini request failed")

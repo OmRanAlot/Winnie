@@ -110,11 +110,16 @@ class TaskStore:
         result = self._execute(lambda table: table.insert(task.model_dump(mode="json")))
         return result.data[0]
 
-    def list(self, *, month_code=None, status=None, stakeholder_code=None, limit=50, offset=0):
+    def list(
+        self, *, month_code=None, semester_code=None, status=None,
+        stakeholder_code=None, limit=50, offset=0,
+    ):
         def query(table):
             request = table.select("*", count="exact")
             if month_code is not None:
                 request = request.eq("month_code", month_code)
+            if semester_code is not None:
+                request = request.eq("semester_code", semester_code)
             if status is not None:
                 request = request.eq("status", status)
             if stakeholder_code is not None:
@@ -146,3 +151,40 @@ class TaskStore:
         result = self._execute(lambda table: table.delete().eq("id", str(task_id)))
         if not result.data:
             raise TaskNotFound
+
+    def tracker_tasks(self, spreadsheet_id: str):
+        """Read the whole source, not just the API's default first page."""
+        tasks, offset = [], 0
+        while True:
+            result = self._execute(
+                lambda table, offset=offset: table.select("*").eq(
+                    "source_spreadsheet_id", spreadsheet_id
+                ).order("id").range(offset, offset + 499)
+            )
+            tasks.extend(result.data)
+            if len(result.data) < 500:
+                return tasks
+            offset += 500
+
+    def insert_import_task(self, task: dict):
+        return self._execute(lambda table: table.insert(task)).data
+
+    def update_import_task(self, task_id: str, expected_updated_at: str, changes: dict):
+        # If another process changed the task after preview, do not overwrite it.
+        return self._execute(lambda table: table.update(changes).eq(
+            "id", task_id
+        ).eq("updated_at", expected_updated_at)).data
+
+    def unfinished_for_semester(self, semester_code: str):
+        """All unfinished candidates, ordered by deadline before personal filtering."""
+        tasks, offset = [], 0
+        while True:
+            page = self._execute(lambda table, offset=offset: table.select("*").eq(
+                "semester_code", semester_code
+            ).neq("status", "done").order(
+                "due_date", nullsfirst=False
+            ).order("id").range(offset, offset + 499)).data
+            tasks.extend(page)
+            if len(page) < 500:
+                return tasks
+            offset += 500

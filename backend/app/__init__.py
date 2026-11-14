@@ -23,6 +23,8 @@ BUILT TODAY
     POST /api/recordings/{id}/assignments  -> services/meeting_tasks.py (Gemini, then Supabase)
     GET  /api/tasks, PATCH /api/tasks/{id}/status  routes/tasks.py -> services/tasks.py
                              -> repository.py -> integrations/supabase_client.py
+    POST /api/planning/drafts routes/planning.py -> services/planning.py -> agents/planner.py
+                             Read-only historical checklist or Deep Agents draft; no activation.
     Everything listed as "Planned" in routes/, services/ and integrations/ is not built yet.
 
 PLANNED, NOT BUILT (no files exist for these on purpose; create them when the feature lands)
@@ -34,10 +36,9 @@ PLANNED, NOT BUILT (no files exist for these on purpose; create them when the fe
                     - Google Sheets / Docs sync
                   Never start the scheduler at FastAPI import time: dev reload or multiple API
                   workers would duplicate every send. One worker, with durable notification dedupe.
-    agents/       Event planner + structured-output schemas. Build only after the deterministic
-                  proposal/approval flow works. Start with transcript extraction, assignment and
-                  timeline steps. Keep model-provider imports out of routes, and never give an
-                  agent unrestricted write/send tools: agent tools call the same services as routes.
+    agents/       Draft planner exists; proposal persistence, revision editing, approval and
+                  activation still need implementation. Keep model-provider imports out of routes,
+                  and never give an agent unrestricted write/send tools.
     schemas.py    Add the {success, data, error, meta} response envelope and Pagination
                   {total, page, limit}. Add per-feature request/response shapes next to Recording.
     main.py       Lifespan hook (open DB engine, shut down cleanly); global error handler that

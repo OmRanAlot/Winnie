@@ -440,14 +440,14 @@ def test_settings_read_the_unprefixed_env_names(monkeypatch):
 
     settings = Settings(_env_file=None)
 
-    assert (settings.gemini_api_key, settings.gemini_model) == ("abc", "gemini-x")
+    assert (settings.gemini_api_key.get_secret_value(), settings.gemini_model) == ("abc", "gemini-x")
 
 
 def test_settings_also_accept_winnie_prefixed_names(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setenv("WINNIE_GEMINI_API_KEY", "prefixed")
 
-    assert Settings(_env_file=None).gemini_api_key == "prefixed"
+    assert Settings(_env_file=None).gemini_api_key.get_secret_value() == "prefixed"
 
 
 def test_settings_default_to_no_key_and_a_default_model(monkeypatch):
