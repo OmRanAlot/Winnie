@@ -22,8 +22,20 @@ console.log("Echo listener started. Text your Photon line from an allowed phone.
 for await (const [space, message] of app.messages) {
   if (message.content.type === "text") {
     try {
-      await space.send(`echo: ${message.content.text}`);
-      console.log("Echo reply sent.");
+      const text = message.content.text.trim().toLowerCase();
+
+      if (text === "help") {
+        await space.send("Hi! I'm Winnie, the WiCS Project Manager. I help coordinate WiCS tasks and ensure nothing is falling behind. For now, try texting ping.");
+      }
+
+      else if (text === "ping") {
+        await space.send("pong 🐼🏓");
+      }
+
+      else {
+        await space.send('Hey! I have not been completely developed yet. Text "help" to see what I can do and my intended purpose. ')
+      }
+      console.log("Message received. Reply sent.");
     } catch {
       console.error("Echo reply failed. Check the Photon connection and project settings.");
     }
