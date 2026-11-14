@@ -13,14 +13,45 @@ uv run ruff check .              # lint
 
 `app/__init__.py` is the map of this package: what each file is, how a request flows, what is built, and what is planned.
 
+## Deploy with Docker and Cloud Run
+
+The [Dockerfile](Dockerfile) builds only the backend. Build it from `backend/` so
+`pyproject.toml`, `uv.lock`, the application, and runtime data are in the build
+context:
+
+```bash
+docker build -t winnie-api .
+docker run --rm -p 8080:8080 --env-file .env winnie-api
+```
+
+For Google Cloud Run, push the image to Artifact Registry and deploy it. Replace
+the placeholders with your project, region, and repository names:
+
+```bash
+gcloud auth configure-docker REGION-docker.pkg.dev
+docker tag winnie-api REGION-docker.pkg.dev/PROJECT_ID/REPOSITORY/winnie-api
+docker push REGION-docker.pkg.dev/PROJECT_ID/REPOSITORY/winnie-api
+gcloud run deploy winnie-api `
+  --image REGION-docker.pkg.dev/PROJECT_ID/REPOSITORY/winnie-api `
+  --region REGION `
+  --platform managed `
+  --allow-unauthenticated
+```
+
+Set `GOOGLE_API_KEY`, `SUPABASE_URL`, and `SUPABASE_SECRET_KEY` as Cloud Run
+environment variables or Secret Manager references; do not bake credentials into
+the image. Cloud Run injects `PORT`, and the container listens on it automatically.
+
 ## Semester task trackers
 
 Task CRUD uses Supabase. The backend loads `WINNIE_SUPABASE_URL` and
-`WINNIE_SUPABASE_SECRET_KEY` from the repository-root `.env`, not `messaging/.env`.
+`SUPABASE_SECRET_KEY` (or legacy `SUPABASE_SERVICE_ROLE_KEY`) from the repository-root
+or `backend/.env`, not `messaging/.env`. The publishable key is for client use;
+`SUPABASE_DB_PWD` is not used by the backend.
 Apply both SQL migrations in order before using the expanded task fields.
 See [tracker import setup](../docs/TRACKER_IMPORT.md) for migration steps, monthly
 snapshot rules, permanent task IDs, the offline CSV/TSV preview, and the reviewed
-Supabase import command (`python -m app.import_tracker`). Imports default to a
+Supabase import command (`python -m app.cli.import_tracker`). Imports default to a
 database preview; actual writes require `--apply --expect-plan <plan_id>`.
 Live Google Sheets synchronization is not implemented yet.
 

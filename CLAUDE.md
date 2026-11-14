@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-The stack is chosen. Built so far: the browser conversation recorder (frontend + `POST /api/recordings`) and `GET /api/health`. Everything else is planned, and is described in docstrings rather than empty placeholder files (see the repository map in `README.md`, and `backend/app/__init__.py`). When integrations are actually built, replace the "Planned integrations" section with what was built.
+The stack is chosen. Built so far: the browser conversation recorder (frontend + `POST /api/recordings`), Gemini task assignment (`POST /api/recordings/{id}/assignments`), the Supabase task store (`supabase/migrations/`, `app/repository.py`, `GET/PATCH /api/tasks`) with a placeholder Gantt timeline (`frontend/src/features/timeline/`), and `GET /api/health`. Everything else is planned, and is described in docstrings rather than empty placeholder files (see the repository map in `README.md`, and `backend/app/__init__.py`). When integrations are actually built, replace the "Planned integrations" section with what was built.
 
 ## Stack and layout
 
@@ -76,6 +76,7 @@ Several roles have two seats, so the data model must handle more than one person
 
 These are named in the spec. The specific APIs have not been chosen yet:
 
+- Supabase (Postgres) is the task store: BUILT. Tables in `supabase/migrations/0001_init.sql`; the backend uses the service-role key via supabase-py (no ORM). Tests use `tests/fake_supabase.py`.
 - Google Sheets (the existing task tracker) and Google Docs (meeting notes and agendas)
 - Discord
 - The shared email inbox

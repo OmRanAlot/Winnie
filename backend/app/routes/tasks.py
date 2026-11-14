@@ -1,16 +1,28 @@
-"""Task CRUD endpoints for the dashboard and backend clients; delegates to services/tasks.py."""
+"""Task endpoints, in two groups on one /api/tasks router.
 
+Timeline (read by the frontend's Gantt view, frontend/src/lib/api.ts), bigint ids, no auth yet:
+    GET   /api/tasks?status=&assignee=&seat=   every task, ordered by deadline (unscheduled last)
+    PATCH /api/tasks/{task_id}/status          body {"status": "open" | "done" | "blocked"}
+
+Task records (CRUD for backend clients), uuid ids, require the X-Winnie-Api-Key header:
+    POST/GET /api/tasks/records, GET/PATCH/DELETE /api/tasks/records/{task_id}
+
+Thin: validates input, calls services/tasks.py, wraps results in the {success, data, error, meta}
+envelope.
+"""
+
+import logging
 from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.responses import JSONResponse
 
+from app.core.settings import Settings
+from app.db import repository
 from app.integrations.supabase import StorageUnavailable
-from app.services.tasks import TaskNotFound, TaskStore
-from app.settings import Settings
-from app.task_schemas import (
+from app.schemas.api import TaskStatusUpdate, failure
+from app.schemas.tasks import (
     MonthCode,
     SemesterCode,
     StakeholderCode,
@@ -18,6 +30,48 @@ from app.task_schemas import (
     TaskStatus,
     TaskUpdate,
 )
+from app.services import tasks as task_service
+from app.services.tasks import TaskNotFound, TaskStore
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+STORE_UNAVAILABLE = "The task store is unavailable. Check the Supabase settings and try again."
+
+
+# --- Timeline -------------------------------------------------------------
+
+
+@router.get("")
+def list_tasks(status: str | None = None, assignee: str | None = None, seat: str | None = None):
+    try:
+        views = task_service.list_task_views(status=status, assignee=assignee, seat=seat)
+    except repository.InvalidStatus as error:
+        return failure(str(error), 422)
+    except task_service.STORAGE_ERRORS:
+        logger.exception("Could not list tasks")
+        return failure(STORE_UNAVAILABLE, 503)
+    return {
+        "success": True,
+        "data": [view.model_dump(mode="json") for view in views],
+        "error": None,
+        "meta": {"count": len(views)},
+    }
+
+
+@router.patch("/{task_id}/status")
+def update_status(task_id: int, body: TaskStatusUpdate):
+    try:
+        view = task_service.set_status(task_id, body.status)
+    except repository.NotFound:
+        return failure("Task not found.", 404)
+    except task_service.STORAGE_ERRORS:
+        logger.exception("Could not update task %s", task_id)
+        return failure(STORE_UNAVAILABLE, 503)
+    return {"success": True, "data": view.model_dump(mode="json"), "error": None, "meta": {}}
+
+
+# --- Task records ---------------------------------------------------------
 
 
 def authorize_tasks(x_winnie_api_key: str = Header(default="")):
@@ -31,9 +85,7 @@ def authorize_tasks(x_winnie_api_key: str = Header(default="")):
         raise HTTPException(401, "Invalid task API key.")
 
 
-router = APIRouter(
-    prefix="/api/tasks", tags=["tasks"], dependencies=[Depends(authorize_tasks)]
-)
+records = APIRouter(prefix="/records", dependencies=[Depends(authorize_tasks)])
 
 
 def get_task_store():
@@ -51,25 +103,18 @@ def run_operation(operation, meta=None):
     try:
         return envelope(operation(), meta)
     except TaskNotFound:
-        return JSONResponse(status_code=404, content={
-            "success": False, "data": None,
-            "error": {"message": "Task not found."}, "meta": {},
-        })
+        return failure("Task not found.", 404)
     except StorageUnavailable:
-        return JSONResponse(status_code=503, content={
-            "success": False, "data": None,
-            "error": {"message": "Task storage is unavailable. Check Supabase configuration."},
-            "meta": {},
-        })
+        return failure("Task storage is unavailable. Check Supabase configuration.", 503)
 
 
-@router.post("", status_code=201)
+@records.post("", status_code=201)
 def create_task(task: TaskCreate, store: Store):
     return run_operation(lambda: store.create(task))
 
 
-@router.get("")
-def list_tasks(
+@records.get("")
+def list_task_records(
     store: Store,
     month_code: MonthCode | None = None,
     semester_code: SemesterCode | None = None,
@@ -92,20 +137,23 @@ def list_tasks(
     return run_operation(operation, meta)
 
 
-@router.get("/{task_id}")
+@records.get("/{task_id}")
 def get_task(task_id: UUID, store: Store):
     return run_operation(lambda: store.get(task_id))
 
 
-@router.patch("/{task_id}")
+@records.patch("/{task_id}")
 def update_task(task_id: UUID, changes: TaskUpdate, store: Store):
     return run_operation(lambda: store.update(task_id, changes))
 
 
-@router.delete("/{task_id}")
+@records.delete("/{task_id}")
 def delete_task(task_id: UUID, store: Store):
     def operation():
         store.delete(task_id)
         return {"id": str(task_id)}
 
     return run_operation(operation)
+
+
+router.include_router(records)

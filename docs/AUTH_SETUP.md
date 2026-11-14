@@ -99,7 +99,7 @@ their login email/password using Supabase Auth rather than updating this table.
 ## Create a sample login
 
 The repository-root `.env` must contain `WINNIE_SUPABASE_URL` and
-`WINNIE_SUPABASE_SECRET_KEY`. From `backend/`, run:
+`SUPABASE_SERVICE_ROLE_KEY`. From `backend/`, run:
 
 ```powershell
 uv run python -m app.create_demo_user --create

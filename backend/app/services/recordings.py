@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import NamedTuple
 from uuid import uuid4
 
-from app.schemas import Recording
+from app.schemas.api import Recording
 
 logger = logging.getLogger(__name__)
 

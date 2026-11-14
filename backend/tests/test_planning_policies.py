@@ -5,8 +5,8 @@ from datetime import date
 
 import pytest
 
-from app.pipeline_schemas import Dependencies, Schedule, ScheduleItem
-from app.planning_schemas import DraftContents, ProposedTask
+from app.schemas.pipeline import Dependencies, Schedule, ScheduleItem
+from app.schemas.planning import DraftContents, ProposedTask
 from app.services.planning_history import match_roles
 from app.services.planning_pipeline import apply_schedule
 from app.services.planning_policies import (
@@ -90,7 +90,7 @@ def test_receiving_and_packing_are_not_ordering(title):
 
 
 def test_revision_moves_prerequisites_earlier_and_preserves_dependency_gap():
-    from app.pipeline_schemas import PipelineDraft
+    from app.schemas.pipeline import PipelineDraft
     from app.services.planning_revision import revise_policy_draft
 
     draft = PipelineDraft.model_validate({

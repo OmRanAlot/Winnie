@@ -1,14 +1,20 @@
 """Winnie backend (FastAPI). Start here to find your way around.
 
-WHAT IS WHERE
-    main.py        Creates the FastAPI app and registers every router. Run this file.
-    settings.py    Environment configuration (reads the repo-root .env, prefix WINNIE_).
-    models.py      Domain objects: Member, Role, Task, Meeting, Notification, ...
-                   Plain dataclasses with validation. Not database tables.
-    schemas.py     API request/response shapes (what crosses HTTP). Currently: Recording.
+WHAT IS WHERE (every folder has its own __init__.py docstring with the file-by-file detail)
+    main.py        The only file at this level. Creates the FastAPI app and registers every
+                   router. Run this file.
+    core/          App-wide plumbing: settings.py (env config, prefix WINNIE_, repo-root .env),
+                   logging_config.py, deadlines.py (spoken deadline -> America/New_York datetime).
+    domain/        models.py: Member, Role, Meeting, Notification, ... (dataclasses) and
+                   ExtractedTask / Task / TaskDependency (Pydantic, mirror the Supabase tables).
+    schemas/       Pydantic shapes that cross a boundary: api.py (Recording, TaskView, the
+                   response envelope), tasks.py, planning.py, pipeline.py.
+    db/            repository.py: Supabase reads/writes for seats, people, meetings, tasks, deps.
     routes/        HTTP endpoints. One file per feature. Thin: validate, call a service.
     services/      Business logic. No HTTP objects in here.
+    agents/        All LangChain / Deep Agents code (planning drafts). Propose-only, no tools.
     integrations/  Clients for outside systems (Google, Discord, email, messaging).
+    cli/           `python -m app.cli.<name>` tools: imports, previews, demo user.
     ../tests/      pytest. One test file per feature, named test_<feature>.py.
 
 HOW A REQUEST FLOWS
@@ -17,26 +23,32 @@ HOW A REQUEST FLOWS
 
 BUILT TODAY
     GET  /api/health         routes/health.py
-    POST /api/recordings     routes/recordings.py -> services/recordings.py -> schemas.Recording
+    POST /api/recordings     routes/recordings.py -> services/recordings.py -> schemas/api.py Recording
+    POST /api/recordings/{id}/assignments  -> services/meeting_tasks.py (Gemini, then Supabase)
+    GET  /api/tasks, PATCH /api/tasks/{id}/status  routes/tasks.py -> services/tasks.py
+                             -> db/repository.py -> integrations/supabase_client.py
     POST /api/planning/drafts routes/planning.py -> services/planning.py -> agents/planner.py
                              Read-only historical checklist or Deep Agents draft; no activation.
+    POST /api/planning/pipeline-drafts  routes/planning.py -> services/planning_pipeline.py
+                             -> agents/stages.py (one Deep Agents call per stage).
+    All LangChain / Deep Agents code lives in agents/ (map and call flow in agents/__init__.py).
+    Nothing outside agents/ imports langchain or deepagents.
     Everything listed as "Planned" in routes/, services/ and integrations/ is not built yet.
 
 PLANNED, NOT BUILT (no files exist for these on purpose; create them when the feature lands)
-    database.py   SQLAlchemy 2.x engine + session factory + a `get_session` FastAPI dependency.
-                  Database not chosen: SQLite for local dev, likely Postgres in prod
-                  (docs/architecture.md). Add Alembic migrations (`uv run alembic init migrations`)
-                  once tables exist. Repositories (find/create/update per table) are deliberately
-                  skipped until there is real persistence; call the session from services at first.
+    database      DONE differently: Supabase (Postgres) via supabase-py, see db/repository.py and
+                  supabase/migrations/. Members, notifications etc. still live only in
+                  domain/models.py.
     jobs.py       Scheduled sweeps, run by a SEPARATE worker process (APScheduler):
                     - deadline sweep (hourly): see services/deadlines.py
                     - email reminder sweep
                     - Google Sheets / Docs sync
                   Never start the scheduler at FastAPI import time: dev reload or multiple API
                   workers would duplicate every send. One worker, with durable notification dedupe.
-    agents/       Draft planner exists; proposal persistence, revision editing, approval and
-                  activation still need implementation. Keep model-provider imports out of routes,
-                  and never give an agent unrestricted write/send tools.
+    agents/       Planners exist (see BUILT TODAY); proposal persistence, revision editing,
+                  approval and activation still need implementation. Keep model-provider imports
+                  inside agents/, out of routes and services, and never give an agent
+                  unrestricted write/send tools (agents/runner.py builds them tool-free).
     schemas.py    Add the {success, data, error, meta} response envelope and Pagination
                   {total, page, limit}. Add per-feature request/response shapes next to Recording.
     main.py       Lifespan hook (open DB engine, shut down cleanly); global error handler that

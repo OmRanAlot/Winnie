@@ -1,13 +1,15 @@
 """Domain objects for Winnie: who is on the board, what work exists, who gets told about it.
 
-These are plain dataclasses that validate themselves on creation. They are NOT database tables
-and hold no business logic; services/ does the work, and database.py (planned, see
-app/__init__.py) will handle persistence.
+Most are plain dataclasses that validate themselves on creation and are not stored yet. The task
+models (ExtractedTask, Task, TaskDependency) are Pydantic and mirror the Supabase tables in
+supabase/migrations/0001_init.sql; app/db/repository.py reads and writes them. No business logic
+lives here; services/ does the work.
 
 Contents, in order:
     Member, Role, RoleSeat        the e-board people and their positions
     Skill                         tags used to suggest substitutes
-    Task, TaskDependency          board work and "A waits on B" links
+    ExtractedTask                 an action item pulled out of a transcript (pre-storage)
+    Task, TaskDependency          stored board work and "A waits on B" links (Supabase rows)
     Meeting                       a transcribed meeting and the tasks pulled out of it
     Notification, NotificationSubscription   who gets told what
     (EmailThread is planned, see the note at the bottom.)
@@ -17,6 +19,10 @@ notification can target one member, one seat ("PR Chair #2"), or a whole role (e
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Literal, get_args
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # --- People and roles -------------------------------------------------------------------------
 
@@ -87,51 +93,75 @@ class Skill:
 
 # --- Work -------------------------------------------------------------------------------------
 
-TASK_STATUSES = {"todo", "in_progress", "blocked", "done"}
-OWNER_TARGETS = {"member", "role_seat", "whole_role"}
+TaskStatus = Literal["open", "done", "blocked"]
+TASK_STATUSES: frozenset[str] = frozenset(get_args(TaskStatus))
 
 
-@dataclass
-class Task:
-    """A unit of board work. The single source of truth that replaces the spreadsheet, Docs and Discord."""
+class ExtractedTask(BaseModel):
+    """One action item extracted from a meeting transcript, as the assignment step returns it
+    (services/task_assignment.py) and as app/repository.insert_extracted_tasks stores it.
+
+    Matches the LLM JSON: {"title", "description", "seat", "assignee", "rationale",
+    "deadline", "needs_review"}. `deadline` is the phrase as spoken ("by Monday noon").
+    """
+
+    model_config = ConfigDict(frozen=True, str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    seat: str  # a roster seat key, or "Unassigned"
+    assignee: str | None = None  # the member's name; None when unassigned
+    rationale: str = ""
+    deadline: str | None = None  # as spoken; parsed by app/core/deadlines.py
+    needs_review: bool = False  # True when no seat could be chosen
+
+
+class Task(BaseModel):
+    """One row of the Supabase `tasks` table (supabase/migrations/0001_init.sql).
+
+    The single source of truth that replaces the spreadsheet, Docs and Discord. `seat` and
+    `assignee` are the joined names, filled by app/repository.list_tasks.
+    """
+
+    model_config = ConfigDict(frozen=True)
 
     id: int
     title: str
-    description: str
-    status: str  # one of TASK_STATUSES
-    owner_target: str  # one of OWNER_TARGETS
-    due_date: str | None = None  # ISO 8601 date
-    event_tag: str | None = None  # e.g. "GirlHacks"
-    source: str | None = None  # "meeting" | "sheet" | "doc" | "discord" | "manual"
-    source_reference: str | None = None
-    required_skills: list[str] = field(default_factory=list)
-    ai_eligible: bool = False
-    created_at: str | None = None  # ISO 8601 datetime
-    updated_at: str | None = None  # ISO 8601 datetime
-
-    def __post_init__(self):
-        if not self.title:
-            raise ValueError("Task title cannot be empty.")
-        if self.status not in TASK_STATUSES:
-            raise ValueError(f"Invalid task status: {self.status}")
-        if self.owner_target not in OWNER_TARGETS:
-            raise ValueError(f"Invalid owner target: {self.owner_target}")
+    description: str | None = None
+    seat_id: int | None = None
+    assignee_id: int | None = None
+    rationale: str | None = None
+    deadline_raw: str | None = None
+    deadline_at: datetime | None = None
+    needs_review: bool = False
+    status: TaskStatus = "open"
+    source_meeting_id: int | None = None
+    raw_json: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+    seat: str | None = None
+    assignee: str | None = None
+    meeting_held_at: datetime | None = None
+    depends_on: tuple[int, ...] = ()
 
 
-@dataclass
-class TaskDependency:
-    """Directed edge: task `task_id` depends on task `depends_on_task_id`.
+class TaskDependency(BaseModel):
+    """Directed edge: task `task_id` waits on task `depends_on_id` (table task_dependencies).
 
     Core feature: when the task being waited on finishes or gets blocked, the owners of the
-    dependents are notified. Longer cycles (A->B->A) must be rejected by services/tasks.py.
+    dependents are notified. Longer cycles (A->B->A) are rejected by app/db/repository.py.
     """
 
-    task_id: int
-    depends_on_task_id: int
+    model_config = ConfigDict(frozen=True)
 
-    def __post_init__(self):
-        if self.task_id == self.depends_on_task_id:
+    task_id: int
+    depends_on_id: int
+
+    @model_validator(mode="after")
+    def not_self(self) -> "TaskDependency":
+        if self.task_id == self.depends_on_id:
             raise ValueError("A task cannot depend on itself.")
+        return self
 
 
 @dataclass

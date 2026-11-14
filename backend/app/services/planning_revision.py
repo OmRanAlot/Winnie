@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from app.pipeline_schemas import Dependencies, PipelineDraft, Schedule, ScheduleItem
+from app.schemas.pipeline import Dependencies, PipelineDraft, Schedule, ScheduleItem
 from app.services.planning_history import match_roles
 from app.services.planning_pipeline import apply_dependencies, apply_schedule
 from app.services.planning_policies import (
@@ -20,7 +20,7 @@ def revise_policy_draft(draft: PipelineDraft, rosters: list) -> PipelineDraft:
         if (upstream, downstream) in lookup:
             lookup[upstream, downstream].minimum_gap_days = max(1, lookup[upstream, downstream].minimum_gap_days)
         else:
-            from app.pipeline_schemas import Dependency
+            from app.schemas.pipeline import Dependency
 
             edges.append(Dependency(upstream_task_id=upstream, downstream_task_id=downstream,
                                     minimum_gap_days=1,

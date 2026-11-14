@@ -12,16 +12,17 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.logging_config import RequestLogMiddleware, setup_logging
+from app.core.logging_config import RequestLogMiddleware, setup_logging
+from app.core.settings import Settings
 from app.routes.health import router as health_router
+from app.routes.meetings import router as meetings_router
 from app.routes.members import router as members_router
+from app.routes.messages import router as messages_router
+from app.routes.planning import router as planning_router
 from app.routes.recordings import router as recordings_router
 from app.routes.reminders import router as reminders_router
 from app.routes.tasks import router as tasks_router
-from app.routes.planning import router as planning_router
-from app.settings import Settings
-# pyrefly: ignore[missing-import]
-from app.routes.messages import router as messages_router
+from app.services.task_assignment import router as assign_task_router
 
 settings = Settings()
 setup_logging(settings.log_level)
@@ -38,7 +39,23 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(recordings_router)
 app.include_router(reminders_router)
+app.include_router(meetings_router)
+app.include_router(assign_task_router)
 app.include_router(tasks_router)
 app.include_router(messages_router)
 app.include_router(planning_router)
 app.include_router(members_router)
+
+logger.info(
+    "Winnie API starting: env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s "
+    "supabase_url=%s supabase_key=%s",
+    settings.environment, settings.log_level, settings.task_transcript_source,
+    "set" if settings.gemini_api_key else "MISSING",
+    settings.gemini_model,
+    "set" if settings.supabase_url else "MISSING",
+    "set" if settings.supabase_service_role_key else "MISSING",
+)
+if not settings.gemini_api_key:
+    logger.warning("GEMINI_API_KEY is not set: task assignment will return 503")
+if not (settings.supabase_url and settings.supabase_service_role_key):
+    logger.warning("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set: /api/tasks will return 503")

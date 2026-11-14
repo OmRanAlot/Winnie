@@ -45,8 +45,14 @@ class Tasks:
         return self.rows[offset:offset + limit], len(self.rows)
 
 
+SKILLS = {"AVERY": {"technical": [{"skill": "budgeting", "evidence": "Money"}],
+                    "soft": [{"skill": "follow-up", "evidence": "Money"}], "source": "role-derived"}}
+
+
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    # Never read the developer's real backend/data/member_skills.json in tests.
+    monkeypatch.setattr(route, "load_skills", lambda: SKILLS)
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -59,7 +65,10 @@ def use(members=None, tasks=None):
 def test_members_returns_public_fields_only(client):
     use()
     body = client.get("/api/members").json()
-    assert body["success"] and body["data"] == [PUBLIC] and body["meta"] == {"total": 1}
+    assert body["success"] and body["meta"] == {"total": 1}
+    assert body["data"] == [{**PUBLIC, "skills": ["budgeting", "follow-up"], "technical_skills": ["budgeting"],
+                             "soft_skills": ["follow-up"], "skills_source": "role-derived"}]
+    assert not {"email", "phone_number"} & set(body["data"][0])
 
 
 def test_list_active_never_selects_contact_details():

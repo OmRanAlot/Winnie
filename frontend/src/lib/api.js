@@ -52,6 +52,7 @@ export function toUiTask(t, monday = weekStart()) {
     assignee: null, // no member mapping in the API yet; assigneeText holds the tracker cell
     assigneeText: t.assignee_text || "",
     status: STATUS_TO_UI[t.status] ?? "Upcoming",
+    priority: t.priority ?? "normal",
     blocked: t.status === "blocked",
     dep: null, // dependencies are not stored in the backend yet
     day,
@@ -82,7 +83,19 @@ export async function getMembers() {
     role: m.board_role,
     description: m.role_description,
     skills: m.skills ?? [],
+    technical: m.technical_skills ?? [],
+    soft: m.soft_skills ?? [],
+    skillsSource: m.skills_source ?? null, // "role-derived" = generated from the role text
   }));
+}
+
+// Up to 3 members whose skills fit a pending task, lightest workload first (never the assignee).
+// [{code, name, role, fit: "strong"|"possible", reason, matched_skills, open, due_this_week}]
+export async function getCandidates(taskId) {
+  const body = await request(`/members/candidates/${encodeURIComponent(taskId)}`, {
+    signal: AbortSignal.timeout(60000),
+  });
+  return body.data;
 }
 
 // {task id: [member codes]} for the active semester; null = assignee cell not recognized yet.
@@ -115,4 +128,14 @@ export async function updateTaskStatus(id, uiStatus) {
     body: JSON.stringify({ status }),
   });
   return toUiTask(body.data);
+}
+
+// Kept for lib/useRecorder.js and lib/recordingUpload.js.
+export const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+
+export async function assignTasks(recordingId) {
+  const body = await request(`/recordings/${encodeURIComponent(recordingId)}/assignments`, {
+    method: "POST", signal: AbortSignal.timeout(200000),
+  });
+  return body;
 }

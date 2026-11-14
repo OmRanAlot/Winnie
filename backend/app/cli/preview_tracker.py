@@ -1,4 +1,4 @@
-"""Run with: uv run python -m app.preview_tracker --help (from backend/)."""
+"""Run with: uv run python -m app.cli.preview_tracker --help (from backend/)."""
 
 import argparse
 import json

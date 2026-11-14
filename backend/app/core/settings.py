@@ -1,8 +1,8 @@
 """Environment configuration for the backend.
 
 Values come from environment variables prefixed WINNIE_ (e.g. WINNIE_CORS_ORIGINS), or from a
-.env file at the REPOSITORY ROOT or in backend/ (copy .env.example there). Imported by app/main.py
-and services/task_assignment.py.
+.env file at the REPOSITORY ROOT or in backend/ (copy .env.example there). Imported by app/main.py,
+services/task_assignment.py and integrations/supabase_client.py.
 Planned settings for the integrations are listed in app/__init__.py.
 """
 
@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-REPO_ROOT = Path(__file__).resolve().parents[2]  # backend/app/settings.py -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/core/settings.py -> repo root
 
 
 class Settings(BaseSettings):
@@ -31,9 +31,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"  # WINNIE_LOG_LEVEL=DEBUG for more detail
     cors_origins: list[str] = ["http://localhost:5173"]
-    supabase_url: str = ""
-    supabase_secret_key: SecretStr = SecretStr("")
-    task_api_key: SecretStr = SecretStr("")
+
     messaging_bridge_secret: SecretStr = SecretStr("")
     active_semester: str = "fall-2026"
     message_ai_enabled: bool = False
@@ -53,13 +51,32 @@ class Settings(BaseSettings):
     planning_history_semester: str = "fall-2026"
     planning_timeout_seconds: float = Field(default=60, gt=0, le=180)
     planning_pipeline_timeout_seconds: float = Field(default=180, gt=0, le=600)
+
     # Gemini (services/task_assignment.py). Read from the unprefixed names used in
     # .env.example; the WINNIE_-prefixed names also work.
-    gemini_api_key: str | None = Field(
-        default=None, repr=False,
-        validation_alias=AliasChoices("GEMINI_API_KEY", "WINNIE_GEMINI_API_KEY", "GOOGLE_API_KEY")
+    # GOOGLE_API_KEY takes precedence over GEMINI_API_KEY. SecretStr keeps it out of reprs.
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY", "WINNIE_GEMINI_API_KEY"),
     )
     gemini_model: str = Field(
         default="gemini-3.8-flash",
         validation_alias=AliasChoices("GEMINI_MODEL", "WINNIE_GEMINI_MODEL"),
     )
+
+    # Supabase task store (integrations/supabase_client.py). Server-side only: the secret
+    # key bypasses row-level security, so it must never reach the frontend or the logs.
+    # SecretStr keeps it out of reprs and tracebacks.
+    supabase_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("SUPABASE_URL", "WINNIE_SUPABASE_URL")
+    )
+    supabase_service_role_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SUPABASE_SECRET_KEY", "WINNIE_SUPABASE_SECRET_KEY",
+            "SUPABASE_SERVICE_ROLE_KEY", "WINNIE_SUPABASE_SERVICE_ROLE_KEY",
+        ),
+    )
+
+    # Shared secret for the task-records CRUD endpoints (routes/tasks.py, X-Winnie-Api-Key header).
+    task_api_key: SecretStr = SecretStr("")

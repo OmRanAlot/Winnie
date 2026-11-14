@@ -6,8 +6,8 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from app.pipeline_schemas import SemesterRoster
-from app.planning_schemas import DraftContents, ProposedTask
+from app.schemas.pipeline import SemesterRoster
+from app.schemas.planning import DraftContents, ProposedTask
 
 ORDER_LEAD_DAYS = 21
 POLICY_TEXT = """

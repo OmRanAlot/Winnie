@@ -13,9 +13,9 @@ import pytest
 from fastapi.testclient import TestClient
 from google.genai import errors
 
+from app.core.settings import Settings
 from app.main import app
 from app.services import task_assignment as route
-from app.settings import Settings
 
 URL = "/api/assign_task_from_gemini"
 PHONE = "1-555-000-1234"
@@ -179,7 +179,7 @@ def test_schema_only_allows_roster_seats_or_unassigned():
 
 
 def extracted(**overrides):
-    return route.ExtractedTask(**task(**overrides))
+    return route.GeminiTask(**task(**overrides))
 
 
 def test_known_seat_gets_the_members_name():
@@ -440,14 +440,14 @@ def test_settings_read_the_unprefixed_env_names(monkeypatch):
 
     settings = Settings(_env_file=None)
 
-    assert (settings.gemini_api_key, settings.gemini_model) == ("abc", "gemini-x")
+    assert (settings.gemini_api_key.get_secret_value(), settings.gemini_model) == ("abc", "gemini-x")
 
 
 def test_settings_also_accept_winnie_prefixed_names(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setenv("WINNIE_GEMINI_API_KEY", "prefixed")
 
-    assert Settings(_env_file=None).gemini_api_key == "prefixed"
+    assert Settings(_env_file=None).gemini_api_key.get_secret_value() == "prefixed"
 
 
 def test_settings_default_to_no_key_and_a_default_model(monkeypatch):

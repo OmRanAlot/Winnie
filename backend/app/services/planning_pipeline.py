@@ -1,12 +1,26 @@
-"""Mandatory planner stages with validated handoffs; no storage or notification writes."""
+"""Mandatory planner stages with validated handoffs; no storage or notification writes.
+
+run_pipeline backs POST /api/planning/pipeline-drafts. It loads history and rosters, then runs
+seven stages in order: event classification, historical classification, historical task and
+lead-time retrieval, task/role planning, dependency planning, timeline planning, and verified
+role-to-member matching. The five model stages go through a StageRunner (app/agents/stages.py);
+every answer is validated before the next stage sees it. In "mock" mode no model is called.
+
+One timeout bounds the whole run. Any failure becomes PlanningUnavailable with a generic
+message; the cause is logged server-side by exception type only, never the message, because
+provider errors can echo prompts or keys. Each stage logs its name and duration.
+"""
 
 import asyncio
 import json
+import logging
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
 from app.agents.stages import DeepStageRunner
-from app.pipeline_schemas import (
+from app.core.settings import REPO_ROOT
+from app.schemas.pipeline import (
     Classification,
     ClassifiedHistory,
     Dependencies,
@@ -16,7 +30,7 @@ from app.pipeline_schemas import (
     Schedule,
     ScheduleItem,
 )
-from app.planning_schemas import DraftContents, PlanningRequest
+from app.schemas.planning import DraftContents, PlanningRequest
 from app.services.planning import PlanningUnavailable, validate_draft
 from app.services.planning_context import normalize
 from app.services.planning_history import (
@@ -33,7 +47,12 @@ from app.services.planning_policies import (
     validate_order_deadlines,
     validate_policy_dependencies,
 )
-from app.settings import REPO_ROOT
+
+logger = logging.getLogger(__name__)
+
+# The event loop and perf_counter clocks differ slightly (coarse on Windows), so a real
+# wait_for timeout can measure a hair under the limit. Allow 10% slack when classifying it.
+TIMEOUT_TOLERANCE = 0.9
 
 
 def exact_classification(name: str, taxonomy: dict) -> Classification:
@@ -106,13 +125,31 @@ async def run_pipeline(request: PipelineRequest, *, knowledge_path: Path, taxono
                        mode: str = "mock", model: str = "", timeout: float = 60,
                        runner=None) -> PipelineDraft:
     """One timeout bounds the entire staged run, not each provider request separately."""
+    logger.info("pipeline start mode=%s semester=%s timeout=%.0fs", mode, history_semester, timeout)
+    started = time.perf_counter()
     try:
-        return await asyncio.wait_for(_pipeline(
+        draft = await asyncio.wait_for(_pipeline(
             request, knowledge_path, taxonomy_path, roster_path, history_semester,
             mode, model, runner,
         ), timeout)
     except Exception as exc:
+        elapsed = _elapsed_ms(started)
+        # asyncio.wait_for raises TimeoutError only once the limit has passed. A TimeoutError that
+        # arrives sooner came from the provider SDK, so report it as a failure, not our timeout.
+        if isinstance(exc, TimeoutError) and elapsed >= timeout * 1000 * TIMEOUT_TOLERANCE:
+            logger.error("pipeline timed out after %.0f ms (limit %.0fs)", elapsed, timeout)
+        else:
+            logger.error("pipeline failed after %.0f ms: %s", elapsed, type(exc).__name__)
+        logger.debug("pipeline failure detail", exc_info=True)
         raise PlanningUnavailable("Staged planning unavailable; check context and provider setup.") from exc
+    logger.info("pipeline done mode=%s tasks=%d stages=%d warnings=%d in %.0f ms", mode,
+                len(draft.plan.tasks), len(draft.completed_stages), len(draft.warnings),
+                _elapsed_ms(started))
+    return draft
+
+
+def _elapsed_ms(started: float) -> float:
+    return (time.perf_counter() - started) * 1000
 
 
 async def _pipeline(request, knowledge_path, taxonomy_path, roster_path, history_semester,
@@ -139,8 +176,16 @@ async def _pipeline(request, knowledge_path, taxonomy_path, roster_path, history
     ]
 
     async def stage(name, schema, payload):
-        value = await runner.run(name, schema, payload)
-        return schema.model_validate(value)
+        stage_started = time.perf_counter()
+        try:
+            value = await runner.run(name, schema, payload)
+            result = schema.model_validate(value)
+        except Exception as exc:
+            logger.warning("pipeline stage %s failed after %.0f ms: %s",
+                           name, _elapsed_ms(stage_started), type(exc).__name__)
+            raise
+        logger.info("pipeline stage %s done in %.0f ms", name, _elapsed_ms(stage_started))
+        return result
 
     async def validated_stage(name, schema, payload, validate):
         """Give the specialist actionable validation feedback, with bounded retries."""

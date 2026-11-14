@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from app.core.settings import Settings
 from app.integrations.supabase import StorageUnavailable
 from app.services.tasks import TaskStore
 from app.services.tracker_import import TrackerContext, preview_tracker
@@ -13,7 +14,6 @@ from app.services.tracker_sync import (
     apply_import,
     plan_import,
 )
-from app.settings import Settings
 
 
 def main():

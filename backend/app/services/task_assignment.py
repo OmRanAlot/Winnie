@@ -8,9 +8,9 @@ How it works
        "Unassigned" (enforced by the response schema, then re-checked here).
     3. Map each seat to a person. Tasks that could not be assigned come back with
        needs_review=true so the President or Vice President can resolve them. Nothing is saved:
-       these are candidates that wait for human confirmation (see Meeting in app/models.py).
+       these are candidates that wait for human confirmation (see Meeting in app/domain/models.py).
 
-Needs GEMINI_API_KEY (and optionally GEMINI_MODEL); see app/settings.py. The Gemini call is
+Needs GEMINI_API_KEY (and optionally GEMINI_MODEL); see app/core/settings.py. The Gemini call is
 isolated in get_assignments(), so it can move to integrations/ and the rest to services/ when
 this grows.
 """
@@ -28,8 +28,9 @@ from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from app.schemas import failure
-from app.settings import Settings
+from app.core.settings import Settings
+from app.domain.models import ExtractedTask
+from app.schemas.api import failure
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/assign_task_from_gemini", tags=["assign_task_from_gemini"])
@@ -53,8 +54,8 @@ class RosterEntry(BaseModel):
     name: str = Field(min_length=1)
 
 
-class ExtractedTask(BaseModel):
-    """One task exactly as Gemini returns it."""
+class GeminiTask(BaseModel):
+    """One task exactly as Gemini returns it (no assignee yet; see to_assignment)."""
 
     title: str = Field(min_length=1, max_length=200)
     description: str
@@ -63,16 +64,8 @@ class ExtractedTask(BaseModel):
     deadline: str = ""  # empty when the meeting gave none
 
 
-class Assignment(BaseModel):
-    """One task as this endpoint returns it."""
-
-    title: str
-    description: str
-    seat: str  # a roster seat key, or "Unassigned"
-    assignee: str | None  # the member's name; None when unassigned
-    rationale: str
-    deadline: str | None  # as spoken in the meeting ("by Friday"); not parsed into a date
-    needs_review: bool  # True when no seat could be chosen
+# One task as this endpoint returns it is app.domain.models.ExtractedTask (seat, assignee, deadline as
+# spoken, needs_review). It is also what app/repository.insert_extracted_tasks stores.
 
 
 # What each role is responsible for. Sent to Gemini so it can match tasks to roles.
@@ -224,9 +217,9 @@ def build_schema(eboard: dict[str, str]) -> dict:
     }
 
 
-def to_assignment(task: ExtractedTask, eboard: dict[str, str]) -> Assignment:
+def to_assignment(task: GeminiTask, eboard: dict[str, str]) -> ExtractedTask:
     assignee = eboard.get(task.seat)  # None for "Unassigned" or any seat that is not on the roster
-    return Assignment(
+    return ExtractedTask(
         title=task.title,
         description=task.description,
         seat=task.seat if assignee else UNASSIGNED,
@@ -255,7 +248,7 @@ def gemini_client(api_key: str) -> genai.Client:
 
 async def get_assignments(
     transcript: str, eboard: dict[str, str], api_key: str, model: str
-) -> list[Assignment]:
+) -> list[ExtractedTask]:
     """Ask Gemini for the tasks in the transcript and who should do them."""
     logger.info("Calling Gemini model=%s (%d transcript chars, %d seats)", model, len(transcript), len(eboard))
     started = time.perf_counter()
@@ -283,7 +276,7 @@ async def get_assignments(
         logger.error("Gemini returned no text; prompt_feedback=%s", getattr(response, "prompt_feedback", None))
         raise ValueError("Gemini returned no text (the response may have been blocked).")
     logger.debug("Gemini raw response: %s", response.text)
-    tasks = TypeAdapter(list[ExtractedTask]).validate_json(response.text)
+    tasks = TypeAdapter(list[GeminiTask]).validate_json(response.text)
     assignments = [to_assignment(task, eboard) for task in tasks]
     for extracted, assignment in zip(tasks, assignments):
         if extracted.seat != assignment.seat:
@@ -305,7 +298,8 @@ async def assign_tasks(body: AssignRequest, settings: Annotated[Settings, Depend
         return failure("The e-board roster could not be loaded.", 503)
     try:
         assignments = await get_assignments(
-            body.transcript, eboard, settings.gemini_api_key, settings.gemini_model
+            body.transcript, eboard, settings.gemini_api_key.get_secret_value(),
+            settings.gemini_model,
         )
     except (errors.APIError, httpx.HTTPError):
         logger.exception("Gemini request failed")

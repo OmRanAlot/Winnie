@@ -7,7 +7,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from app.planning_schemas import PlanningRequest
+from app.schemas.planning import PlanningRequest
 
 # Reviewed aliases from the Fall calendar and October tracker; never fuzzy-join silently.
 ALIASES = {

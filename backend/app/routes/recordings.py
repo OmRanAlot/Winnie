@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from app.schemas import MAX_JSON_BYTES, Recording, failure
+from app.schemas.api import MAX_JSON_BYTES, Recording, failure
 from app.services.recordings import save_recording
 
 logger = logging.getLogger(__name__)

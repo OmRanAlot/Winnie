@@ -4,6 +4,10 @@
 !.env.example
 *service-account*.json
 
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
 # Python
 .venv/
 .venv-*/

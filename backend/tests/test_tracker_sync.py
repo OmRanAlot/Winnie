@@ -224,7 +224,7 @@ def test_cli_previews_then_applies_without_real_credentials(tmp_path, monkeypatc
     import json
     import sys
 
-    from app import import_tracker
+    from app.cli import import_tracker
 
     source = tmp_path / "tracker.csv"
     source.write_text(CSV, encoding="utf-8")

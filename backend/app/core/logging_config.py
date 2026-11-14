@@ -25,7 +25,11 @@ def setup_logging(level: str = "INFO") -> None:
     """Send every app log line to stderr. force=True so it wins over uvicorn's reloader setup."""
     logging.basicConfig(level=level.upper(), format=LOG_FORMAT, force=True)
     # Keep third-party chatter (HTTP client internals) out unless debugging.
-    for noisy in ("httpx", "httpcore", "google_genai", "multipart"):
+    # langchain/langgraph/deepagents log their own internals; Winnie's agent lines come from
+    # app.agents.runner, so only their warnings and errors are worth showing.
+    noisy_libraries = ("httpx", "httpcore", "google_genai", "multipart",
+                       "langchain", "langchain_core", "langgraph", "deepagents")
+    for noisy in noisy_libraries:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

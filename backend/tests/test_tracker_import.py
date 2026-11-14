@@ -6,8 +6,8 @@ import io
 import pytest
 from pydantic import ValidationError
 
+from app.schemas.tasks import TaskCreate, TaskUpdate
 from app.services.tracker_import import TrackerContext, preview_tracker
-from app.task_schemas import TaskCreate, TaskUpdate
 
 HEADERS = [
     "Event", "Task Name", "Status", "Priority", "Assignee", "Deadline", "Notes",

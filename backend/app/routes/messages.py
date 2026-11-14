@@ -9,13 +9,13 @@ from pydantic import BaseModel, Field
 from app.agents.message_interpreter import GeminiMessageInterpreter
 from app.integrations.message_completion import CompletionStore
 from app.integrations.help_requests import HelpRequestStore
+from app.core.settings import Settings
 from app.integrations.supabase import StorageUnavailable
 from app.services.conversation import conversation_reply
 from app.services.help_requests import help_request_reply
 from app.services.members import MemberStore
 from app.services.message_replies import MENU, personal_reply
 from app.services.tasks import TaskStore
-from app.settings import Settings
 
 router = APIRouter(prefix="/api", tags=["messages"])
 
