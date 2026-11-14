@@ -73,14 +73,6 @@ const REQUESTS = [
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
-// Helpers read the latest database-backed task and roster state.
-let currentPeople = [];
-let currentTasks = [];
-const person = (id) => currentPeople.find((p) => p.id === id);
-const task = (id) => currentTasks.find((t) => t.id === id);
-const owns = (t, id) => !!id && (t.assignee === id || (t.assignees ?? []).includes(id));
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
 const REASSIGNED_COLOR = "#f3ebe2";
 const EMPTY_PLAN_INPUT = { name: "", description: "", startDate: "", dueDate: "", time: "" };
 const EMPTY_TASK_FORM = { title: "", description: "", startDate: "", dueDate: "", time: "", priority: "normal", summary: "" };
@@ -464,7 +456,6 @@ export default function App({ profile, admin, signOut }) {
   const [adminShowAllGantt, setAdminShowAllGantt] = useState(false);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState("");
-  const [reqs, setReqs] = useState([]);
   const [requestError, setRequestError] = useState("");
   const [requestBusy, setRequestBusy] = useState(false);
   const mutationLock = useRef(false);
@@ -525,6 +516,7 @@ export default function App({ profile, admin, signOut }) {
       }
       throw e;
     } finally { if (version === refreshVersion.current) setLoading(false); }
+  }, []);
   useEffect(() => {
     Promise.all([getTasks(), getMembers(), getAssignments().catch(() => null)])
       .then(([ts, people, assignments]) => {
@@ -751,8 +743,6 @@ export default function App({ profile, admin, signOut }) {
   // Status buttons in the redesign: save through the same path as the task page.
   const setTaskStatus = (id, status) => { const t = task(id); if (t) changeStatus(t, status); };
   const isAdminView = admin && !viewAs;
-  const me = (viewAs ? person(viewAs) : PEOPLE.find(q => q.id === profile.member_code)) ?? {
-    id: profile.member_code, name: profile.name || "Member", role: profile.role, skills: [],
   // No real login yet: admins see the President's view, everyone else the Vice President's.
   const byRole = (role) => PEOPLE.find((q) => q.role === role);
   const me = (viewAs ? person(viewAs) : live ? byRole(isAdminView ? "President" : "Vice President") : person(isAdminView ? 1 : 2)) ?? PEOPLE[0];
@@ -896,7 +886,6 @@ export default function App({ profile, admin, signOut }) {
       const t = task(p.id);
       if (!t) { page = (<><Top title="Task not found" /><p style={{ textAlign: "center", fontSize: 20 }}>This task isn’t in the current data (meeting links still use sample tasks).</p></>); break; }
       const dep = t.dep ? task(t.dep) : null;
-      const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due], ["Assignee", t.assigneeText || who(t).name], ["Original assignee", person(t.originalAssigneeCode)?.name || t.originalAssigneeCode || "Not recorded"], ["Status", t.status], ["Dependency", dep ? `Depends on “${dep.title}” (${who(dep).name})` : "None"]];
       const currentAssigneeId = currentOwner(t);
       const initialAssigneeId = initialOwner(t);
       const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due],
@@ -1292,29 +1281,6 @@ export default function App({ profile, admin, signOut }) {
           {!loading && !dataError && !pending.length && <p className="empty">No pending requests.</p>}</>}
         <h2>{approvedOnly ? "Approved" : "History"}</h2>{history.map(card)}
       </>;
-      page = (<><Top title={`Tasks Re-assigned: ${REQUESTS.length}`} tag />{REQUESTS.map((r) => <div className="due" key={r.id}><span style={{ width: 110, fontSize: 18 }}>11/1{r.id}/2026:</span><button className="pill" onClick={() => go("task", { id: r.task })}>{task(r.task).title}</button><span style={{ fontSize: 18, width: 230 }}>Assignee: {person(r.to).name}</span></div>)}</>);
-      break;
-    case "review": {
-      const visibleRequests = live ? [] : reqs;
-      page = (<><Top title="Task Reassignment Requests" tag />
-        {live && <p className="metrics-note" style={{ textAlign: "center" }}>The backend does not provide reassignment request storage yet, so no live requests can be reviewed.</p>}
-        {!live && visibleRequests.map((request) => (<div className="req" key={request.id}>
-          <div className="panel">
-            <b>{task(request.task)?.title ?? "Task"}</b><br />
-            {person(request.from)?.name} to {person(request.to)?.name}<br />
-            <span>{request.reason}</span><br />
-            <small>{request.requestedAt} · {request.status}</small>
-          </div>
-          {request.status === "pending" && <>
-            <button className="rb" style={{ background: "#5f7a3d" }} aria-label="Approve request"
-              onClick={() => reviewReassignmentRequest(request.id, "approved")}><Icon n="check" s={24} /></button>
-            <button className="rb" style={{ background: "#b5472a" }} aria-label="Deny request"
-              onClick={() => reviewReassignmentRequest(request.id, "denied")}><Icon n="x" s={24} /></button>
-          </>}
-        </div>))}
-        {!live && !visibleRequests.length && <p className="empty">No reassignment requests yet.</p>}
-        {!live && <p className="metrics-note" style={{ textAlign: "center" }}>Sample decisions are kept for this session only.</p>}
-      </>);
       break;
     }
     case "meetmetrics":
@@ -1350,14 +1316,6 @@ export default function App({ profile, admin, signOut }) {
         {requestError && <p role="alert">{requestError}</p>}
         {!profile.member_code && <p role="alert">Your account must be linked to the member roster before requesting a reassignment.</p>}
         <div className="acts"><button className="btn alt" disabled={requestBusy} onClick={() => setModal(null)}>Cancel</button><button className="btn" disabled={requestBusy || !profile.member_code || !live} onClick={sendRequest}>{requestBusy ? "Saving?" : "Send request"}</button></div></div></div>)}
-        <label style={{ display: "block", marginTop: 12, fontWeight: 700 }}>Reason (one sentence)
-          <textarea className="field" rows={2} maxLength={500} value={reassignmentReason}
-            placeholder="Briefly explain why you need to transfer this task."
-            onChange={(event) => setReassignmentReason(event.target.value)} />
-        </label>
-        <small>{live ? "The request will not be sent until backend support is available." : "Sample requests are kept only for this session."}</small>
-        <div className="acts"><button className="btn alt" onClick={() => { setModal(null); setReassignmentReason(""); }}>Cancel</button>
-          <button className="btn" onClick={sendReassignmentRequest}>Send request</button></div></div></div>)}
       {recorder && <Recorder kind={recorder} onClose={() => setRecorder(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <div role="status" style={{ position: "fixed", top: 8, right: 12, fontSize: 12, padding: "4px 10px", borderRadius: 999, background: live ? "#7fb08a" : "#e8a36b", color: "#fff", fontWeight: 700 }}>{source}</div>

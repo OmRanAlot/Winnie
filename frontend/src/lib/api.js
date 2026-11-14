@@ -41,18 +41,22 @@ export function weekStart(today = new Date()) {
 export function toUiTask(t, monday = weekStart()) {
   const due = t.due_date ? new Date(`${t.due_date}T00:00:00`) : null;
   const day = due ? Math.round((due - monday) / 86400000) : -1; // 0 = Monday of this week
+  const ownerCode = t.current_assignee_code ?? t.owner_code ?? null;
+  const originalAssigneeCode = t.original_assignee_code ?? t.initial_assignee_code ?? t.owner_code ?? null;
   return {
     id: t.id,
     code: t.task_code,
+    ownerCode,
+    originalAssigneeCode,
     title: t.title,
     assigned: usDate(t.created_at?.slice(0, 10)),
     start: usDate(t.due_date) || "—",
     due: usDate(t.due_date) || t.deadline_text || "No date",
     dueIso: t.due_date,
     finished: t.status === "done" ? usDate(t.updated_at?.slice(0, 10)) : "",
-    assignee: t.current_assignee_code ?? t.owner_code ?? null,
-    currentAssignee: t.current_assignee_code ?? t.owner_code ?? null,
-    initialAssignee: t.initial_assignee_code ?? t.owner_code ?? null,
+    assignee: ownerCode,
+    currentAssignee: ownerCode,
+    initialAssignee: originalAssigneeCode,
     assigneeText: t.assignee_text || "",
     status: STATUS_TO_UI[t.status] ?? "Upcoming",
     priority: t.priority ?? "normal",
