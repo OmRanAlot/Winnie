@@ -1,0 +1,21 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+
+:root { font-family: 'DM Sans', sans-serif; color: #24473b; background: #f7f6ed; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 1200px; margin: auto; padding: 32px 48px; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+.wordmark { color: inherit; font-family: 'Manrope', sans-serif; font-weight: 800; font-size: 36px; text-decoration: none; letter-spacing: -2px; }
+.wordmark span { color: #b8663d; margin-left: 6px; }
+.status { font-size: 13px; background: #e7ecdf; padding: 9px 14px; border-radius: 24px; }
+.intro { padding: 88px 0 56px; max-width: 820px; }
+.eyebrow { font-size: 12px; letter-spacing: 2px; font-weight: 700; }
+h1 { font-family: 'Manrope', sans-serif; font-size: clamp(44px, 7vw, 84px); line-height: 1.08; letter-spacing: -3px; margin: 22px 0; }
+.subtitle { max-width: 560px; font-size: 19px; line-height: 1.7; color: #56675a; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+article { border-top: 2px solid #bfcbb6; padding: 24px 4px; }
+article span { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: #737e65; }
+h2 { font-family: 'Manrope', sans-serif; font-size: 23px; letter-spacing: -0.6px; }
+article p { color: #56675a; line-height: 1.65; }
+footer { padding-top: 48px; font-size: 12px; color: #737e65; }
+@media (max-width: 700px) { main { padding: 24px; } header { align-items: flex-start; } .status { max-width: 170px; } .intro { padding-top: 60px; } .cards { grid-template-columns: 1fr; } }
