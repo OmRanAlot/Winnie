@@ -7,7 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 const alice = '11111111-1111-4111-8111-111111111111';
 const bob = '22222222-2222-4222-8222-222222222222';
 const migration = await readFile(
-  new URL('../migrations/20261114120000_create_profiles.sql', import.meta.url), 'utf8',
+  new URL('../migrations/20261114120001_create_profiles.sql', import.meta.url), 'utf8',
 );
 
 async function createDatabase() {

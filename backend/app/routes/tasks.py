@@ -1,8 +1,8 @@
 """Task endpoints, in two groups on one /api/tasks router.
 
-Timeline (read by the frontend's Gantt view, frontend/src/lib/api.ts), bigint ids, no auth yet:
+Timeline compatibility view, UUID ids, no auth yet:
     GET   /api/tasks?status=&assignee=&seat=   every task, ordered by deadline (unscheduled last)
-    PATCH /api/tasks/{task_id}/status          body {"status": "open" | "done" | "blocked"}
+    PATCH /api/tasks/{task_id}/status          body {"status": "todo" | "in_progress" | "done" | "blocked"}
 
 Task records (CRUD for backend clients), uuid ids, require the X-Winnie-Api-Key header:
     POST/GET /api/tasks/records, GET/PATCH/DELETE /api/tasks/records/{task_id}
@@ -60,9 +60,9 @@ def list_tasks(status: str | None = None, assignee: str | None = None, seat: str
 
 
 @router.patch("/{task_id}/status")
-def update_status(task_id: int, body: TaskStatusUpdate):
+def update_status(task_id: UUID, body: TaskStatusUpdate):
     try:
-        view = task_service.set_status(task_id, body.status)
+        view = task_service.set_status(str(task_id), body.status)
     except repository.NotFound:
         return failure("Task not found.", 404)
     except task_service.STORAGE_ERRORS:

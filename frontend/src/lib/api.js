@@ -1,7 +1,7 @@
 // Calls to the Winnie backend (/api is proxied to localhost:8000 by vite.config.js).
 // Backend tasks are translated into the shape App.jsx's design uses, so the screens don't change.
 
-const PAGE = 100; // the backend's maximum page size for GET /api/tasks
+const PAGE = 100; // the backend's maximum page size for GET /api/tasks/records
 
 const STATUS_TO_UI = { todo: "Upcoming", in_progress: "In-Progress", blocked: "In-Progress", done: "Completed" };
 const STATUS_FROM_UI = { Upcoming: "todo", "In-Progress": "in_progress", Completed: "done" };
@@ -66,7 +66,7 @@ export function toUiTask(t, monday = weekStart()) {
 export async function getTasks() {
   const all = [];
   for (let offset = 0; ; offset += PAGE) {
-    const body = await request(`/tasks?limit=${PAGE}&offset=${offset}`);
+    const body = await request(`/tasks/records?limit=${PAGE}&offset=${offset}`);
     all.push(...body.data);
     if (body.data.length < PAGE || all.length >= (body.meta?.total ?? 0)) break;
   }
@@ -133,7 +133,7 @@ export async function assignRecordingTasks(id) {
 export async function updateTaskStatus(id, uiStatus) {
   const status = STATUS_FROM_UI[uiStatus];
   if (!status) throw new Error(`Unknown status ${uiStatus}`);
-  const body = await request(`/tasks/${encodeURIComponent(id)}`, {
+  const body = await request(`/tasks/records/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
   });

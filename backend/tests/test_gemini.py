@@ -427,6 +427,18 @@ def test_real_gemini_client_is_built_offline_and_reused_per_key():
     route.gemini_client.cache_clear()
 
 
+def test_shared_gemini_client_accepts_protected_settings_key():
+    from pydantic import SecretStr
+
+    route.gemini_client.cache_clear()
+    client = route.gemini_client(SecretStr("synthetic-test-key"))
+    try:
+        assert client._api_client.api_key == "synthetic-test-key"
+    finally:
+        client.close()
+        route.gemini_client.cache_clear()
+
+
 def test_settings_are_loaded_once():
     route.get_settings.cache_clear()
 

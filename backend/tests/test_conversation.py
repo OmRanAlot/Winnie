@@ -242,11 +242,13 @@ def test_gemini_adapter_sends_allowlisted_context_and_validates_json(monkeypatch
     import json
 
     from google import genai
+    from pydantic import SecretStr
 
     captured = {}
 
     class Client:
         def __init__(self, **kwargs):
+            assert kwargs["api_key"] == "fake"
             self.models = self
 
         def __enter__(self):
@@ -260,7 +262,7 @@ def test_gemini_adapter_sends_allowlisted_context_and_validates_json(monkeypatch
             return SimpleNamespace(text=decision(message().text).model_dump_json())
 
     monkeypatch.setattr(genai, "Client", Client)
-    result = GeminiMessageInterpreter(settings()).interpret(message().text, list(Tasks().rows.values()))
+    result = GeminiMessageInterpreter(settings(gemini_api_key=SecretStr("fake"))).interpret(message().text, list(Tasks().rows.values()))
     context = json.loads(captured["contents"])["assigned_tasks"]
     assert result.intent == "complete_task"
     assert all("assignee_text" not in item and "description" not in item for item in context)

@@ -1,3 +1,18 @@
+-- Preserve the original numeric task store before creating the canonical UUID table.
+-- Existing meetings/people/seats stay in place; legacy tasks and edges remain recoverable.
+do $upgrade$
+begin
+    if exists (select 1 from information_schema.columns
+               where table_schema = 'public' and table_name = 'tasks'
+                 and column_name = 'id' and data_type = 'bigint') then
+        create schema if not exists winnie_legacy;
+        revoke all on schema winnie_legacy from public, anon, authenticated;
+        alter table public.task_dependencies set schema winnie_legacy;
+        alter table public.tasks set schema winnie_legacy;
+    end if;
+end;
+$upgrade$;
+
 -- Task persistence for FastAPI. Access is server-only until member authentication is built.
 create sequence public.task_code_sequence;
 

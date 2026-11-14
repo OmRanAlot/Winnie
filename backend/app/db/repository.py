@@ -1,18 +1,15 @@
-"""Supabase reads and writes for seats, people, meetings, tasks and task dependencies.
+"""Meeting persistence and timeline projection over the canonical UUID task store.
 
-Called by app/services/tasks.py and scripts/seed_example.py. Tables are defined in
-supabase/migrations/0001_init.sql. Uses the supabase-py query builder (no ORM). Every function
-takes an optional `client` so tests can pass tests/fake_supabase.FakeClient; by default it uses
-the singleton from app/integrations/supabase_client.py.
-
-supabase-py has no transactions: insert_extracted_tasks writes all tasks in one batch insert,
-but the meeting row is created separately (create_meeting) and stays if that insert fails.
+Tracker imports, messaging, and meeting extraction share public.tasks. Timeline
+names are display text, never verified membership. The legacy seat/person helpers
+remain for compatibility tooling; ingestion does not call them.
 """
 
 import logging
 from collections.abc import Iterable, Sequence
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from postgrest.exceptions import APIError
 from supabase import Client
@@ -35,7 +32,7 @@ class NotFound(LookupError):
 
 
 class InvalidStatus(ValueError):
-    """A status other than 'open', 'done' or 'blocked' was requested (a client error)."""
+    """An unsupported task status was requested (a client error)."""
 
 
 def _db(client: Client | None) -> Client:
@@ -50,7 +47,7 @@ def _clean(name: str, what: str) -> str:
 
 
 def _check_status(status: str) -> None:
-    if status not in TASK_STATUSES:
+    if status not in TASK_STATUSES and status != "open":
         raise InvalidStatus(f"Invalid task status {status!r}; expected one of {sorted(TASK_STATUSES)}.")
 
 
@@ -193,18 +190,24 @@ def tasks_for_meeting(meeting_id: int, client: Client | None = None) -> list[Tas
     return sorted(_hydrate(rows, db), key=_timeline_order)
 
 
-def _task_row(
-    task: ExtractedTask, meeting_id: int, held_at: datetime, seat_id: int | None, assignee_id: int | None
-) -> Row:
-    deadline_at = resolve_deadline(task.deadline, held_at)
+def _task_row(task: ExtractedTask, meeting_id: int, held_at: datetime, index: int) -> Row:
+    deadline = resolve_deadline(task.deadline, held_at)
+    local = held_at.astimezone(NEW_YORK)
     return {
+        # Stable per meeting slot: concurrent retries cannot insert a second task set.
+        "id": str(uuid5(NAMESPACE_URL, f"winnie:meeting:{meeting_id}:task:{index}")),
         "title": task.title,
-        "description": task.description or None,
-        "seat_id": seat_id,
-        "assignee_id": assignee_id,
+        "description": task.description,
+        "month_code": local.strftime("%Y-%m"),
+        "semester_code": f"{'spring' if local.month <= 5 else 'summer' if local.month <= 8 else 'fall'}-{local.year}",
+        "source": "meeting",
+        "source_reference": f"meeting:{meeting_id}",
+        "seat_text": task.seat if task.seat != UNASSIGNED_SEAT else None,
+        "assignee_text": task.assignee or "",
         "rationale": task.rationale or None,
-        "deadline_raw": task.deadline,
-        "deadline_at": deadline_at.isoformat() if deadline_at else None,
+        "deadline_text": task.deadline or "",
+        "due_date": deadline.astimezone(NEW_YORK).date().isoformat() if deadline else None,
+        "deadline_at": deadline.isoformat() if deadline else None,
         "needs_review": task.needs_review,
         "source_meeting_id": meeting_id,
         "raw_json": task.model_dump(mode="json"),
@@ -214,12 +217,9 @@ def _task_row(
 def insert_extracted_tasks(
     meeting_id: int, tasks: Iterable[ExtractedTask], client: Client | None = None
 ) -> list[Task]:
-    """Store LLM-extracted tasks for a meeting and return them as Task rows.
+    """Insert meeting actions into the same UUID task table used by tracker/messaging.
 
-    Resolves each seat and assignee to an id (creating them if new; "Unassigned" seats and
-    missing assignees stay NULL), parses the spoken deadline against the meeting time
-    (unparseable -> deadline_at NULL, the phrase is kept in deadline_raw), and keeps the
-    original JSON in raw_json. All tasks go in one batch insert.
+    Extracted names remain text; they never create or impersonate verified members.
     """
     db, tasks = _db(client), list(tasks)
     meetings = db.table("meetings").select("id,held_at").eq("id", meeting_id).limit(1).execute().data
@@ -228,26 +228,16 @@ def insert_extracted_tasks(
     if not tasks:
         return []
     held_at = datetime.fromisoformat(meetings[0]["held_at"])
-    seat_ids: dict[str, int] = {}
-    person_ids: dict[str, int] = {}
-    rows = []
-    for task in tasks:
-        seat_id = None
-        if task.seat and task.seat != UNASSIGNED_SEAT:
-            if task.seat not in seat_ids:
-                seat_ids[task.seat] = get_or_create_seat(task.seat, client=db)
-            seat_id = seat_ids[task.seat]
-        assignee_id = None
-        if task.assignee:
-            if task.assignee not in person_ids:
-                person_ids[task.assignee] = get_or_create_person(task.assignee, client=db)
-            assignee_id = person_ids[task.assignee]
-        rows.append(_task_row(task, meeting_id, held_at, seat_id, assignee_id))
-    inserted = db.table("tasks").insert(rows).execute().data
-    unparsed = sum(1 for row in rows if row["deadline_raw"] and not row["deadline_at"])
-    logger.info(
-        "Stored %d tasks for meeting %s (%d deadlines left unparsed)", len(inserted), meeting_id, unparsed
-    )
+    rows = [_task_row(task, meeting_id, held_at, index) for index, task in enumerate(tasks)]
+    try:
+        inserted = db.table("tasks").insert(rows).execute().data
+    except APIError as error:
+        if error.code != UNIQUE_VIOLATION:
+            raise
+        existing = tasks_for_meeting(meeting_id, client=db)
+        if not existing:
+            raise
+        return existing
     return _hydrate(inserted, db)
 
 
@@ -259,33 +249,45 @@ def _values_by_id(db: Client, table: str, ids: set[int], column: str) -> dict[in
 
 
 def _hydrate(rows: Sequence[Row], db: Client) -> list[Task]:
-    """Attach seat/assignee names, the meeting time and dependency ids to raw task rows."""
+    """Project canonical task records into timeline fields, preserving UUID dependency links."""
     if not rows:
         return []
-    seats = _values_by_id(db, "seats", {r["seat_id"] for r in rows if r.get("seat_id")}, "name")
-    people = _values_by_id(db, "people", {r["assignee_id"] for r in rows if r.get("assignee_id")}, "name")
-    meeting_ids = {r["source_meeting_id"] for r in rows if r.get("source_meeting_id")}
-    meetings = _values_by_id(db, "meetings", meeting_ids, "held_at")
-    edges = (
-        db.table("task_dependencies").select("task_id,depends_on_id")
-        .in_("task_id", [r["id"] for r in rows]).execute().data
-    )  # fmt: skip
-    depends_on: dict[int, list[int]] = {}
+    meetings = _values_by_id(
+        db, "meetings", {r["source_meeting_id"] for r in rows if r.get("source_meeting_id")}, "held_at"
+    )
+    edges = db.table("task_dependencies").select("task_id,depends_on_id").in_(
+        "task_id", [r["id"] for r in rows]
+    ).execute().data
+    depends_on: dict[str, list[str]] = {}
     for edge in edges:
         depends_on.setdefault(edge["task_id"], []).append(edge["depends_on_id"])
-    return [
-        Task(
-            **row,
-            seat=seats.get(row.get("seat_id")),
-            assignee=people.get(row.get("assignee_id")),
+    result = []
+    for row in rows:
+        due = row.get("due_date")
+        precise = datetime.fromisoformat(row["deadline_at"]) if row.get("deadline_at") else None
+        # due_date is canonical. A tracker edit/clear must not resurrect an old timestamp.
+        if due:
+            date_value = datetime.fromisoformat(str(due)).date()
+            if precise is None or precise.astimezone(NEW_YORK).date() != date_value:
+                precise = datetime.combine(date_value, time.min, tzinfo=NEW_YORK)
+        else:
+            precise = None
+        assignee = row.get("assignee_text") or row.get("owner_code") or None
+        result.append(Task(
+            id=row["id"], title=row["title"], description=row.get("description"),
+            status=row["status"], seat=row.get("seat_text"), assignee=assignee,
+            assignee_id=row.get("owner_code") or (f"name:{assignee.casefold()}" if assignee else None),
+            deadline_raw=row.get("deadline_text"), deadline_at=precise,
+            rationale=row.get("rationale"), needs_review=row.get("needs_review", False),
+            source_meeting_id=row.get("source_meeting_id"), raw_json=row.get("raw_json"),
+            created_at=row["created_at"], updated_at=row["updated_at"],
             meeting_held_at=meetings.get(row.get("source_meeting_id")),
             depends_on=tuple(sorted(depends_on.get(row["id"], []))),
-        )
-        for row in rows
-    ]
+        ))
+    return result
 
 
-def _timeline_order(task: Task) -> tuple[bool, float, float, int]:
+def _timeline_order(task: Task) -> tuple[bool, float, float, str]:
     """Scheduled tasks first, by deadline; then unscheduled; ties by creation time and id."""
     deadline = task.deadline_at.timestamp() if task.deadline_at else 0.0
     return (task.deadline_at is None, deadline, task.created_at.timestamp(), task.id)
@@ -306,24 +308,23 @@ def list_tasks(
     query = db.table("tasks").select("*")
     if status is not None:
         _check_status(status)
-        query = query.eq("status", status)
+        query = query.eq("status", "todo" if status == "open" else status)
+    rows = query.order("due_date", nullsfirst=False).limit(MAX_TASKS).execute().data
+    tasks = sorted(_hydrate(rows, db), key=_timeline_order)
     if assignee is not None:
-        person = match_person(assignee, db.table("people").select("id,name,aliases").execute().data)
-        if not person:
-            return []
-        query = query.eq("assignee_id", person["id"])
+        people = [{"id": name, "name": name, "aliases": []}
+                  for name in sorted({t.assignee for t in tasks if t.assignee})]
+        person = match_person(assignee, people)
+        tasks = [t for t in tasks if person and t.assignee == person["name"]]
     if seat is not None:
-        seat_id = _find_seat_id(seat, db)
-        if seat_id is None:
-            return []
-        query = query.eq("seat_id", seat_id)
-    rows = query.order("deadline_at", nullsfirst=False).limit(MAX_TASKS).execute().data
-    return sorted(_hydrate(rows, db), key=_timeline_order)
+        tasks = [t for t in tasks if t.seat and t.seat.casefold() == seat.strip().casefold()]
+    return tasks
 
 
-def update_task_status(task_id: int, status: str, client: Client | None = None) -> Task:
-    """Set a task's status ('open', 'done' or 'blocked'); updated_at is set by the DB trigger."""
+def update_task_status(task_id: str, status: str, client: Client | None = None) -> Task:
+    """Set canonical status; the legacy input "open" is translated to "todo"."""
     _check_status(status)
+    status = "todo" if status == "open" else status
     db = _db(client)
     rows = db.table("tasks").update({"status": status}).eq("id", task_id).execute().data
     if not rows:
@@ -335,9 +336,9 @@ def update_task_status(task_id: int, status: str, client: Client | None = None) 
 # --- dependencies -----------------------------------------------------------------------------
 
 
-def would_create_cycle(edges: Iterable[tuple[int, int]], task_id: int, depends_on_id: int) -> bool:
+def would_create_cycle(edges: Iterable[tuple[str, str]], task_id: str, depends_on_id: str) -> bool:
     """True if adding "task_id waits on depends_on_id" would close a loop in `edges`."""
-    waits_on: dict[int, set[int]] = {}
+    waits_on: dict[str, set[str]] = {}
     for waiting, needed in edges:
         waits_on.setdefault(waiting, set()).add(needed)
     stack, seen = [depends_on_id], set()
@@ -351,7 +352,7 @@ def would_create_cycle(edges: Iterable[tuple[int, int]], task_id: int, depends_o
     return False
 
 
-def add_dependency(task_id: int, depends_on_id: int, client: Client | None = None) -> TaskDependency:
+def add_dependency(task_id: str, depends_on_id: str, client: Client | None = None) -> TaskDependency:
     """Record that `task_id` waits on `depends_on_id`. Idempotent; rejects self-links and cycles."""
     edge = TaskDependency(task_id=task_id, depends_on_id=depends_on_id)  # rejects self-links
     db = _db(client)

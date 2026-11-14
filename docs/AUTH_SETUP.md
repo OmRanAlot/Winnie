@@ -63,7 +63,7 @@ in the profile table. Login continues to use `supabase.auth.signInWithPassword`.
 ## Apply the profile migration
 
 The self-contained migration is
-[`20261114120000_create_profiles.sql`](../supabase/migrations/20261114120000_create_profiles.sql).
+[`20261114120001_create_profiles.sql`](../supabase/migrations/20261114120001_create_profiles.sql).
 In your project's Supabase dashboard, open **SQL Editor**, paste the whole file, and
 run it once. It does not depend on the task migrations or modify task data.
 

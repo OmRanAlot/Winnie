@@ -1,5 +1,10 @@
 # Winnie backend
 
+Meeting ingestion, tracker imports, and messaging share UUID task records.
+Existing databases need the [schema upgrade](../docs/SCHEMA_UPGRADE.md) before
+running this backend. The dashboard uses `/api/tasks/records`; `/api/tasks` is
+the timeline projection of the same records.
+
 GitHub Actions runs backend, messaging, database, and container checks and
 publishes passing default-branch images. See [CI setup](../docs/CI.md) for
 required checks, image tags, and production deployment configuration.

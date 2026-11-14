@@ -8,7 +8,7 @@ const alice = '11111111-1111-4111-8111-111111111111';
 const bob = '22222222-2222-4222-8222-222222222222';
 const migrations = await Promise.all([
   '20261114120000_add_messaging_members.sql',
-  '20261114120000_create_profiles.sql',
+  '20261114120001_create_profiles.sql',
   '20261114140000_link_member_roster.sql',
 ].map(name => readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8')));
 

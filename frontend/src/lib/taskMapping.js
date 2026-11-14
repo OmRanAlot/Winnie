@@ -1,10 +1,8 @@
 // Turns backend tasks (TaskView, see lib/api.js) into the shapes the UI in App.jsx draws, and the
 // UI's three statuses back into the backend's. Pure functions, covered by tests/taskMapping.test.mjs.
 //
-// The backend only knows open | done | blocked, but the UI also shows "Upcoming" vs "In-Progress".
-// "In-Progress" is therefore remembered in the browser (the `started` set of task ids) and is
-// never sent to the API; only Completed <-> done/open is stored. A blocked task has no UI state of
-// its own, so it is drawn as In-Progress (work that has begun but is stuck).
+// UUID task identities and todo/in_progress/blocked/done statuses come from the shared task store.
+// A blocked task is drawn as In-Progress until the UI gains a separate blocked state.
 
 const DAY_MS = 86_400_000;
 const MIN_BAR_DAYS = 0.6;
@@ -13,12 +11,12 @@ export const STATUS_COLORS = { Upcoming: '#e0b25a', 'In-Progress': '#cc6a3d', Co
 
 export function uiStatus(view, started = new Set()) {
   if (view.status === 'done') return 'Completed';
-  if (view.status === 'blocked' || started.has(view.id)) return 'In-Progress';
+  if (view.status === 'in_progress' || view.status === 'blocked' || started.has(view.id)) return 'In-Progress';
   return 'Upcoming';
 }
 
 export function backendStatus(status) {
-  return status === 'Completed' ? 'done' : 'open';
+  return status === 'Completed' ? 'done' : status === 'In-Progress' ? 'in_progress' : 'todo';
 }
 
 /** ISO timestamp -> "MM/DD/YYYY" in local time ('' when missing or invalid). */

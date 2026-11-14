@@ -1,9 +1,9 @@
 """Task use cases, in two groups sharing one module (routes/tasks.py is the only caller).
 
-Timeline (repository.py, bigint ids): save a meeting's extracted tasks, list them for the Gantt
+Timeline (repository.py, UUID ids): save a meeting's extracted tasks, list them for the Gantt
 view, check off. Errors are left to the caller: repository.NotFound, ValueError, STORAGE_ERRORS.
 
-Task records (TaskStore, uuid ids): CRUD against the Supabase `tasks` table via
+Task records (TaskStore, UUID ids): CRUD against the Supabase `tasks` table via
 integrations/supabase.py. Raises TaskNotFound / StorageUnavailable.
 """
 
@@ -79,7 +79,7 @@ def list_task_views(
     return [to_view(task) for task in tasks]
 
 
-def set_status(task_id: int, status: str) -> TaskView:
+def set_status(task_id: str, status: str) -> TaskView:
     return to_view(repository.update_task_status(task_id, status))
 
 

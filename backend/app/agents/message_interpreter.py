@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class MessageDecision(BaseModel):
@@ -69,7 +69,8 @@ class GeminiMessageInterpreter:
             from google.genai import types
 
             with genai.Client(
-                api_key=settings.gemini_api_key,
+                api_key=(settings.gemini_api_key.get_secret_value()
+                         if isinstance(settings.gemini_api_key, SecretStr) else settings.gemini_api_key),
                 http_options=types.HttpOptions(
                     timeout=int(settings.message_ai_timeout_seconds * 1000),
                     retry_options=types.HttpRetryOptions(attempts=1),
