@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import Login from './Login';
+import { Shell } from './Shell';
 import App from '../App';
 
 export default function SessionGate() {
@@ -51,12 +52,12 @@ export default function SessionGate() {
     const { error } = await supabase.auth.signOut();
     if (error) setError(error.message);
   };
-  if (session === undefined) return <main>Loading your session…</main>;
+  if (session === undefined) return <Shell><div className="center"><p>Loading your session…</p></div></Shell>;
   if (!session) return <Login />;
-  if (!account) return <main><h1>Winnie</h1>{error ? <>
+  if (!account) return <Shell><div className="center"><h2>Winnie</h2>{error ? <>
     <p role="alert">Could not load your account: {error}</p>
-    <button onClick={() => setRetry(x => x + 1)}>Retry</button>
-    <button onClick={signOut}>Sign out</button>
-  </> : <p>Loading your account…</p>}</main>;
+    <button className="btn" onClick={() => setRetry(x => x + 1)}>Retry</button>
+    <button className="link" onClick={signOut}>Sign out</button>
+  </> : <p>Loading your account…</p>}</div></Shell>;
   return <App key={session.user.id} profile={account.profile} admin={account.admin} signOut={signOut} />;
 }
