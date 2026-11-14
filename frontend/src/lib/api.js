@@ -123,7 +123,7 @@ export async function generateTaskPlan(input) {
 }
 
 export async function createTaskRecord(task) {
-  const body = await request("/tasks", {
+  const body = await request("/tasks/records", { // POST /api/tasks does not exist (405)
     method: "POST",
     body: JSON.stringify(task),
   });
