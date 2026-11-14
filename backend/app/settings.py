@@ -47,7 +47,8 @@ class Settings(BaseSettings):
     # Gemini (services/task_assignment.py). Read from the unprefixed names used in
     # .env.example; the WINNIE_-prefixed names also work.
     gemini_api_key: str | None = Field(
-        default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "WINNIE_GEMINI_API_KEY")
+        default=None, repr=False,
+        validation_alias=AliasChoices("GEMINI_API_KEY", "WINNIE_GEMINI_API_KEY", "GOOGLE_API_KEY")
     )
     gemini_model: str = Field(
         default="gemini-3.8-flash",
