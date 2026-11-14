@@ -5,9 +5,9 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.pipeline_schemas import PipelineRequest
+from app.core.settings import REPO_ROOT, Settings
+from app.schemas.pipeline import PipelineRequest
 from app.services.planning_pipeline import run_pipeline
-from app.settings import REPO_ROOT, Settings
 
 
 def main():

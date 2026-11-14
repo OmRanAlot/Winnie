@@ -3,7 +3,7 @@
 from supabase import Client, create_client
 from supabase.client import ClientOptions
 
-from app.settings import Settings
+from app.core.settings import Settings
 
 
 class StorageUnavailable(Exception):

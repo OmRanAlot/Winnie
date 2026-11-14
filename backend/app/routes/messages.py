@@ -6,11 +6,11 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.settings import Settings
 from app.integrations.supabase import StorageUnavailable
 from app.services.members import MemberStore
 from app.services.message_replies import MENU, personal_reply
 from app.services.tasks import TaskStore
-from app.settings import Settings
 
 router = APIRouter(prefix="/api", tags=["messages"])
 

@@ -8,9 +8,9 @@ How it works
        "Unassigned" (enforced by the response schema, then re-checked here).
     3. Map each seat to a person. Tasks that could not be assigned come back with
        needs_review=true so the President or Vice President can resolve them. Nothing is saved:
-       these are candidates that wait for human confirmation (see Meeting in app/models.py).
+       these are candidates that wait for human confirmation (see Meeting in app/domain/models.py).
 
-Needs GEMINI_API_KEY (and optionally GEMINI_MODEL); see app/settings.py. The Gemini call is
+Needs GEMINI_API_KEY (and optionally GEMINI_MODEL); see app/core/settings.py. The Gemini call is
 isolated in get_assignments(), so it can move to integrations/ and the rest to services/ when
 this grows.
 """
@@ -28,9 +28,9 @@ from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from app.models import ExtractedTask
-from app.schemas import failure
-from app.settings import Settings
+from app.core.settings import Settings
+from app.domain.models import ExtractedTask
+from app.schemas.api import failure
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/assign_task_from_gemini", tags=["assign_task_from_gemini"])
@@ -64,7 +64,7 @@ class GeminiTask(BaseModel):
     deadline: str = ""  # empty when the meeting gave none
 
 
-# One task as this endpoint returns it is app.models.ExtractedTask (seat, assignee, deadline as
+# One task as this endpoint returns it is app.domain.models.ExtractedTask (seat, assignee, deadline as
 # spoken, needs_review). It is also what app/repository.insert_extracted_tasks stores.
 
 

@@ -1,7 +1,8 @@
 """The one Supabase client the backend uses (supabase-py, service-role key, server side only).
 
-Called by app/repository.py. Reads SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY through
-app/settings.py and fails loudly (SupabaseNotConfigured) when either is missing. The key is
+Called by app/db/repository.py. Reads SUPABASE_URL and SUPABASE_SECRET_KEY (or the legacy
+SUPABASE_SERVICE_ROLE_KEY) through
+app/core/settings.py and fails loudly (SupabaseNotConfigured) when either is missing. The key is
 never logged: only whether it is set.
 """
 
@@ -10,20 +11,22 @@ from functools import lru_cache
 
 from supabase import Client, create_client
 
-from app.settings import Settings
+from app.core.settings import Settings
 
 logger = logging.getLogger(__name__)
 
 
 class SupabaseNotConfigured(RuntimeError):
-    """SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing from the environment / .env."""
+    """The Supabase URL or backend secret key is missing from the environment / .env."""
 
 
 def require_credentials(settings: Settings) -> tuple[str, str]:
     """Return (url, service_role_key), or raise naming every missing variable (never the value)."""
     url = settings.supabase_url
     key = settings.supabase_service_role_key.get_secret_value() if settings.supabase_service_role_key else ""
-    missing = [name for name, value in (("SUPABASE_URL", url), ("SUPABASE_SERVICE_ROLE_KEY", key)) if not value]
+    missing = [name for name, value in (
+        ("SUPABASE_URL", url), ("SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY)", key)
+    ) if not value]
     if missing or not url:
         raise SupabaseNotConfigured(
             f"Missing {', '.join(missing)}. Copy .env.example to .env and fill them in "

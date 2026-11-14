@@ -16,11 +16,13 @@ uv run ruff check .              # lint
 ## Semester task trackers
 
 Task CRUD uses Supabase. The backend loads `WINNIE_SUPABASE_URL` and
-`SUPABASE_SERVICE_ROLE_KEY` from the repository-root `.env`, not `messaging/.env`.
+`SUPABASE_SECRET_KEY` (or legacy `SUPABASE_SERVICE_ROLE_KEY`) from the repository-root
+or `backend/.env`, not `messaging/.env`. The publishable key is for client use;
+`SUPABASE_DB_PWD` is not used by the backend.
 Apply both SQL migrations in order before using the expanded task fields.
 See [tracker import setup](../docs/TRACKER_IMPORT.md) for migration steps, monthly
 snapshot rules, permanent task IDs, the offline CSV/TSV preview, and the reviewed
-Supabase import command (`python -m app.import_tracker`). Imports default to a
+Supabase import command (`python -m app.cli.import_tracker`). Imports default to a
 database preview; actual writes require `--apply --expect-plan <plan_id>`.
 Live Google Sheets synchronization is not implemented yet.
 

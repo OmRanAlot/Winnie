@@ -18,13 +18,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from app import repository
+from app.core.settings import Settings
+from app.db import repository
 from app.integrations.supabase import StorageUnavailable
-from app.schemas import TaskStatusUpdate, failure
-from app.services import tasks as task_service
-from app.services.tasks import TaskNotFound, TaskStore
-from app.settings import Settings
-from app.task_schemas import (
+from app.schemas.api import TaskStatusUpdate, failure
+from app.schemas.tasks import (
     MonthCode,
     SemesterCode,
     StakeholderCode,
@@ -32,6 +30,8 @@ from app.task_schemas import (
     TaskStatus,
     TaskUpdate,
 )
+from app.services import tasks as task_service
+from app.services.tasks import TaskNotFound, TaskStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])

@@ -12,10 +12,10 @@ from pathlib import Path
 from httpx import HTTPError
 from supabase_auth.errors import AuthError
 
+from app.core.settings import Settings
 from app.integrations.supabase import StorageUnavailable, create_task_client
-from app.settings import Settings
 
-CREDENTIALS_PATH = Path(__file__).resolve().parents[1] / "data" / "demo-login.json"
+CREDENTIALS_PATH = Path(__file__).resolve().parents[2] / "data" / "demo-login.json"
 
 
 def main():

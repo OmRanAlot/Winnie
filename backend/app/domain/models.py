@@ -2,7 +2,7 @@
 
 Most are plain dataclasses that validate themselves on creation and are not stored yet. The task
 models (ExtractedTask, Task, TaskDependency) are Pydantic and mirror the Supabase tables in
-supabase/migrations/0001_init.sql; app/repository.py reads and writes them. No business logic
+supabase/migrations/0001_init.sql; app/db/repository.py reads and writes them. No business logic
 lives here; services/ does the work.
 
 Contents, in order:
@@ -112,7 +112,7 @@ class ExtractedTask(BaseModel):
     seat: str  # a roster seat key, or "Unassigned"
     assignee: str | None = None  # the member's name; None when unassigned
     rationale: str = ""
-    deadline: str | None = None  # as spoken; parsed by app/deadlines.py
+    deadline: str | None = None  # as spoken; parsed by app/core/deadlines.py
     needs_review: bool = False  # True when no seat could be chosen
 
 
@@ -149,7 +149,7 @@ class TaskDependency(BaseModel):
     """Directed edge: task `task_id` waits on task `depends_on_id` (table task_dependencies).
 
     Core feature: when the task being waited on finishes or gets blocked, the owners of the
-    dependents are notified. Longer cycles (A->B->A) are rejected by app/repository.py.
+    dependents are notified. Longer cycles (A->B->A) are rejected by app/db/repository.py.
     """
 
     model_config = ConfigDict(frozen=True)

@@ -12,7 +12,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ValidationError
 
-from app.task_schemas import MonthCode, SemesterCode, SourceId, TaskCreate
+from app.schemas.tasks import MonthCode, SemesterCode, SourceId, TaskCreate
 
 MONTHS = (
     "january", "february", "march", "april", "may", "june",

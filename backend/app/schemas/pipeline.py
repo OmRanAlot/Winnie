@@ -5,8 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.planning_schemas import DraftContents, Role, Text
-from app.task_schemas import SemesterCode, StakeholderCode
+from app.schemas.planning import DraftContents, Role, Text
+from app.schemas.tasks import SemesterCode, StakeholderCode
 
 Category = Literal[
     "Tabling", "Professional Development", "Company Events", "Technical Workshop",

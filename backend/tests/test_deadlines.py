@@ -1,11 +1,11 @@
-"""Tests for app/deadlines.py: spoken deadlines resolved against the meeting time (New York)."""
+"""Tests for app/core/deadlines.py: spoken deadlines resolved against the meeting time (New York)."""
 
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.deadlines import NEW_YORK, resolve_deadline
+from app.core.deadlines import NEW_YORK, resolve_deadline
 
 # Friday 2026-11-13, 18:00 in New York.
 FRIDAY_EVENING = datetime(2026, 11, 13, 18, 0, tzinfo=NEW_YORK)

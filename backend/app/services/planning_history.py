@@ -8,7 +8,7 @@ from datetime import date, datetime
 from pathlib import Path
 from statistics import median
 
-from app.pipeline_schemas import RosterFile
+from app.schemas.pipeline import RosterFile
 from app.services.members import assignment_members
 from app.services.planning_context import normalize
 

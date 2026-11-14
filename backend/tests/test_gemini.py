@@ -13,9 +13,9 @@ import pytest
 from fastapi.testclient import TestClient
 from google.genai import errors
 
+from app.core.settings import Settings
 from app.main import app
 from app.services import task_assignment as route
-from app.settings import Settings
 
 URL = "/api/assign_task_from_gemini"
 PHONE = "1-555-000-1234"

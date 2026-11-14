@@ -9,14 +9,14 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from app import repository
-from app.deadlines import NEW_YORK
+from app.core.deadlines import NEW_YORK
+from app.core.settings import Settings
+from app.db import repository
+from app.domain.models import ExtractedTask
 from app.integrations import supabase_client
 from app.integrations.supabase_client import SupabaseNotConfigured, require_credentials
 from app.main import app
-from app.models import ExtractedTask
 from app.services import meeting_tasks, task_assignment
-from app.settings import Settings
 from tests.fake_supabase import FakeClient
 
 MEETING_AT = datetime(2026, 11, 13, 18, 0, tzinfo=NEW_YORK)
@@ -164,6 +164,33 @@ def test_storage_failure_still_returns_assignments(monkeypatch):
 
 
 # --- credentials ----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("variable", [
+    "SUPABASE_SECRET_KEY", "WINNIE_SUPABASE_SECRET_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY", "WINNIE_SUPABASE_SERVICE_ROLE_KEY",
+])
+def test_backend_key_environment_aliases(monkeypatch, variable):
+    for name in (
+        "SUPABASE_SECRET_KEY", "WINNIE_SUPABASE_SECRET_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY", "WINNIE_SUPABASE_SERVICE_ROLE_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(variable, "sb_secret_synthetic")
+    settings = Settings(SUPABASE_URL="https://x.supabase.co", _env_file=None)
+    assert require_credentials(settings) == ("https://x.supabase.co", "sb_secret_synthetic")
+    assert "sb_secret_synthetic" not in repr(settings)
+
+
+def test_secret_key_from_dotenv_takes_precedence_over_legacy_key(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "SUPABASE_URL=https://x.supabase.co\n"
+        "SUPABASE_SECRET_KEY=sb_secret_synthetic\nSUPABASE_SERVICE_ROLE_KEY=\n",
+        encoding="utf-8",
+    )
+    settings = Settings(_env_file=env_file)
+    assert require_credentials(settings) == ("https://x.supabase.co", "sb_secret_synthetic")
 
 
 def test_missing_credentials_fail_loudly_without_leaking_values():

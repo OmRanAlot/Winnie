@@ -2,12 +2,12 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.pipeline_schemas import PipelineRequest
-from app.planning_schemas import PlanningDraft, PlanningRequest
+from app.core.settings import REPO_ROOT, Settings
 from app.routes.tasks import authorize_tasks, envelope
+from app.schemas.pipeline import PipelineRequest
+from app.schemas.planning import PlanningDraft, PlanningRequest
 from app.services.planning import PlanningUnavailable, create_draft
 from app.services.planning_pipeline import run_pipeline
-from app.settings import REPO_ROOT, Settings
 
 router = APIRouter(prefix="/api/planning", tags=["planning"],
                    dependencies=[Depends(authorize_tasks)])

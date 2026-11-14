@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.main import app
-from app.planning_schemas import DraftContents, PlanningRequest
 from app.routes.tasks import authorize_tasks
+from app.schemas.planning import DraftContents, PlanningRequest
 from app.services.planning import PlanningUnavailable, create_draft
 from app.services.planning_context import build_knowledge, load_examples
 

@@ -1,6 +1,6 @@
 """Tests for scripts/seed_example.py against the in-memory FakeClient."""
 
-from app import repository
+from app.db import repository
 from scripts import seed_example
 from tests.fake_supabase import FakeClient
 

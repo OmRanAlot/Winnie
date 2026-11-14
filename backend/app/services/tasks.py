@@ -16,12 +16,12 @@ import httpx
 from httpx import HTTPError
 from postgrest.exceptions import APIError
 
-from app import repository
+from app.db import repository
+from app.domain.models import ExtractedTask, Task
 from app.integrations.supabase import StorageUnavailable, create_task_client
 from app.integrations.supabase_client import SupabaseNotConfigured
-from app.models import ExtractedTask, Task
-from app.schemas import TaskView
-from app.task_schemas import TaskCreate, TaskUpdate
+from app.schemas.api import TaskView
+from app.schemas.tasks import TaskCreate, TaskUpdate
 
 # Anything that means "the task store could not be reached or is not set up".
 STORAGE_ERRORS = (SupabaseNotConfigured, APIError, httpx.HTTPError)

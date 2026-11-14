@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-REPO_ROOT = Path(__file__).resolve().parents[2]  # backend/app/settings.py -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/core/settings.py -> repo root
 
 
 class Settings(BaseSettings):
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GEMINI_MODEL", "WINNIE_GEMINI_MODEL"),
     )
 
-    # Supabase task store (integrations/supabase_client.py). Server-side only: the service-role
+    # Supabase task store (integrations/supabase_client.py). Server-side only: the secret
     # key bypasses row-level security, so it must never reach the frontend or the logs.
     # SecretStr keeps it out of reprs and tracebacks.
     supabase_url: str | None = Field(
@@ -64,7 +64,8 @@ class Settings(BaseSettings):
     supabase_service_role_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "SUPABASE_SERVICE_ROLE_KEY", "WINNIE_SUPABASE_SERVICE_ROLE_KEY"
+            "SUPABASE_SECRET_KEY", "WINNIE_SUPABASE_SECRET_KEY",
+            "SUPABASE_SERVICE_ROLE_KEY", "WINNIE_SUPABASE_SERVICE_ROLE_KEY",
         ),
     )
 

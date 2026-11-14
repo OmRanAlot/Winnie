@@ -16,10 +16,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from app import repository
-from app.deadlines import NEW_YORK
+from app.core.deadlines import NEW_YORK
+from app.db import repository
+from app.domain.models import ExtractedTask
 from app.integrations.supabase_client import get_client
-from app.models import ExtractedTask
 
 ROSTER = Path(__file__).resolve().parents[1] / "data" / "eboardMembers.json"
 MEETING_TITLE = "Sample e-board sync (seed)"

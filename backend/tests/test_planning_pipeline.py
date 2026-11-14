@@ -6,14 +6,14 @@ from datetime import date
 
 import pytest
 
-from app.pipeline_schemas import (
+from app.schemas.pipeline import (
     Classification,
     ClassifiedHistory,
     Dependencies,
     PipelineRequest,
     Schedule,
 )
-from app.planning_schemas import DraftContents
+from app.schemas.planning import DraftContents
 from app.services.planning import PlanningUnavailable
 from app.services.planning_history import enrich_history, read_taxonomy, timing_statistics
 from app.services.planning_pipeline import apply_dependencies, run_pipeline

@@ -1,4 +1,4 @@
-"""In-memory stand-in for the slice of the supabase-py client that app/repository.py uses.
+"""In-memory stand-in for the slice of the supabase-py client that app/db/repository.py uses.
 
 Supports table(...).select/insert/update/delete with .eq/.in_/.limit and .execute(). Mimics
 the migration's identity ids, defaults, unique constraints (23505) and foreign keys (23503),
@@ -17,7 +17,7 @@ from postgrest.exceptions import APIError
 DEFAULTS: dict[str, dict[str, Any]] = {
     "seats": {},
     "people": {"aliases": []},
-    "meetings": {"title": None, "transcript": None, "recording_id": None},
+    "meetings": {"title": None, "transcript": None, "recording_id": None, "summary": None},
     "tasks": {
         "description": None, "seat_id": None, "assignee_id": None, "rationale": None,
         "deadline_raw": None, "deadline_at": None, "needs_review": False, "status": "open",

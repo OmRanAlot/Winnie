@@ -1,6 +1,6 @@
 """Preview a WiCS roster TSV, prepare private SQL, or import through the server-only RPC.
 
-Run from backend/: python -m app.import_roster PATH [--prepare-sql | --apply]
+Run from backend/: python -m app.cli.import_roster PATH [--prepare-sql | --apply]
 No invitations, Auth accounts, or messaging sender mappings are created.
 """
 
@@ -14,8 +14,8 @@ from postgrest.exceptions import APIError
 from app.integrations.supabase import StorageUnavailable, create_task_client
 from app.services.roster_import import parse_roster
 
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
-MIGRATION = Path(__file__).resolve().parents[2] / "supabase" / "migrations" / (
+DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+MIGRATION = Path(__file__).resolve().parents[3] / "supabase" / "migrations" / (
     "20261114140000_link_member_roster.sql"
 )
 

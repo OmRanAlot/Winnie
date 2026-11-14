@@ -16,7 +16,7 @@ from pathlib import Path
 
 from starlette.concurrency import run_in_threadpool
 
-from app.models import ExtractedTask
+from app.domain.models import ExtractedTask
 from app.services import recordings, task_assignment
 from app.services import tasks as task_service
 

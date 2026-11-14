@@ -83,7 +83,7 @@ def failure(message: str, status: int):
 
 
 class TaskView(BaseModel):
-    """One task as the frontend sees it. Built from app.models.Task by services/tasks.py."""
+    """One task as the frontend sees it. Built from app.domain.models.Task by services/tasks.py."""
 
     id: int
     title: str

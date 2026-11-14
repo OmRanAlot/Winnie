@@ -17,9 +17,9 @@ from typing import Any
 from postgrest.exceptions import APIError
 from supabase import Client
 
-from app.deadlines import NEW_YORK, resolve_deadline
+from app.core.deadlines import NEW_YORK, resolve_deadline
+from app.domain.models import TASK_STATUSES, ExtractedTask, Task, TaskDependency
 from app.integrations.supabase_client import get_client
-from app.models import TASK_STATUSES, ExtractedTask, Task, TaskDependency
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +179,11 @@ def find_or_create_meeting(
         if error.code != UNIQUE_VIOLATION or not (found := existing()):
             raise
         return found[0]["id"], False
+
+
+def save_summary(recording_id: str, summary: str, client: Client | None = None) -> None:
+    """Store the AI-written summary on the meeting of `recording_id` (meetings.summary)."""
+    _db(client).table("meetings").update({"summary": summary}).eq("recording_id", recording_id).execute()
 
 
 def tasks_for_meeting(meeting_id: int, client: Client | None = None) -> list[Task]:

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { startTranscription } from '../src/lib/speech.ts';
+import { startTranscription } from '../src/lib/speech.js';
 
 class FakeRecognition {
   static instance;

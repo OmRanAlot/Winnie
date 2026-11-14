@@ -1,12 +1,12 @@
-"""Tests for app/repository.py against the in-memory FakeClient (no live Supabase)."""
+"""Tests for app/db/repository.py against the in-memory FakeClient (no live Supabase)."""
 
 from datetime import datetime
 
 import pytest
 
-from app import repository as repo
-from app.deadlines import NEW_YORK
-from app.models import ExtractedTask
+from app.core.deadlines import NEW_YORK
+from app.db import repository as repo
+from app.domain.models import ExtractedTask
 from tests.fake_supabase import FakeClient
 
 MEETING_AT = datetime(2026, 11, 13, 18, 0, tzinfo=NEW_YORK)  # a Friday

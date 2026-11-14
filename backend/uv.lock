@@ -3557,6 +3557,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
     { name = "apscheduler" },
+    { name = "deepagents" },
     { name = "discord-py" },
     { name = "fastapi", extra = ["standard"] },
     { name = "google-api-python-client" },
@@ -3564,6 +3565,7 @@ dependencies = [
     { name = "google-auth-oauthlib" },
     { name = "google-genai" },
     { name = "httpx" },
+    { name = "langchain" },
     { name = "pydantic-settings" },
     { name = "python-dateutil" },
     { name = "sqlalchemy" },
@@ -3591,6 +3593,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.20.1" },
     { name = "apscheduler", specifier = ">=3.11.3" },
+    { name = "deepagents", specifier = ">=0.7.38" },
     { name = "deepagents", marker = "extra == 'agents'", specifier = ">=0.7,<0.8" },
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.162.7" },
@@ -3599,6 +3602,7 @@ requires-dist = [
     { name = "google-auth-oauthlib", specifier = ">=1.5.0" },
     { name = "google-genai", specifier = ">=3.3.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "langchain", specifier = ">=1.5.0" },
     { name = "langchain-google-genai", marker = "extra == 'agents'", specifier = ">=4,<5" },
     { name = "langchain-openai", marker = "extra == 'agents'", specifier = ">=1,<2" },
     { name = "pydantic-settings", specifier = ">=2.16.3" },

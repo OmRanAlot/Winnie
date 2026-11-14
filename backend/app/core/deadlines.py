@@ -1,6 +1,6 @@
 """Turn a spoken deadline ("by Monday noon") into a datetime, relative to the meeting time.
 
-Called by app/repository.py (insert_extracted_tasks) to fill tasks.deadline_at; the original
+Called by app/db/repository.py (insert_extracted_tasks) to fill tasks.deadline_at; the original
 phrase is always kept in tasks.deadline_raw. Everything is resolved in America/New_York.
 
 Grammar (case-insensitive, filler words like "by", "before", "due", "at", "on", "this" ignored):
