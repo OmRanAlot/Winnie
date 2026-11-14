@@ -72,7 +72,7 @@ python -m app.prepare_pipeline 'C:/path/Spring Calendar.csv' --output data/plann
 Try the full pipeline from `backend/` after configuring Gemini, without a running API:
 
 ```powershell
-uv run --extra agents python -m app.preview_pipeline --event 'Git workshop' --idea 'Employer-led hands-on Git exercises and Q&A' --date 2027-04-20 --semester spring-2027 --output data/planning/git-draft.json
+uv run --extra agents python -m app.cli.preview_pipeline --event 'Git workshop' --idea 'Employer-led hands-on Git exercises and Q&A' --date 2027-04-20 --semester spring-2027 --output data/planning/git-draft.json
 ```
 
 This saves a private review artifact, including proposed Fall classifications, and

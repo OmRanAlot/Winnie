@@ -68,6 +68,17 @@ def assignment_members(assignee_text: str, aliases: list[dict]) -> set[str] | No
     return set(result) if result is not None else None
 
 
+def task_assignments(tasks: list[dict], aliases: list[dict]) -> dict[str, list[str] | None]:
+    """{task id: sorted member codes}, or None where the assignee cell is not fully recognized
+    (the dashboard then shows the raw cell instead of guessing)."""
+    result = {}
+    for task in tasks:
+        text = (task.get("assignee_text") or "").strip()
+        codes = assignment_members(text, aliases) if text else set()
+        result[str(task["id"])] = sorted(codes) if codes is not None else None
+    return result
+
+
 class MemberStore:
     def __init__(self, client_factory=create_task_client):
         self.client_factory = client_factory
@@ -93,6 +104,15 @@ class MemberStore:
             "code,display_name,active"
         ).eq("code", identity[0]["member_code"]).eq("active", True)).data
         return members[0] if len(members) == 1 else None
+
+    # Public profile fields only: contact details (email, phone_number) never leave the backend.
+    PUBLIC_FIELDS = "code,display_name,board_role,role_description,skills"
+
+    def list_active(self):
+        """Active board members for the dashboard, ordered by name."""
+        return self._execute("members", lambda table: table.select(
+            self.PUBLIC_FIELDS
+        ).eq("active", True).order("display_name")).data
 
     def aliases(self, semester_code: str):
         aliases, offset = [], 0

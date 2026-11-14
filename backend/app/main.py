@@ -15,9 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.logging_config import RequestLogMiddleware, setup_logging
 from app.core.settings import Settings
 from app.routes.health import router as health_router
-
-# pyrefly: ignore[missing-import]
 from app.routes.meetings import router as meetings_router
+from app.routes.members import router as members_router
 from app.routes.messages import router as messages_router
 from app.routes.planning import router as planning_router
 from app.routes.recordings import router as recordings_router
@@ -43,6 +42,7 @@ app.include_router(assign_task_router)
 app.include_router(tasks_router)
 app.include_router(messages_router)
 app.include_router(planning_router)
+app.include_router(members_router)
 
 logger.info(
     "Winnie API starting: env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s "

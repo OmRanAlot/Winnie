@@ -92,6 +92,7 @@ class Assignment(StrictModel):
     role: Role | None
     candidate_member_codes: list[StakeholderCode]
     proposed_member_code: StakeholderCode | None
+    proposed_member_name: Text | None = None
     rationale: str
 
 

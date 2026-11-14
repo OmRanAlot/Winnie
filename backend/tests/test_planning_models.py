@@ -8,20 +8,25 @@ from app.agents.models import planning_model
 from app.core.settings import Settings
 
 
+def key_value(settings):
+    key = settings.gemini_api_key
+    return key.get_secret_value() if hasattr(key, "get_secret_value") else key
+
+
 def test_gemini_key_loaded_from_dotenv(tmp_path, monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     dotenv = tmp_path / ".env"
     dotenv.write_text("GEMINI_API_KEY=synthetic-key\n", encoding="utf-8")
     settings = Settings(_env_file=dotenv)
-    assert settings.gemini_api_key.get_secret_value() == "synthetic-key"
+    assert key_value(settings) == "synthetic-key"
     assert "synthetic-key" not in repr(settings)
 
 
-def test_google_alias_precedence(monkeypatch):
+def test_gemini_alias_precedence(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "primary-test-key")
     monkeypatch.setenv("GEMINI_API_KEY", "fallback-test-key")
-    assert Settings(_env_file=None).gemini_api_key.get_secret_value() == "primary-test-key"
+    assert key_value(Settings(_env_file=None)) == "primary-test-key"
 
 
 def test_missing_gemini_key_fails_before_model_creation(monkeypatch):

@@ -74,9 +74,9 @@ class FakeRunner:
             "dependencies": {"edges": [{"upstream_task_id": "list", "downstream_task_id": "buy",
                                           "minimum_gap_days": 2, "rationale": "Purchasing needs the list"}]},
             "timeline": {"items": [
-                {"task_id": "list", "due_date": "2027-04-06", "rationale": "14-day historical lead",
+                {"task_id": "list", "due_date": "2027-03-28", "rationale": "Prerequisite ready before ordering",
                  "evidence_ids": ["old-1"]},
-                {"task_id": "buy", "due_date": "2027-04-13", "rationale": "7-day historical lead",
+                {"task_id": "buy", "due_date": "2027-03-30", "rationale": "21-day ordering policy overrides history",
                  "evidence_ids": ["old-2"]},
             ]},
         }[stage]
@@ -88,7 +88,7 @@ class FakeRunner:
             result["edges"].append({"upstream_task_id": "buy", "downstream_task_id": "list",
                                      "rationale": "Bad cycle"})
         if self.invalid == "too_short" and stage == "timeline":
-            result["items"][1]["due_date"] = "2027-04-07"
+            result["items"][1]["due_date"] = "2027-03-29"
         if self.invalid == "missing_schedule" and stage == "timeline":
             result["items"].pop()
         if self.invalid == "fake_evidence" and stage == "tasks":
@@ -105,7 +105,7 @@ async def test_all_stages_historical_roles_buffers_and_handoffs(sources):
     assert draft.assignments[0].proposed_member_code == "EC1"
     assert draft.assignments[1].proposed_member_code == "TREAS"
     assert draft.plan.tasks[1].dependency_ids == ["list"]
-    assert draft.plan.tasks[1].due_date == date(2027, 4, 13)
+    assert draft.plan.tasks[1].due_date == date(2027, 3, 30)
     assert len(draft.handoffs) == 1
     assert draft.timing_statistics[0]["median_lead_days"] == 14
     assert draft.historical_examples[0]["tasks"][0]["historical_roles"] == ["Event Coordinator"]
@@ -205,6 +205,31 @@ async def test_full_pipeline_timeout(sources):
     with pytest.raises(PlanningUnavailable):
         await run_pipeline(request(), **sources, mode="deepagents", runner=StalledRunner(),
                            timeout=.01)
+
+
+@pytest.mark.asyncio
+async def test_schedule_coverage_failure_is_repaired_with_specific_feedback(sources):
+    class RepairRunner(FakeRunner):
+        def __init__(self):
+            super().__init__()
+            self.timeline_calls = 0
+
+        async def run(self, stage, schema, payload):
+            result = await super().run(stage, schema, payload)
+            if stage == "timeline":
+                self.timeline_calls += 1
+                if self.timeline_calls == 1:
+                    return result.model_copy(update={"items": result.items[:1]})
+                assert "buy" in payload["validation_feedback"]
+                assert payload["required_task_ids"] == ["list", "buy"]
+                assert len(payload["previous_attempt"]["items"]) == 1
+            return result
+
+    runner = RepairRunner()
+    draft = await run_pipeline(request(), **sources, mode="deepagents", runner=runner)
+    assert runner.timeline_calls == 2
+    assert runner.calls.count("tasks") == 1
+    assert len(draft.schedule.items) == 2
 
 
 def test_pipeline_api_offline_contract(sources, monkeypatch):

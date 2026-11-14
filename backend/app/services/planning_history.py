@@ -91,4 +91,5 @@ def match_roles(tasks: list, rosters: list, semester: str) -> list[dict]:
         assignments.append({"task_id": task.id, "role": task.suggested_role,
                             "candidate_member_codes": sorted(m.member_code for m in candidates),
                             "proposed_member_code": proposed, "rationale": reason})
+        assignments[-1]["proposed_member_name"] = candidates[0].display_name if proposed else None
     return assignments
