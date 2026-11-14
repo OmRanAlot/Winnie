@@ -77,8 +77,19 @@ $supabaseUrl = Read-Plain "SUPABASE_URL, e.g. https://<ref>.supabase.co (Enter t
 if ($supabaseUrl) { $envVars += "SUPABASE_URL=$supabaseUrl" }
 
 $updateArgs = @("run", "services", "update", $Service, "--region", $Region, "--project", $ProjectId)
-if ($secretMounts) { $updateArgs += @("--update-secrets", ($secretMounts -join ",")) }
-if ($envVars) { $updateArgs += @("--update-env-vars", ($envVars -join ",")) }
+if ($secretMounts) {
+    # Cloud Run refuses to turn an existing plain env var into a secret reference of the
+    # same name, so drop any plain-text copy in the same update (the secret replaces it).
+    $mountedNames = $secretMounts | ForEach-Object { ($_ -split "=")[0] }
+    $updateArgs += @("--remove-env-vars", ($mountedNames -join ","))
+    $updateArgs += @("--update-secrets", ($secretMounts -join ","))
+}
+if ($envVars) {
+    # Same type-conflict rule in the other direction: drop any secret reference of that name.
+    $plainNames = $envVars | ForEach-Object { ($_ -split "=")[0] }
+    $updateArgs += @("--remove-secrets", ($plainNames -join ","))
+    $updateArgs += @("--update-env-vars", ($envVars -join ","))
+}
 
 if ($secretMounts -or $envVars) {
     gcloud @updateArgs
