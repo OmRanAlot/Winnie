@@ -179,7 +179,7 @@ def test_schema_only_allows_roster_seats_or_unassigned():
 
 
 def extracted(**overrides):
-    return route.ExtractedTask(**task(**overrides))
+    return route.GeminiTask(**task(**overrides))
 
 
 def test_known_seat_gets_the_members_name():

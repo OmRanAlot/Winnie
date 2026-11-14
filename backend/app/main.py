@@ -41,10 +41,15 @@ app.include_router(tasks_router)
 app.include_router(messages_router)
 
 logger.info(
-    "Winnie API starting: env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s",
+    "Winnie API starting: env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s "
+    "supabase_url=%s supabase_key=%s",
     settings.environment, settings.log_level, settings.task_transcript_source,
     "set" if settings.gemini_api_key else "MISSING",
     settings.gemini_model,
+    "set" if settings.supabase_url else "MISSING",
+    "set" if settings.supabase_service_role_key else "MISSING",
 )
 if not settings.gemini_api_key:
     logger.warning("GEMINI_API_KEY is not set: task assignment will return 503")
+if not (settings.supabase_url and settings.supabase_service_role_key):
+    logger.warning("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set: /api/tasks will return 503")

@@ -12,7 +12,7 @@ class StorageUnavailable(Exception):
 
 def create_task_client() -> Client:
     settings = Settings()
-    key = settings.supabase_secret_key.get_secret_value()
+    key = settings.supabase_service_role_key.get_secret_value() if settings.supabase_service_role_key else ""
     if not settings.supabase_url or not key:
         raise StorageUnavailable("Supabase is not configured.")
     return create_client(

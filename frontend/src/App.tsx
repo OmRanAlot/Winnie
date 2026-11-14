@@ -10,10 +10,14 @@
 //   - "Download locally": download the JSON + audio without contacting the backend.
 // The JSON shape is defined by backend/app/schemas.py (Recording); keep them in sync.
 //
+// Below the recorder, <Timeline /> (src/features/timeline/) shows every stored task as a Gantt.
+//
 // PLACEHOLDER: the UX team's design will replace this frontend, so don't invest here.
 import { useEffect, useRef, useState } from 'react';
 import { assignTasks, checkHealth, MAX_AUDIO_BYTES, saveRecording } from './lib/api';
 import { browserRecognition, startTranscription, type TranscriptStatus } from './lib/speech';
+// Swappable: the Gantt lives in its own folder and only needs GET /api/tasks.
+import Timeline from './features/timeline/Timeline';
 
 type Phase = 'idle' | 'starting' | 'recording' | 'stopping' | 'ready';
 interface Recording { audio: Blob; startedAt: string; durationMs: number; language: string }
@@ -45,6 +49,7 @@ const clock = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:
 
 export default function App() {
   const [taskOutput, setTaskOutput] = useState('');
+  const [timelineKey, setTimelineKey] = useState(0); // bumped after new tasks are stored
   const [phase, setPhase] = useState<Phase>('idle');
   const [apiStatus, setApiStatus] = useState('Checking API…');
   const [title, setTitle] = useState('Untitled conversation');
@@ -169,7 +174,9 @@ export default function App() {
       setTaskOutput('Assigning tasks...');
       try {
         const result = await assignTasks(saved.id);
-        if (mounted.current) setTaskOutput(`Source: ${result.meta.source} transcript\n` + result.data.assignments.map(t => `${t.title} ? ${t.assignee || 'Unassigned'} (${t.seat})${t.deadline ? ` ? ${t.deadline}` : ''}\n${t.description}\n${t.rationale}${t.needs_review ? ' ? Needs review' : ''}`).join('\n\n'));
+        if (mounted.current) setTimelineKey(key => key + 1);
+        const storedNote = result.meta.stored === false ? `Not saved to the board: ${result.meta.store_error ?? 'task store unavailable'}\n` : '';
+        if (mounted.current) setTaskOutput(storedNote + `Source: ${result.meta.source} transcript\n` + result.data.assignments.map(t => `${t.title} ? ${t.assignee || 'Unassigned'} (${t.seat})${t.deadline ? ` ? ${t.deadline}` : ''}\n${t.description}\n${t.rationale}${t.needs_review ? ' ? Needs review' : ''}`).join('\n\n'));
       } catch (cause) { if (mounted.current) setTaskOutput(`Recording saved. ${cause instanceof Error ? cause.message : 'Task assignment failed'}`); }
 
     } catch (cause) {
@@ -216,6 +223,7 @@ export default function App() {
           <div className="transcript-footer"><span>{transcript.trim() ? transcript.trim().split(/\s+/).length : 0} words</span><span>Editable after recording</span></div>
         </div>
       </section>
+      <Timeline refreshKey={timelineKey} />
       {taskOutput && <section aria-live="polite"><h2>Proposed tasks</h2><pre style={{whiteSpace: "pre-wrap"}}>{taskOutput}</pre></section>}
       {!browserRecognition() && <p className="message">Speech recognition is unavailable in this browser. You can record audio and enter a transcript manually.</p>}
       {!canRecord && <p className="message error" role="alert">Microphone recording requires localhost or HTTPS and a browser with MediaRecorder support.</p>}

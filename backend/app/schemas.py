@@ -1,9 +1,9 @@
 """API request/response shapes: what crosses HTTP between the frontend and the backend.
 
-Currently contains only the browser Recording (audio + transcript saved as one JSON file).
-Used by routes/recordings.py. The planned {success, data, error, meta} envelope and per-feature
-shapes are described in app/__init__.py. These shapes are the contract the replacement frontend
-is built against, so change them deliberately.
+Contains the browser Recording (audio + transcript saved as one JSON file, used by
+routes/recordings.py) and the task timeline shapes TaskView / TaskStatusUpdate (routes/tasks.py).
+Responses use the {success, data, error, meta} envelope (see failure() below). These shapes are
+the contract the replacement frontend is built against, so change them deliberately.
 """
 
 import base64
@@ -57,10 +57,12 @@ class Member(BaseModel):
     role: Literal["President", "Vice President", "Secretary", 
                   "Treasurer", "PR1", "PR2", "Event Coordinator1", "Event Coordinator2", 
                   "Community Outreach Chair", "Industry Partnership Chair1", 
-                  "Industry Partnership Chair2", "Technical Director"] = "Trainee"
+                  "Industry Partnership Chair2", "Technical Director", "Trainee"] = "Trainee"
+
 
 
 from fastapi.responses import JSONResponse
+
 
 def failure(message: str, status: int):
     return JSONResponse(
@@ -74,3 +76,29 @@ def failure(message: str, status: int):
     )
 
 
+
+
+# --- Tasks (GET /api/tasks, PATCH /api/tasks/{id}/status; routes/tasks.py) -------------------
+# The timeline contract for the (replaceable) frontend: one bar per task from `start` to `end`.
+
+
+class TaskView(BaseModel):
+    """One task as the frontend sees it. Built from app.models.Task by services/tasks.py."""
+
+    id: int
+    title: str
+    description: str | None
+    status: Literal["open", "done", "blocked"]
+    seat: str | None  # None when unassigned
+    assignee: str | None  # the person's name; None when unassigned
+    assignee_id: int | None  # stable key for per-person colors
+    start: datetime  # when the task was raised: the meeting time, else when it was created
+    end: datetime | None  # the parsed deadline; None means unscheduled
+    deadline_raw: str | None  # the deadline as spoken ("by Monday noon")
+    needs_review: bool
+    rationale: str | None
+    depends_on: list[int]  # ids of tasks this one waits on
+
+
+class TaskStatusUpdate(BaseModel):
+    status: Literal["open", "done", "blocked"]

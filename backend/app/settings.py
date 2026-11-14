@@ -1,8 +1,8 @@
 """Environment configuration for the backend.
 
 Values come from environment variables prefixed WINNIE_ (e.g. WINNIE_CORS_ORIGINS), or from a
-.env file at the REPOSITORY ROOT or in backend/ (copy .env.example there). Imported by app/main.py
-and services/task_assignment.py.
+.env file at the REPOSITORY ROOT or in backend/ (copy .env.example there). Imported by app/main.py,
+services/task_assignment.py and integrations/supabase_client.py.
 Planned settings for the integrations are listed in app/__init__.py.
 """
 
@@ -41,6 +41,19 @@ class Settings(BaseSettings):
         default="gemini-3.8-flash",
         validation_alias=AliasChoices("GEMINI_MODEL", "WINNIE_GEMINI_MODEL"),
     )
-    supabase_url: str = ""
-    supabase_secret_key: SecretStr = SecretStr("")
+
+    # Supabase task store (integrations/supabase_client.py). Server-side only: the service-role
+    # key bypasses row-level security, so it must never reach the frontend or the logs.
+    # SecretStr keeps it out of reprs and tracebacks.
+    supabase_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("SUPABASE_URL", "WINNIE_SUPABASE_URL")
+    )
+    supabase_service_role_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SUPABASE_SERVICE_ROLE_KEY", "WINNIE_SUPABASE_SERVICE_ROLE_KEY"
+        ),
+    )
+
+    # Shared secret for the task-records CRUD endpoints (routes/tasks.py, X-Winnie-Api-Key header).
     task_api_key: SecretStr = SecretStr("")

@@ -3,9 +3,11 @@
 WHAT IS WHERE
     main.py        Creates the FastAPI app and registers every router. Run this file.
     settings.py    Environment configuration (reads the repo-root .env, prefix WINNIE_).
-    models.py      Domain objects: Member, Role, Task, Meeting, Notification, ...
-                   Plain dataclasses with validation. Not database tables.
-    schemas.py     API request/response shapes (what crosses HTTP). Currently: Recording.
+    models.py      Domain objects: Member, Role, Meeting, Notification, ... (dataclasses) and
+                   ExtractedTask / Task / TaskDependency (Pydantic, mirror the Supabase tables).
+    schemas.py     API request/response shapes (what crosses HTTP): Recording, TaskView.
+    deadlines.py   Spoken deadline ("by Monday noon") -> datetime in America/New_York, or None.
+    repository.py  Supabase reads/writes for seats, people, meetings, tasks, dependencies.
     routes/        HTTP endpoints. One file per feature. Thin: validate, call a service.
     services/      Business logic. No HTTP objects in here.
     integrations/  Clients for outside systems (Google, Discord, email, messaging).
@@ -18,14 +20,14 @@ HOW A REQUEST FLOWS
 BUILT TODAY
     GET  /api/health         routes/health.py
     POST /api/recordings     routes/recordings.py -> services/recordings.py -> schemas.Recording
+    POST /api/recordings/{id}/assignments  -> services/meeting_tasks.py (Gemini, then Supabase)
+    GET  /api/tasks, PATCH /api/tasks/{id}/status  routes/tasks.py -> services/tasks.py
+                             -> repository.py -> integrations/supabase_client.py
     Everything listed as "Planned" in routes/, services/ and integrations/ is not built yet.
 
 PLANNED, NOT BUILT (no files exist for these on purpose; create them when the feature lands)
-    database.py   SQLAlchemy 2.x engine + session factory + a `get_session` FastAPI dependency.
-                  Database not chosen: SQLite for local dev, likely Postgres in prod
-                  (docs/architecture.md). Add Alembic migrations (`uv run alembic init migrations`)
-                  once tables exist. Repositories (find/create/update per table) are deliberately
-                  skipped until there is real persistence; call the session from services at first.
+    database      DONE differently: Supabase (Postgres) via supabase-py, see repository.py and
+                  supabase/migrations/. Members, notifications etc. still live only in models.py.
     jobs.py       Scheduled sweeps, run by a SEPARATE worker process (APScheduler):
                     - deadline sweep (hourly): see services/deadlines.py
                     - email reminder sweep
