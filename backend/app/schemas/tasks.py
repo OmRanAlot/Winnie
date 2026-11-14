@@ -94,6 +94,7 @@ class TaskUpdate(BaseModel):
 
 
 class StoredTask(TaskCreate):
+    original_assignee_code: StakeholderCode | None = None
     id: UUID
     task_code: str
     created_at: datetime

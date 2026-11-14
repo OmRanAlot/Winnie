@@ -1,0 +1,161 @@
+# CI for every pull request and push to main; CD to Cloud Run + Firebase Hosting on main.
+#
+# CI jobs use no secrets, so they are safe on pull requests from forks.
+# Deploy jobs run only on push to main, after every CI job passes, and only once the repo
+# variables GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT exist (see docs/CI.md).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GCP_PROJECT: hack-princeton-514716
+  GCP_REGION: us-east1
+  CLOUD_RUN_SERVICE: api
+  FIREBASE_TOOLS_VERSION: 15.36.0
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install (lockfile must be up to date)
+        run: uv sync --frozen
+      - name: Lint
+        run: uv run ruff check .
+      - name: Test
+        run: uv run pytest
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Build
+        run: npm run build
+
+  messaging:
+    name: messaging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: messaging
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: messaging/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build the backend image (not pushed)
+        run: docker build --tag winnie-api:ci backend
+
+  deploy-backend:
+    name: deploy-backend
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    needs: [backend, frontend, messaging, docker-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      # Existing env vars, secrets, scaling and IAM on the service are kept; only the image changes.
+      - name: Deploy to Cloud Run
+        run: >
+          gcloud run deploy "$CLOUD_RUN_SERVICE" --source backend
+          --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
+      - name: Smoke test
+        run: |
+          url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region "$GCP_REGION" --project "$GCP_PROJECT" --format='value(status.url)')"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors "$url/api/health"
+
+  deploy-frontend:
+    name: deploy-frontend
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    needs: [deploy-backend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: deploy-frontend
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Build
+        run: npm run build
+        env:
+          # Public by design (shipped to browsers). Never put a secret/service-role key here.
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - name: Deploy to Firebase Hosting
+        run: npx --yes firebase-tools@${{ env.FIREBASE_TOOLS_VERSION }} deploy --only hosting --project "$GCP_PROJECT"
+      - name: Smoke test (through the Hosting rewrite to Cloud Run)
+        run: curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors "https://${GCP_PROJECT}.web.app/api/health"
