@@ -4,6 +4,7 @@ import json
 
 from app.agents.models import planning_model
 from app.planning_schemas import DraftContents, PlanningRequest, ProposedTask
+from app.services.planning_policies import POLICY_TEXT
 
 SYSTEM_PROMPT = """You draft event task plans for NJIT WiCS. Return the requested schema.
 Work in three steps: extract requirements from the idea and historical examples;
@@ -20,6 +21,7 @@ Use null deadlines when timing is unknown. Suggested dates must fit the requeste
 do not reuse historical absolute dates. Use phase after for recaps/reflections.
 No live tasks, messages, purchases, bookings, approvals or commitments may be made.
 """
+SYSTEM_PROMPT += POLICY_TEXT
 
 
 def mock_plan(request: PlanningRequest, examples: list[dict]) -> DraftContents:

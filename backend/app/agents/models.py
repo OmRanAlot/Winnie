@@ -8,7 +8,9 @@ def planning_model(model, settings: Settings | None = None):
     if not isinstance(model, str) or not model.startswith("google_genai:"):
         return model
     settings = settings or Settings()
-    key = settings.gemini_api_key.get_secret_value()
+    configured_key = settings.gemini_api_key
+    key = (configured_key.get_secret_value()
+           if hasattr(configured_key, "get_secret_value") else configured_key)
     model_id = model.removeprefix("google_genai:").strip()
     if not key or not model_id:
         raise ValueError("Configure GEMINI_API_KEY and a google_genai model ID.")

@@ -7,6 +7,8 @@ const STATUS_TO_UI = { todo: "Upcoming", in_progress: "In-Progress", blocked: "I
 const STATUS_FROM_UI = { Upcoming: "todo", "In-Progress": "in_progress", Completed: "done" };
 
 async function request(path, options = {}) {
+  const method = (options.method ?? "GET").toUpperCase();
+  const endpoint = `/api${path.split("?")[0]}`;
   let response;
   try {
     response = await fetch(`/api${path}`, {
@@ -15,11 +17,12 @@ async function request(path, options = {}) {
       signal: options.signal ?? AbortSignal.timeout(15000),
     });
   } catch {
-    throw new Error("Cannot reach the backend. Is it running on port 8000?");
+    throw new Error(`Cannot reach the backend for ${method} ${endpoint}. Is it running on port 8000?`);
   }
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) {
-    throw new Error(body?.error?.message || body?.detail || `Request failed (HTTP ${response.status}).`);
+    const detail = body?.error?.message || body?.detail;
+    throw new Error(`${method} ${endpoint} returned HTTP ${response.status}${detail ? `: ${detail}` : ""}.`);
   }
   return body;
 }
@@ -49,6 +52,7 @@ export function toUiTask(t, monday = weekStart()) {
     assignee: null, // no member mapping in the API yet; assigneeText holds the tracker cell
     assigneeText: t.assignee_text || "",
     status: STATUS_TO_UI[t.status] ?? "Upcoming",
+    priority: t.priority ?? "normal",
     blocked: t.status === "blocked",
     dep: null, // dependencies are not stored in the backend yet
     day,

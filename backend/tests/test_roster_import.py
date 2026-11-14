@@ -26,8 +26,11 @@ def test_roster_blocks_preserve_missing_contacts_and_role_notes(tmp_path):
     assert rows[1]["email"] is None
     assert rows[1]["phone_number"] is None
     assert rows[1]["contact_consent"] is False
-    assert rows[1]["delegation_context_verified"] is False
-    assert len(warnings) == 1
+    assert rows[1]["delegation_context_verified"] is True
+    assert "technical development" in rows[1]["role_description"]
+    assert len(rows[1]["role_responsibilities"]) == 5
+    assert "Lead recruitment." not in rows[1]["role_responsibilities"]
+    assert warnings == []
     assert rows == parse_roster(path)[0]  # Stable codes make repeat imports update members.
 
 
@@ -46,3 +49,23 @@ def test_malformed_member_row_is_not_treated_as_responsibility(tmp_path):
     path.write_text(HEADER + "Alice\tDirector\tPresident\tCS\tunknown\n", encoding="utf-8")
     with pytest.raises(ValueError, match="unrecognized roster row"):
         parse_roster(path)
+
+
+@pytest.mark.parametrize("role,count,expected", [
+    ("Membership Chair", 10, "Lead recruitment efforts during Involvement Fairs and orientation events."),
+    ("Technical Director", 5, "Design and develop the GirlHacks website and landing pages."),
+])
+def test_user_verified_definitions_replace_swapped_export_blocks(tmp_path, role, count, expected):
+    path = tmp_path / "roster.tsv"
+    source = HEADER + (
+        f"Demo Person\tDemo Title\t{role}\tCS\tMay 2027"
+        "\t\t\tThe Role: Incorrect export description.\n Incorrect responsibility.\n"
+    )
+    path.write_text(source, encoding="utf-8")
+    rows, warnings = parse_roster(path)
+    assert warnings == []
+    assert rows[0]["delegation_context_verified"] is True
+    assert len(rows[0]["role_responsibilities"]) == count
+    assert expected in rows[0]["role_responsibilities"]
+    assert "Incorrect" not in rows[0]["role_description"]
+    assert path.read_text(encoding="utf-8") == source

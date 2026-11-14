@@ -1,12 +1,17 @@
 """Coordinate read-only planning and validate model output before returning a draft."""
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from app.agents.planner import deep_plan, mock_plan
 from app.planning_schemas import PlanningDraft, PlanningRequest
 from app.services.planning_context import load_examples
+from app.services.planning_policies import (
+    ORDER_LEAD_DAYS,
+    apply_task_policies,
+    validate_order_deadlines,
+)
 
 
 class PlanningUnavailable(Exception):
@@ -38,7 +43,13 @@ async def create_draft(request: PlanningRequest, *, knowledge_path: Path,
             contents = await asyncio.wait_for(deep_plan(request, examples, model), timeout)
         else:
             raise ValueError("Configure planning mode and explicit provider:model.")
+        contents = apply_task_policies(contents)
+        if mode == "mock":
+            for task in contents.tasks:
+                if task.kind == "order_items":
+                    task.due_date = request.event_date - timedelta(days=ORDER_LEAD_DAYS)
         validate_draft(contents, request, examples)
+        validate_order_deadlines(contents, request.event_date)
     except (OSError, ValueError, KeyError, ImportError, TimeoutError) as exc:
         raise PlanningUnavailable("Planning configuration, context or output is invalid.") from exc
     except Exception as exc:
