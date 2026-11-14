@@ -36,7 +36,6 @@ const SAMPLE_TASKS = [
   { id: 16, title: "Review room layout", assigned: "11/08/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 9, day: 5, len: 1, notes: "" },
   { id: 17, title: "Collect final RSVP count", assigned: "11/09/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 5, len: 1, notes: "" },
 ];
-const DUE_SOON_IDS = TASKS.filter((t) => t.status !== "Completed").map((t) => t.id);
 const MEETINGS = [
   { id: 1, date: "11/13/26", name: "Fall 2026 E-Board Meeting", tasks: [[ "Allocate budget for GBM 1", 3], ["Design GBM 1 flyer", 7]] },
   { id: 2, date: "11/10/26", name: "Finance Logistics Meeting", tasks: [["Book GBM 1 room", 5]] },
@@ -129,20 +128,20 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .gh,.gr{display:grid;grid-template-columns:150px 84px 84px 84px 1fr;align-items:center}
 .gh{background:var(--hover);font-weight:700;padding:var(--s2) var(--s3);gap:var(--s1)}
 .gr{padding:var(--s1) var(--s3);gap:var(--s1);height:40px;border-top:1px solid var(--line);cursor:pointer}
-.gr:hover{background:#f1e7dc}
-.gr.context{background:#f4e3d7;border-left:3px solid var(--rust)}
-.gr.context:hover{background:#ead2c1}
 .gr span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-weight:700}
 .lane{position:relative;height:100%;background:repeating-linear-gradient(90deg,transparent 0 calc(100%/7 - 1px),var(--line) calc(100%/7 - 1px) calc(100%/7))}
 .bar{position:absolute;top:10px;height:20px;border-radius:3px}
+.bar.related-bar{outline:2px solid var(--rust);outline-offset:1px}
+.bar.linked-highlight{z-index:1;outline:3px solid var(--maroon);outline-offset:1px;filter:saturate(1.25) brightness(1.08)}
+.bar.unrelated-dim{opacity:.4}
 .tog{display:flex;align-items:center;gap:var(--s2);justify-content:flex-end;font-size:14px;margin-bottom:var(--s2);padding:0;border:0;background:transparent;color:inherit;cursor:pointer}
 .sw{width:40px;height:22px;border-radius:99px;background:var(--line);position:relative}
 .sw i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--ink);transition:left .15s}
 .sw.on{background:var(--rust)}.sw.on i{left:21px;background:#fff8f0}
 .legend{display:flex;gap:var(--s4);margin-top:var(--s3);font-size:14px}
 .legend i{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:var(--s2);vertical-align:-2px}
-.legend .related-swatch{background:#f4e3d7;border:1px solid var(--rust)}
+.legend .related-swatch{background:transparent;border:2px solid var(--rust)}
 .sec{font-size:22px;margin:var(--s5) 0 var(--s2);font-weight:650}
 .sum{display:grid;grid-template-columns:1fr 240px;gap:var(--s2) var(--s4);align-items:center;max-width:960px;margin:0 auto;width:100%}
 .sum .pill{display:flex;justify-content:space-between;align-items:center;width:100%;cursor:pointer}
@@ -228,14 +227,14 @@ const Icon = ({ n, s = 22 }) => <svg width={s} height={s} viewBox="0 0 24 24" fi
 const Avatar = ({ p, cls = "", ...r }) => <button className={`avatar ${cls}`} title={p.name} aria-label={p.name} {...r}>{ini(p.name)}</button>;
 
 /* ---------- Gantt ---------- */
-function Gantt({ tasks: all, allTasks = all, isAdminView = false, onOpen, who: owner }) {
+function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onShowAllChange, onOpen, who: owner }) {
   const [deps, setDeps] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  const [hoveredTaskId, setHoveredTaskId] = useState(null);
   const [week, setWeek] = useState(0); // 0 = this week, -1 = last week, 1 = next week
   const H = 40, W = 700, cw = W / 7;
   // Live tasks carry a real due date: place each one on the selected week's Mon..Sun columns.
   // Sample tasks (no dueIso) keep their hand-set day/len.
-  const dated = all.some((t) => t.dueIso);
+  const dated = allTasks.some((t) => t.dueIso);
   const monday = weekStart();
   monday.setDate(monday.getDate() + 7 * week);
   const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
@@ -249,8 +248,31 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, onOpen, who: o
   const taskIds = new Set(baseTasks.map((t) => t.id));
   const ownTaskIds = new Set(weekTasks(all).map((t) => t.id));
   const weeklyAllTasks = weekTasks(allTasks);
-  const chartTasks = deps
-    ? weeklyAllTasks.filter((t) => taskIds.has(t.id) || baseTasks.some((ownTask) => ownTask.dep === t.id || t.dep === ownTask.id))
+  const getConnectedTaskIds = (rootIds) => {
+    const connected = new Set(rootIds);
+    const pending = [...rootIds];
+    while (pending.length) {
+      const currentId = pending.pop();
+      weeklyAllTasks.forEach((candidate) => {
+        const neighbors = [];
+        if (candidate.dep === currentId) neighbors.push(candidate.id);
+        if (candidate.id === currentId && candidate.dep != null) neighbors.push(candidate.dep);
+        neighbors.forEach((id) => {
+          if (!connected.has(id)) {
+            connected.add(id);
+            pending.push(id);
+          }
+        });
+      });
+    }
+    return connected;
+  };
+  const linkedIds = deps ? getConnectedTaskIds([...taskIds]) : new Set();
+  const highlightedIds = hoveredTaskId === null ? new Set() : getConnectedTaskIds([hoveredTaskId]);
+  highlightedIds.forEach((id) => linkedIds.add(id));
+  const showLinkedTasks = deps || hoveredTaskId !== null;
+  const chartTasks = showLinkedTasks
+    ? [...baseTasks, ...weeklyAllTasks.filter((t) => linkedIds.has(t.id) && !taskIds.has(t.id))]
     : baseTasks;
   const idx = Object.fromEntries(chartTasks.map((t, i) => [t.id, i]));
   return (
@@ -263,7 +285,7 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, onOpen, who: o
       <div className={`gantt-controls${isAdminView ? " admin-controls" : ""}`}>
         {isAdminView && (
           <button type="button" className="tog" aria-pressed={showAll} aria-label={`Gantt view: ${showAll ? "all E-board tasks" : "my tasks"}. Switch view.`}
-            onClick={() => setShowAll((visible) => !visible)}>
+            onClick={() => onShowAllChange((visible) => !visible)}>
             {showAll ? "All E-board tasks" : "My tasks"} <span className={`sw ${showAll ? "on" : ""}`} aria-hidden="true"><i /></span>
           </button>
         )}
@@ -277,18 +299,22 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, onOpen, who: o
         <div style={{ position: "relative" }}>
           {chartTasks.map((t) => {
             const isRelated = !taskIds.has(t.id);
+            const isHighlighted = hoveredTaskId !== null && highlightedIds.has(t.id);
+            const isDimmed = hoveredTaskId !== null && !isHighlighted;
             const ownerName = person(t.assignee)?.name;
             const showOwner = isRelated || (isAdminView && showAll && !ownTaskIds.has(t.id));
             return (
-            <div className={`gr${isRelated ? " context" : ""}`} key={t.id} onClick={() => onOpen(t.id)}>
+            <div className="gr" key={t.id} onClick={() => onOpen(t.id)}
+              onMouseEnter={() => setHoveredTaskId(t.id)} onMouseLeave={() => setHoveredTaskId(null)}>
               <span title={showOwner ? `${t.title} — ${ownerName}` : t.title}>{t.title}{showOwner && ownerName ? ` · ${ownerName}` : ""}</span><span>{t.start.slice(0, 5)}</span><span>{t.due.slice(0, 5)}</span><span>{t.finished ? t.finished.slice(0, 5) : "—"}</span>
-              <div className="lane"><div className="bar" style={{ left: `${(t.day / 7) * 100}%`, width: `${(t.len / 7) * 100}%`, background: COLORS[t.status] }} /></div>
+              <div className="lane"><div className={`bar${isRelated ? " related-bar" : ""}${isHighlighted ? " linked-highlight" : ""}${isDimmed ? " unrelated-dim" : ""}`}
+                style={{ left: `${(t.day / 7) * 100}%`, width: `${(t.len / 7) * 100}%`, background: COLORS[t.status] }} /></div>
             </div>
             );
           })}
           {!baseTasks.length && <p style={{ textAlign: "center", padding: "18px 0", margin: 0 }}>
             No tasks due {owner ? `for ${owner} ` : ""}this week. Use ◀ ▶ to see other weeks.</p>}
-          {deps && (
+          {showLinkedTasks && (
             <svg className="dependency-lines" viewBox={`0 0 ${W} ${chartTasks.length * H}`} preserveAspectRatio="none" style={{ height: chartTasks.length * H }}>
               {chartTasks.filter((t) => t.dep && idx[t.dep] !== undefined).map((t) => {
                 const a = chartTasks.find((item) => item.id === t.dep), x1 = (a.day + a.len) * cw, y1 = idx[a.id] * H + H / 2, x2 = (t.day + 0.1) * cw, y2 = idx[t.id] * H + 9;
@@ -308,6 +334,7 @@ export default function App() {
   const [stack, setStack] = useState([{ n: "landing" }]);
   const [admin, setAdmin] = useState(false);
   const [viewAs, setViewAs] = useState(null);
+  const [adminShowAllGantt, setAdminShowAllGantt] = useState(false);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState("");
   const [reqs, setReqs] = useState(REQUESTS);
@@ -412,8 +439,7 @@ export default function App() {
       break;
     case "dash": {
       // Live: the Gantt picks the week itself; admins see everyone's tasks, members their own.
-      const mine = live ? TASKS.filter((t) => isAdminView || owns(t, me.id))
-        : viewAs ? TASKS.filter((t) => t.assignee === viewAs) : isAdminView ? TASKS : TASKS.filter((t) => t.assignee === 2 || t.dep);
+      const mine = TASKS.filter((t) => owns(t, me.id));
       const pending = TASKS.filter((t) => t.status !== "Completed");
       const soon = (live ? [...pending].sort((a, b) => (a.dueIso ?? "9999").localeCompare(b.dueIso ?? "9999")) : pending).slice(0, isAdminView ? 3 : 4);
       page = (<>
@@ -422,7 +448,7 @@ export default function App() {
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
             : <button className="bell" aria-label="Notifications" onClick={() => setModal("notif")}><Icon n="bell" s={26} /><b>1</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
-        <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} allTasks={TASKS} isAdminView={isAdminView} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
+        <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} allTasks={TASKS} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
             {isAdminView && <Avatar p={who(t)} cls="sm" onClick={() => t.assignee && go("profile", { id: t.assignee })} />}
             <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
@@ -436,7 +462,7 @@ export default function App() {
                 {t.status === "Completed" ? "Completed" : "In progress"}
               </button>}
           </div>))}</div></div>
-        <Nav /></>);
+      </>);
       break;
     }
     case "meetings":
