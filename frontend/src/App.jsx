@@ -9,18 +9,19 @@ import Recorder from "./Recorder.jsx";
 // Sample people: shown when the backend is unreachable, and still used by the sample
 // Meetings / Requests screens. Real members come from GET /api/members.
 const SAMPLE_PEOPLE = [
-  { id: 1, name: "Maya Patel", role: "President", skills: ["Leadership", "Public speaking", "Budgeting"] },
-  { id: 2, name: "Jordan Lee", role: "Vice President", skills: ["Planning", "Outreach", "Docs"] },
-  { id: 3, name: "Sam Rivera", role: "Treasurer", skills: ["Budgeting", "Spreadsheets", "Sponsorship"] },
-  { id: 4, name: "Priya Shah", role: "Secretary", skills: ["Note-taking", "Scheduling", "Docs"] },
-  { id: 5, name: "Alex Kim", role: "Event Coordinator", skills: ["Logistics", "Planning", "Vendors"] },
-  { id: 6, name: "Dana Cruz", role: "Event Coordinator", skills: ["Design", "Logistics", "Outreach"] },
-  { id: 7, name: "Riley Chen", role: "PR Chair", skills: ["Design", "Social media", "Writing"] },
-  { id: 8, name: "Taylor Brooks", role: "PR Chair", skills: ["Photography", "Writing", "Outreach"] },
-  { id: 9, name: "Morgan Ellis", role: "Industry Partnerships Chair", skills: ["Outreach", "Sponsorship", "Networking"], previousRoles: [] },
-  { id: 10, name: "Casey Nguyen", role: "Industry Partnerships Chair", skills: ["Sponsorship", "Writing", "Networking"], previousRoles: [] },
-  { id: 11, name: "Avery Johnson", role: "Community Outreach Chair", skills: ["Outreach", "Community Engagement", "Event Planning"], previousRoles: [] },
-  { id: 12, name: "Jamie Rivera", role: "Technical Director", skills: ["Web Development", "Technical", "Design"], previousRoles: [] },
+  { id: 1, name: "Lakshita Madhavan", role: "President", skills: ["Leadership", "Public speaking", "Budgeting"] },
+  { id: 2, name: "Stephanie Nicolaescu", role: "Vice President", skills: ["Planning", "Outreach", "Docs"] },
+  { id: 4, name: "Anne Therese Argonza", role: "Secretary", skills: ["Note-taking", "Scheduling", "Docs"] },
+  { id: 3, name: "Sharanya Raj", role: "Treasurer", skills: ["Budgeting", "Spreadsheets", "Sponsorship"] },
+  { id: 5, name: "Saidarsha Karunakaran", role: "Event Coordinator", skills: ["Logistics", "Planning", "Vendors"] },
+  { id: 6, name: "Garima Thapa", role: "Event Coordinator", skills: ["Design", "Logistics", "Outreach"] },
+  { id: 9, name: "Carlin Verano", role: "Industry Partnerships Chair", skills: ["Outreach", "Sponsorship", "Networking"], previousRoles: [] },
+  { id: 10, name: "Manisha Palaniappan", role: "Industry Partnerships Chair", skills: ["Sponsorship", "Writing", "Networking"], previousRoles: [] },
+  { id: 7, name: "Caithy Liao", role: "Public Relations Chair", skills: ["Design", "Social media", "Writing"] },
+  { id: 8, name: "Azka Faisal", role: "Public Relations Chair", skills: ["Photography", "Writing", "Outreach"] },
+  { id: 11, name: "Priya Patel", role: "Community Outreach Chair", skills: ["Outreach", "Community Engagement", "Event Planning"], previousRoles: [] },
+  { id: 12, name: "Meera James", role: "Technical Director", skills: ["Web Development", "Technical", "Design"], previousRoles: [] },
+  { id: 13, name: "Diya Pottangadi", role: "Membership Chair", skills: ["Membership", "Community Engagement", "Outreach", "Event Planning"], previousRoles: [] },
 ];
 // Sample tasks, shown only when the backend can't be reached. Real tasks come from GET /api/tasks.
 // day = start column (0 = Mon), len = days wide, dep = id of task it depends on
@@ -332,6 +333,39 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .box{width:min(480px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;padding:var(--s4)}
   .toast{max-width:calc(100% - 32px);text-align:center}
 }
+`;
+
+const DESIGN_REFRESH_ENABLED = true; // Set false to restore the current styling.
+const DESIGN_REFRESH_CSS = `
+.app.design-refresh{background-image:radial-gradient(ellipse at 50% 0,rgba(255,255,255,.48),transparent 58%)}
+.app.design-refresh .top{position:relative;padding-bottom:8px}
+.app.design-refresh .top::after{content:"";position:absolute;left:8%;right:8%;bottom:0;height:1px;background:linear-gradient(90deg,transparent,var(--line),transparent)}
+.app.design-refresh .top h1::after{content:"";display:block;width:38px;height:3px;margin:5px auto 0;border-radius:99px;background:var(--rust)}
+.app.design-refresh .top .greeting::after{margin-left:0}
+.app.design-refresh .panel{border:1px solid rgba(214,196,178,.88);border-radius:14px;box-shadow:0 6px 18px rgba(58,20,16,.07),inset 0 1px rgba(255,255,255,.55);background-image:linear-gradient(145deg,rgba(255,255,255,.25),transparent 58%)}
+.app.design-refresh .panel>h3:first-child{padding-bottom:var(--s2);border-bottom:1px solid rgba(214,196,178,.8)}
+.app.design-refresh .metrics-chart-panel{background-color:#fff;border-radius:22px;box-shadow:0 8px 24px rgba(58,20,16,.08)}
+.app.design-refresh .nav{border:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0;background:linear-gradient(180deg,#f1e7dc,var(--surface));box-shadow:0 -8px 22px rgba(58,20,16,.07)}
+.app.design-refresh .nav button,.app.design-refresh .btn,.app.design-refresh .pill,.app.design-refresh .admin-menu button,.app.design-refresh .hub button{border-radius:10px;box-shadow:0 2px 0 rgba(58,20,16,.09)}
+.app.design-refresh .avatar{box-shadow:0 0 0 3px var(--paper),0 0 0 4px var(--line),2px 3px 0 var(--maroon)}
+.app.design-refresh .avatar.lg{box-shadow:0 0 0 4px var(--paper),0 0 0 5px var(--line),4px 5px 0 var(--maroon)}
+.app.design-refresh .gantt{border:1px solid var(--line);box-shadow:0 6px 16px rgba(58,20,16,.06)}
+.app.design-refresh .gr{transition:background-color .15s ease}
+.app.design-refresh .bar{border-radius:999px;box-shadow:inset 0 1px rgba(255,255,255,.3);transition:filter .15s ease}
+.app.design-refresh .metrics-member-link{transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease}
+.app.design-refresh .metrics-chart-panel .chart-member rect{transition:filter .15s ease}
+.app.design-refresh .status-switch.on{box-shadow:0 0 0 3px rgba(181,71,42,.12)}
+.app.design-refresh .status-switch:active .status-switch-track i{transform:scale(.86)}
+@media(hover:hover){
+  .app.design-refresh button:not(.back):not(.avatar):not(.bell):not(.chev):not(.rb):hover{transform:translateY(-1px);box-shadow:0 5px 12px rgba(58,20,16,.13)}
+  .app.design-refresh .avatar:hover{transform:rotate(-4deg) scale(1.04)}
+  .app.design-refresh .gr:hover{background-color:rgba(255,255,255,.3)}
+  .app.design-refresh .chart-member:hover rect{filter:brightness(1.08)}
+  .app.design-refresh .metrics-member-link:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(58,20,16,.09)}
+}
+.app.design-refresh button:not(.back):not(.avatar):not(.bell):not(.chev):not(.rb){transition:transform .15s ease,box-shadow .15s ease,background-color .15s ease,color .15s ease}
+.app.design-refresh .avatar{transition:transform .15s ease,background-color .15s ease}
+@media(prefers-reduced-motion:reduce){.app.design-refresh *{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 `;
 
 const ini = (n) => n.split(" ").map((w) => w[0]).join("");
@@ -865,9 +899,10 @@ export default function App() {
       break;
     }
     case "tasks": {
+      const visibleTasks = isAdminView ? tasks : tasks.filter((t) => owns(t, me.id));
       const G = (title, st, avs) => (<>
         <h2 className="sec" style={{ gridColumn: 1 }}>{title}</h2>{avs ? <h2 className="sec" style={{ fontSize: 24 }}>Assign Task:</h2> : <span />}
-        {tasks.filter((t) => t.status === st).sort(compareByDueDate).map((t) => (<Fragment key={t.id}>
+        {visibleTasks.filter((t) => t.status === st).sort(compareByDueDate).map((t) => (<Fragment key={t.id}>
           <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
           <div className="row" style={{ gap: 8 }}>{avs && (live ? (() => {
@@ -881,7 +916,7 @@ export default function App() {
               return <Avatar key={s.code} p={q} cls="sm" title={`${s.name} · ${s.fit === "strong" ? "Strong fit" : "Possible fit"}\n${s.matched_skills.join(", ")}\n${s.due_this_week} due this week · ${s.open} open\n${s.reason}`}
                 style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => setModal({ reassign: [t, q, s] })} />; });
           })() : PEOPLE.filter((q) => !owns(t, q.id) && (!q.skills.length || q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s)))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />))}</div>
-          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!tasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
+          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
@@ -974,6 +1009,7 @@ export default function App() {
         <button onClick={() => go("editlist")}>Edit Profiles</button>
         <button onClick={() => go("metricsOverview")}>Metrics Overview</button>
         <button onClick={() => go("review")}>Task Reassignment Requests</button>
+        <button onClick={() => go("attendance")}>Manage Meeting Attendance</button>
         <button onClick={() => { setPlanInput({ ...EMPTY_PLAN_INPUT }); setPlanError(""); go("planTask"); }}>Create Task</button>
       </div>
         <div style={{ textAlign: "center" }}><button className="btn alt" onClick={() => setStack([{ n: "dash" }])}>Back to dashboard</button></div></>);
@@ -1073,9 +1109,6 @@ export default function App() {
               </button>;
             })}</div>
           </div>
-        </div>
-        <div style={{ textAlign: "center", marginTop: 18 }}>
-          <button className="btn alt" onClick={() => go("attendance")}>Manage Meeting Attendance</button>
         </div>
       </>);
       break;
@@ -1251,7 +1284,7 @@ export default function App() {
 
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
-    <div className="app"><style>{CSS}</style><main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
+    <div className={`app${DESIGN_REFRESH_ENABLED ? " design-refresh" : ""}`}><style>{CSS}{DESIGN_REFRESH_CSS}</style><main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
       {modal === "notif" && (<div className="modal"><div className="box"><h4>Incoming task from Sam Rivera:</h4>Task Reassignment Request:<br />Sam Rivera → {me.name}<br />“Allocate Budget for GBM 1”
         <div className="acts"><button className="btn out" onClick={() => { setModal(null); say("Task accepted"); }}>Accept</button><button className="btn out" onClick={() => { setModal(null); say("Task declined"); }}>Decline</button></div></div></div>)}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
