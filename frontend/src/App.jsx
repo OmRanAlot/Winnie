@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from "react";
-import { getAssignments, getMembers, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
+import { getAssignments, getCandidates, getMembers, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
 import Recorder from "./Recorder.jsx";
 
 /* ---------- Placeholder data (replace with backend responses) ---------- */
@@ -19,23 +19,23 @@ const SAMPLE_PEOPLE = [
 // day = start column (0 = Mon), len = days wide, dep = id of task it depends on
 const SAMPLE_TASKS = [
   { id: 1, title: "Draft GBM 1 agenda", assigned: "11/02/2026", start: "11/09/2026", due: "11/10/2026", finished: "11/10/2026", assignee: 2, status: "Completed", dep: null, day: 0, len: 1.2, notes: "" },
-  { id: 2, title: "Book GBM 1 room", assigned: "11/02/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 5, status: "In-Progress", dep: 1, day: 1, len: 1.2, notes: "Waiting on facilities reply." },
-  { id: 3, title: "Allocate budget for GBM 1", assigned: "11/03/2026", start: "11/11/2026", due: "11/13/2026", finished: "", assignee: 3, status: "Upcoming", dep: 2, day: 2, len: 2, notes: "" },
+  { id: 2, title: "Book GBM 1 room", assigned: "11/02/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 5, status: "In-Progress", priority: "high", dep: 1, day: 1, len: 1.2, notes: "Waiting on facilities reply." },
+  { id: 3, title: "Allocate budget for GBM 1", assigned: "11/03/2026", start: "11/11/2026", due: "11/13/2026", finished: "", assignee: 3, status: "Upcoming", priority: "high", dep: 2, day: 2, len: 2, notes: "" },
   { id: 4, title: "Design GBM 1 flyer", assigned: "11/03/2026", start: "11/10/2026", due: "11/12/2026", finished: "", assignee: 7, status: "In-Progress", dep: null, day: 1, len: 2, notes: "" },
   { id: 5, title: "Post flyer on socials", assigned: "11/04/2026", start: "11/12/2026", due: "11/14/2026", finished: "", assignee: 8, status: "Upcoming", dep: 4, day: 3, len: 1.6, notes: "" },
-  { id: 6, title: "Order snacks", assigned: "11/04/2026", start: "11/13/2026", due: "11/15/2026", finished: "", assignee: 6, status: "Upcoming", dep: 3, day: 4, len: 1.8, notes: "" },
+  { id: 6, title: "Order snacks", assigned: "11/04/2026", start: "11/13/2026", due: "11/15/2026", finished: "", assignee: 6, status: "Upcoming", priority: "low", dep: 3, day: 4, len: 1.8, notes: "" },
   { id: 7, title: "Draft RSVP form", assigned: "11/04/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 4, status: "Upcoming", dep: 1, day: 1, len: 1, notes: "" },
   { id: 8, title: "Share RSVP form", assigned: "11/05/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 8, status: "Upcoming", dep: 7, day: 2, len: 1.2, notes: "" },
   { id: 9, title: "Prepare event layout", assigned: "11/05/2026", start: "11/12/2026", due: "11/14/2026", finished: "", assignee: 5, status: "Upcoming", dep: 2, day: 3, len: 1.5, notes: "" },
   { id: 10, title: "Print GBM 1 flyers", assigned: "11/06/2026", start: "11/12/2026", due: "11/13/2026", finished: "", assignee: 7, status: "Upcoming", dep: 4, day: 3, len: 1.2, notes: "" },
   { id: 11, title: "Confirm catering delivery", assigned: "11/06/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 6, status: "Upcoming", dep: 6, day: 5, len: 1.5, notes: "" },
-  { id: 12, title: "Confirm GBM 1 event plan", assigned: "11/06/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 1, status: "Upcoming", dep: 1, day: 2, len: 1, notes: "" },
-  { id: 13, title: "Review final event budget", assigned: "11/07/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 1, status: "Upcoming", dep: 3, day: 4, len: 1, notes: "" },
+  { id: 12, title: "Confirm GBM 1 event plan", assigned: "11/06/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 1, status: "Upcoming", priority: "high", dep: 1, day: 2, len: 1, notes: "" },
+  { id: 13, title: "Review final event budget", assigned: "11/07/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 1, status: "Upcoming", priority: "high", dep: 3, day: 4, len: 1, notes: "" },
   { id: 14, title: "Prepare opening remarks", assigned: "11/07/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 2, status: "Upcoming", dep: 1, day: 2, len: 1, notes: "" },
   { id: 15, title: "Send GBM 1 reminder", assigned: "11/08/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 4, len: 1, notes: "" },
   { id: 16, title: "Review room layout", assigned: "11/08/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 9, day: 5, len: 1, notes: "" },
   { id: 17, title: "Collect final RSVP count", assigned: "11/09/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 5, len: 1, notes: "" },
-];
+].map((t) => ({ ...t, priority: t.priority ?? "normal" }));
 const MEETINGS = [
   { id: 1, date: "11/13/26", name: "Fall 2026 E-Board Meeting", tasks: [[ "Allocate budget for GBM 1", 3], ["Design GBM 1 flyer", 7]] },
   { id: 2, date: "11/10/26", name: "Finance Logistics Meeting", tasks: [["Book GBM 1 room", 5]] },
@@ -52,6 +52,18 @@ const person = (id) => currentPeople.find((p) => p.id === id) ?? SAMPLE_PEOPLE.f
 const task = (id) => currentTasks.find((t) => t.id === id) ?? SAMPLE_TASKS.find((t) => t.id === id);
 const owns = (t, id) => t.assignee === id || (t.assignees ?? []).includes(id);
 const seedOf = (id) => [...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0);
+const dueDateKey = (t) => {
+  if (t.dueIso) {
+    const time = Date.parse(t.dueIso);
+    if (!Number.isNaN(time)) return time;
+  }
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t.due ?? "");
+  return match ? Date.UTC(Number(match[3]), Number(match[1]) - 1, Number(match[2])) : Infinity;
+};
+const compareByDueDate = (a, b) => {
+  const aDue = dueDateKey(a), bDue = dueDateKey(b);
+  return aDue < bDue ? -1 : aDue > bDue ? 1 : 0;
+};
 // Live tasks have no member link yet: fall back to the tracker's assignee cell.
 const who = (t) => person(t.assignee) ?? { id: null, name: t.assigneeText ? t.assigneeText.split("\n")[0] : "Unassigned" };
 
@@ -110,7 +122,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .home h3{font-size:22px;margin:0 0 var(--s3);font-weight:650}
 .gantt-controls{display:flex;align-items:center;justify-content:flex-end;gap:var(--s3);flex-wrap:wrap}
 .gantt-controls.admin-controls{justify-content:space-between}
-.nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:0 calc(var(--s6) * -1);padding:var(--s4) var(--s6);position:sticky;bottom:0}
+.nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:0 calc(var(--s6) * -1);padding:var(--s4) var(--s6);position:sticky;bottom:0;z-index:5}
 .nav button{border:1px solid var(--line);background:var(--paper);border-radius:var(--r);padding:var(--s3);font-size:20px;font-weight:600;color:var(--ink);cursor:pointer}
 .nav button:hover{background:var(--ink);color:var(--paper)}
 .bell{position:relative;background:none;border:0;color:var(--ink);cursor:pointer;padding:var(--s2);display:grid}
@@ -125,15 +137,17 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .status-switch.on .status-switch-track{background:var(--rust)}
 .status-switch.on .status-switch-track i{left:17px;background:#fff8f0}
 .gantt{background:var(--surface);border-radius:var(--r);overflow:hidden;font-size:13px}
-.gh,.gr{display:grid;grid-template-columns:150px 84px 84px 84px 1fr;align-items:center}
+.gh,.gr{display:grid;grid-template-columns:150px 70px 84px 84px 84px 1fr;align-items:center}
 .gh{background:var(--hover);font-weight:700;padding:var(--s2) var(--s3);gap:var(--s1)}
 .gr{padding:var(--s1) var(--s3);gap:var(--s1);height:40px;border-top:1px solid var(--line);cursor:pointer}
 .gr span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.priority-high{color:var(--maroon);font-weight:700}
+.priority-low{color:var(--muted)}
 .days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-weight:700}
 .lane{position:relative;height:100%;background:repeating-linear-gradient(90deg,transparent 0 calc(100%/7 - 1px),var(--line) calc(100%/7 - 1px) calc(100%/7))}
 .bar{position:absolute;top:10px;height:20px;border-radius:3px}
 .bar.related-bar{outline:2px solid var(--rust);outline-offset:1px}
-.bar.linked-highlight{z-index:1;outline:3px solid var(--maroon);outline-offset:1px;filter:saturate(1.25) brightness(1.08)}
+.bar.linked-highlight{outline:3px solid var(--maroon);outline-offset:1px;filter:saturate(1.25) brightness(1.08)}
 .bar.unrelated-dim{opacity:.4}
 .tog{display:flex;align-items:center;gap:var(--s2);justify-content:flex-end;font-size:14px;margin-bottom:var(--s2);padding:0;border:0;background:transparent;color:inherit;cursor:pointer}
 .sw{width:40px;height:22px;border-radius:99px;background:var(--line);position:relative}
@@ -168,7 +182,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .rb{width:48px;height:48px;border-radius:50%;border:0;color:#fff8f0;cursor:pointer;display:grid;place-items:center}
 .side{display:flex;flex-direction:column;gap:var(--s3)}.side .pill{background:var(--ink);color:var(--paper);cursor:pointer}
 .task-form{grid-template-columns:150px minmax(0,1fr)}
-.dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 436px);pointer-events:none}
+.dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 510px);pointer-events:none}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 @media(max-width:800px){
   .app{padding:var(--s4)}
@@ -177,14 +191,14 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .home,.home>div,.gantt,.gh,.gr{min-width:0;width:100%}
   .meeting-layout{grid-template-columns:1fr!important}
   .task-form{grid-template-columns:minmax(0,100px) minmax(0,1fr)!important}
-  .gh,.gr{grid-template-columns:minmax(0,110px) 0 0 0 minmax(0,1fr)}
-  .gh span:nth-child(2),.gh span:nth-child(3),.gh span:nth-child(4),.gr span:nth-child(2),.gr span:nth-child(3),.gr span:nth-child(4){display:none}
+  .gh,.gr{grid-template-columns:minmax(0,110px) 56px 0 0 0 minmax(0,1fr)}
+  .gh span:nth-child(3),.gh span:nth-child(4),.gh span:nth-child(5),.gr span:nth-child(3),.gr span:nth-child(4),.gr span:nth-child(5){display:none}
   .grid2{grid-template-columns:1fr}
   .grid2 .row{grid-column:1!important;grid-row:auto!important}
   .divider{display:none}
   .sum{grid-template-columns:1fr}
   .hub button:last-child:nth-child(odd){width:100%}
-  .dependency-lines{width:calc(100% - 130px)}
+  .dependency-lines{width:calc(100% - 208px)}
 }
 @media(max-width:520px){
   .app{padding:var(--s3);border-radius:0}
@@ -209,7 +223,8 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .st{font-size:11px}
   .status-action{padding:var(--s2);font-size:11px}
   .panel{padding:var(--s4)}
-  .gh,.gr{grid-template-columns:minmax(0,92px) 0 0 0 minmax(0,1fr)}
+  .gh,.gr{grid-template-columns:minmax(0,92px) 44px 0 0 0 minmax(0,1fr)}
+  .dependency-lines{width:calc(100% - 178px)}
   .gantt{font-size:11px}
   .legend{flex-wrap:wrap;gap:var(--s2)}
   .hub button{padding:var(--s4)}
@@ -239,26 +254,27 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
   monday.setDate(monday.getDate() + 7 * week);
   const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
   const fmt = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const weekTasks = (list) => !dated ? list : list
+  const weekTasks = (list) => !dated ? [...list].sort(compareByDueDate) : list
     .filter((t) => t.dueIso)
     .map((t) => ({ ...t, day: Math.round((new Date(`${t.dueIso}T00:00:00`) - monday) / 86400000), len: 1 }))
     .filter((t) => t.day >= 0 && t.day < 7)
-    .sort((a, b) => a.day - b.day);
+    .sort(compareByDueDate);
   const baseTasks = weekTasks(isAdminView && showAll ? allTasks : all);
   const taskIds = new Set(baseTasks.map((t) => t.id));
   const ownTaskIds = new Set(weekTasks(all).map((t) => t.id));
   const weeklyAllTasks = weekTasks(allTasks);
-  const getConnectedTaskIds = (rootIds) => {
+  const getConnectedTaskIds = (rootIds, scopeTasks = weeklyAllTasks) => {
     const connected = new Set(rootIds);
+    const scopeIds = new Set(scopeTasks.map((task) => task.id));
     const pending = [...rootIds];
     while (pending.length) {
       const currentId = pending.pop();
-      weeklyAllTasks.forEach((candidate) => {
+      scopeTasks.forEach((candidate) => {
         const neighbors = [];
         if (candidate.dep === currentId) neighbors.push(candidate.id);
         if (candidate.id === currentId && candidate.dep != null) neighbors.push(candidate.dep);
         neighbors.forEach((id) => {
-          if (!connected.has(id)) {
+          if (scopeIds.has(id) && !connected.has(id)) {
             connected.add(id);
             pending.push(id);
           }
@@ -268,12 +284,12 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
     return connected;
   };
   const linkedIds = deps ? getConnectedTaskIds([...taskIds]) : new Set();
-  const highlightedIds = hoveredTaskId === null ? new Set() : getConnectedTaskIds([hoveredTaskId]);
-  highlightedIds.forEach((id) => linkedIds.add(id));
+  const hoverScope = isAdminView && !showAll ? baseTasks : weeklyAllTasks;
+  const highlightedIds = hoveredTaskId === null
+    ? new Set() : getConnectedTaskIds([hoveredTaskId], hoverScope);
   const showLinkedTasks = deps || hoveredTaskId !== null;
-  const chartTasks = showLinkedTasks
-    ? [...baseTasks, ...weeklyAllTasks.filter((t) => linkedIds.has(t.id) && !taskIds.has(t.id))]
-    : baseTasks;
+  const chartTaskIds = new Set([...taskIds, ...linkedIds, ...highlightedIds]);
+  const chartTasks = weeklyAllTasks.filter((t) => chartTaskIds.has(t.id)).sort(compareByDueDate);
   const idx = Object.fromEntries(chartTasks.map((t, i) => [t.id, i]));
   return (
     <div>
@@ -294,7 +310,7 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
         </button>
       </div>
       <div className="gantt">
-        <div className="gh"><span>Task title</span><span>Start date</span><span>Due date</span><span>Date finished</span>
+        <div className="gh"><span>Task title</span><span>Priority</span><span>Start date</span><span>Due date</span><span>Date finished</span>
           <div className="days">{DAYS.map((d) => <span key={d}>{d}</span>)}</div></div>
         <div style={{ position: "relative" }}>
           {chartTasks.map((t) => {
@@ -303,10 +319,14 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
             const isDimmed = hoveredTaskId !== null && !isHighlighted;
             const ownerName = person(t.assignee)?.name;
             const showOwner = isRelated || (isAdminView && showAll && !ownTaskIds.has(t.id));
+            const priority = t.priority ?? "normal";
+            const priorityLabel = priority.charAt(0).toUpperCase() + priority.slice(1);
             return (
             <div className="gr" key={t.id} onClick={() => onOpen(t.id)}
               onMouseEnter={() => setHoveredTaskId(t.id)} onMouseLeave={() => setHoveredTaskId(null)}>
-              <span title={showOwner ? `${t.title} — ${ownerName}` : t.title}>{t.title}{showOwner && ownerName ? ` · ${ownerName}` : ""}</span><span>{t.start.slice(0, 5)}</span><span>{t.due.slice(0, 5)}</span><span>{t.finished ? t.finished.slice(0, 5) : "—"}</span>
+              <span title={showOwner ? `${t.title} — ${ownerName}` : t.title}>{t.title}{showOwner && ownerName ? ` · ${ownerName}` : ""}</span>
+              <span className={`priority-${priority}`} title={`${priorityLabel} priority`}>{priorityLabel}</span>
+              <span>{t.start.slice(0, 5)}</span><span>{t.due.slice(0, 5)}</span><span>{t.finished ? t.finished.slice(0, 5) : "—"}</span>
               <div className="lane"><div className={`bar${isRelated ? " related-bar" : ""}${isHighlighted ? " linked-highlight" : ""}${isDimmed ? " unrelated-dim" : ""}`}
                 style={{ left: `${(t.day / 7) * 100}%`, width: `${(t.len / 7) * 100}%`, background: COLORS[t.status] }} /></div>
             </div>
@@ -341,6 +361,13 @@ export default function App() {
   const [open, setOpen] = useState({});
   const [notes, setNotes] = useState({});
   const [recorder, setRecorder] = useState(null); // meeting kind being recorded, or null
+  const [cands, setCands] = useState({}); // task id -> {loading} | {list} | {error}: skill-matched suggestions
+  const loadCandidates = (t) => {
+    setCands((c) => ({ ...c, [t.id]: { loading: true } }));
+    getCandidates(t.id)
+      .then((list) => setCands((c) => ({ ...c, [t.id]: { list } })))
+      .catch((e) => setCands((c) => ({ ...c, [t.id]: { error: e.message } })));
+  };
   const [TASKS, setTasks] = useState(SAMPLE_TASKS);
   const [PEOPLE, setPeople] = useState(SAMPLE_PEOPLE);
   const tasks = TASKS; // the redesign's screens read `tasks`; same live list
@@ -495,7 +522,12 @@ export default function App() {
       page = (<><Top title="Profile" tag={isAdminView} />
         <div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div><h2 style={isAdminView ? { cursor: "pointer" } : {}} onClick={() => isAdminView && setModal({ view: q })}>{q.name}</h2><p>{q.role}</p></div></div>
         <div className="two"><div className="panel"><h3>Tasks</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.title}</a> ({t.status})</li>)}{!ts.length && <li className="none">No tasks assigned yet.</li>}</ul></div>
-          <div className="panel"><h3>Skills</h3><ul>{q.skills.map((s) => <li key={s}>{s}</li>)}{!q.skills.length && <li>No skills listed yet</li>}</ul>
+          <div className="panel"><h3>Skills</h3>
+            {q.technical?.length || q.soft?.length ? (<>
+              <p className="lbl" style={{ margin: "4px 0" }}>Technical</p><ul>{q.technical.map((s) => <li key={s}>{s}</li>)}</ul>
+              <p className="lbl" style={{ margin: "8px 0 4px" }}>Soft skills</p><ul>{q.soft.map((s) => <li key={s}>{s}</li>)}</ul>
+              {q.skillsSource === "role-derived" && <p style={{ fontSize: 13, opacity: 0.75 }}>Based on the {q.role} role description, not individual experience.</p>}
+            </>) : <ul>{q.skills.map((s) => <li key={s}>{s}</li>)}{!q.skills.length && <li>No skills listed yet</li>}</ul>}
             {q.description && <p style={{ fontSize: 15, lineHeight: 1.5 }}>{q.description}</p>}</div></div></>);
       break;
     }
@@ -514,10 +546,20 @@ export default function App() {
     case "tasks": {
       const G = (title, st, avs) => (<>
         <h2 className="sec" style={{ gridColumn: 1 }}>{title}</h2>{avs ? <h2 className="sec" style={{ fontSize: 24 }}>Assign Task:</h2> : <span />}
-        {tasks.filter((t) => t.status === st).map((t) => (<Fragment key={t.id}>
+        {tasks.filter((t) => t.status === st).sort(compareByDueDate).map((t) => (<Fragment key={t.id}>
           <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
-          <div className="row" style={{ gap: 8 }}>{avs && PEOPLE.filter((q) => !owns(t, q.id) && (!q.skills.length || q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s)))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />)}</div>
+          <div className="row" style={{ gap: 8 }}>{avs && (live ? (() => {
+            // Live: only people whose skills fit this task (backend + Gemini), lightest workload first.
+            const c = cands[t.id];
+            if (!c) return <button className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }} title="Find board members whose skills fit this task" onClick={() => loadCandidates(t)}>Suggest</button>;
+            if (c.loading) return <small>Checking skills…</small>;
+            if (c.error) return <small title={c.error}>Couldn’t check · <a href="#retry" onClick={(e) => { e.preventDefault(); loadCandidates(t); }}>retry</a></small>;
+            if (!c.list.length) return <small>No one else has the skills for this</small>;
+            return c.list.map((s) => { const q = person(s.code) ?? { id: s.code, name: s.name };
+              return <Avatar key={s.code} p={q} cls="sm" title={`${s.name} · ${s.fit === "strong" ? "Strong fit" : "Possible fit"}\n${s.matched_skills.join(", ")}\n${s.due_this_week} due this week · ${s.open} open\n${s.reason}`}
+                style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => setModal({ reassign: [t, q, s] })} />; });
+          })() : PEOPLE.filter((q) => !owns(t, q.id) && (!q.skills.length || q.skills.some((s) => ["Budgeting", "Design", "Logistics", "Outreach", "Planning", "Docs"].includes(s)))).slice(0, 3).map((q) => <Avatar key={q.id} p={q} cls="sm" onClick={() => setModal({ reassign: [t, q] })} />))}</div>
           {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!tasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
@@ -590,7 +632,10 @@ export default function App() {
         <div className="acts"><button className="btn out" onClick={() => { setModal(null); say("Task accepted"); }}>Accept</button><button className="btn out" onClick={() => { setModal(null); say("Task declined"); }}>Decline</button></div></div></div>)}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
-      {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br /><small>Your request goes to an admin for approval.</small>
+      {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />
+        {modal.reassign[2] && <small style={{ display: "block", margin: "6px 0" }}><b>{modal.reassign[2].fit === "strong" ? "Strong fit" : "Possible fit"}:</b> {modal.reassign[2].reason}<br />
+          Skills: {modal.reassign[2].matched_skills.join(", ")} · {modal.reassign[2].due_this_week} due this week, {modal.reassign[2].open} open</small>}
+        <small>Your request goes to an admin for approval.</small>
         <div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button><button className="btn" onClick={() => { setModal(null); say("Reassignment request sent to admin"); }}>Send request</button></div></div></div>)}
       {recorder && <Recorder kind={recorder} onClose={() => setRecorder(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}

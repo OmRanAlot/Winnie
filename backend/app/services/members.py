@@ -114,6 +114,12 @@ class MemberStore:
             self.PUBLIC_FIELDS
         ).eq("active", True).order("display_name")).data
 
+    def list_roles(self):
+        """Role text used to derive skills (services/member_skills.py). No contact details."""
+        return self._execute("members", lambda table: table.select(
+            "code,display_name,board_role,role_description,role_responsibilities"
+        ).eq("active", True).order("display_name")).data
+
     def aliases(self, semester_code: str):
         aliases, offset = [], 0
         while True:
