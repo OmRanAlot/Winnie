@@ -949,7 +949,15 @@ export default function App({ profile, admin, signOut }) {
         {visibleTasks.filter((t) => t.status === st).sort(compareByDueDate).map((t) => (<Fragment key={t.id}>
           <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
-          <div className="row" style={{ gap: 8 }}>{avs && (live ? (() => {
+          <div className="row" style={{ gap: 8 }}>
+            {isAdminView && <button type="button" className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }}
+              aria-label={`Nudge assignee for ${t.title}`}
+              title={t.status === "Completed" ? "Completed tasks do not need a reminder" : "Notification delivery is not connected yet"}
+              disabled={t.status === "Completed" || !t.assignee}
+              onClick={(e) => { e.stopPropagation(); say("Nudge delivery is not connected yet; no reminder was sent."); }}>
+              Nudge
+            </button>}
+            {avs && (live ? (() => {
             // Live: only people whose skills fit this task (backend + Gemini), lightest workload first.
             const c = cands[t.id];
             if (!c) return <button className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }} title="Find board members whose skills fit this task" onClick={() => loadCandidates(t)}>Suggest</button>;
