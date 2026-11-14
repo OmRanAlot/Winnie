@@ -2,7 +2,7 @@
 
 Values come from environment variables prefixed WINNIE_ (e.g. WINNIE_CORS_ORIGINS), or from a
 .env file at the REPOSITORY ROOT or in backend/ (copy .env.example there). Imported by app/main.py
-and routes/assign_task_from_gemini.py.
+and services/task_assignment.py.
 Planned settings for the integrations are listed in app/__init__.py.
 """
 
@@ -29,9 +29,10 @@ class Settings(BaseSettings):
 
     app_name: str = "Winnie API"
     environment: str = "development"
+    log_level: str = "INFO"  # WINNIE_LOG_LEVEL=DEBUG for more detail
     cors_origins: list[str] = ["http://localhost:5173"]
 
-    # Gemini (routes/assign_task_from_gemini.py). Read from the unprefixed names used in
+    # Gemini (services/task_assignment.py). Read from the unprefixed names used in
     # .env.example; the WINNIE_-prefixed names also work.
     gemini_api_key: str | None = Field(
         default=None, validation_alias=AliasChoices("GEMINI_API_KEY", "WINNIE_GEMINI_API_KEY")

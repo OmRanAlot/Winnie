@@ -15,22 +15,22 @@
         "email" : "testexample@gmail.com"
     },
     "Treasurer":{
-        "name": "Alice",
+        "name": "Sam",
         "number": "1-123-456-7890",
         "email" : "testexample@gmail.com"
     },
     "Industry Partnership":{
-        "name": "Alice",
+        "name": "Boba",
         "number": "1-123-456-7890",
         "email" : "testexample@gmail.com"
     },
     "PR1":{
-        "name": "Alice",
+        "name": "Tofu",
         "number": "1-123-456-7890",
         "email" : "testexample@gmail.com"
     },
     "PR2":{
-        "name": "Alice",
+        "name": "Luffy",
         "number": "1-123-456-7890",
         "email" : "testexample@gmail.com"
     }

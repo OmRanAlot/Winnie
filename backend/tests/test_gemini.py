@@ -1,4 +1,4 @@
-"""Tests for POST /api/assign_task_from_gemini (app/routes/assign_task_from_gemini.py).
+"""Tests for POST /api/assign_task_from_gemini (app/services/task_assignment.py).
 
 Gemini is never called: a fake client stands in for it, so these run offline and free. They check
 what we send to Gemini (no phone numbers or emails, transcript treated as data), how we turn its
@@ -457,3 +457,10 @@ def test_settings_default_to_no_key_and_a_default_model(monkeypatch):
     settings = Settings(_env_file=None)
 
     assert settings.gemini_api_key is None and settings.gemini_model
+
+
+def test_flash_38_uses_low_thinking(client, gemini, configure):
+    configure(model="gemini-3.8-flash")
+    response = post(client)
+    assert response.status_code == 200
+    assert gemini.calls[0]["config"].thinking_config.thinking_level == "LOW"

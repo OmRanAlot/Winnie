@@ -2,7 +2,9 @@
 // (which saves the recording JSON and the audio file; returns both filenames).
 // Base URL comes from VITE_API_BASE_URL (default "/api", proxied to localhost:8000 by
 // vite.config.ts). Backend side: backend/app/routes/health.py and routes/recordings.py.
-const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+// Accept an origin alone as well as an explicit API path.
+const configuredBase = (import.meta.env.VITE_API_BASE_URL || '/api').trim().replace(/\/+$/, '');
+const apiBase = /^https?:\/\/[^/]+$/i.test(configuredBase) ? `${configuredBase}/api` : configuredBase;
 export const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
 export async function checkHealth(signal?: AbortSignal): Promise<void> {

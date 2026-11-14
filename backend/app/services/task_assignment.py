@@ -17,6 +17,7 @@ this grows.
 
 import json
 import logging
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -36,8 +37,8 @@ router = APIRouter(prefix="/api/assign_task_from_gemini", tags=["assign_task_fro
 EBOARD_FILE = Path(__file__).resolve().parents[2] / "data" / "eboardMembers.json"
 UNASSIGNED = "Unassigned"
 MAX_TRANSCRIPT_CHARS = 200_000
-GEMINI_TIMEOUT_MS = 60_000
-GEMINI_ATTEMPTS = 3
+GEMINI_TIMEOUT_MS = 45_000
+GEMINI_ATTEMPTS = 1
 
 
 class AssignRequest(BaseModel):
@@ -171,6 +172,7 @@ def load_eboard(path: Path | None = None) -> dict[str, str]:
         members = TypeAdapter(dict[str, RosterEntry]).validate_python(json.load(file))
     if not members:
         raise ValueError("The e-board roster is empty.")
+    logger.debug("Loaded %d roster seats", len(members))
     return {seat: entry.name for seat, entry in members.items()}
 
 
@@ -255,26 +257,46 @@ async def get_assignments(
     transcript: str, eboard: dict[str, str], api_key: str, model: str
 ) -> list[Assignment]:
     """Ask Gemini for the tasks in the transcript and who should do them."""
+    logger.info("Calling Gemini model=%s (%d transcript chars, %d seats)", model, len(transcript), len(eboard))
+    started = time.perf_counter()
     response = await gemini_client(api_key).aio.models.generate_content(
         model=model,
         # Strip the closing tag so the transcript cannot end the data block early.
         contents=f"<transcript>\n{transcript.replace('</transcript>', '')}\n</transcript>",
         config=types.GenerateContentConfig(
+            # Gemini 3 defaults can spend substantial time reasoning. Extraction
+            # needs only low effort; minimal is unsupported on 3.8 Flash.
+            thinking_config=types.ThinkingConfig(thinking_level="low")
+            if model.startswith("gemini-3") else None,
             system_instruction=build_instructions(eboard),
             response_mime_type="application/json",
             response_json_schema=build_schema(eboard),
         ),
     )
+    logger.info("Gemini answered in %.1f s", time.perf_counter() - started)
+    usage = getattr(response, "usage_metadata", None)
+    if usage:
+        logger.info("Gemini tokens: input=%s output=%s thinking=%s",
+                    usage.prompt_token_count, usage.candidates_token_count,
+                    usage.thoughts_token_count)
     if not response.text:
+        logger.error("Gemini returned no text; prompt_feedback=%s", getattr(response, "prompt_feedback", None))
         raise ValueError("Gemini returned no text (the response may have been blocked).")
+    logger.debug("Gemini raw response: %s", response.text)
     tasks = TypeAdapter(list[ExtractedTask]).validate_json(response.text)
-    return [to_assignment(task, eboard) for task in tasks]
+    assignments = [to_assignment(task, eboard) for task in tasks]
+    for extracted, assignment in zip(tasks, assignments):
+        if extracted.seat != assignment.seat:
+            logger.warning("Gemini chose unknown seat %r for task %r; marked Unassigned", extracted.seat, extracted.title)
+    logger.info("Parsed %d tasks, %d need review", len(assignments), sum(a.needs_review for a in assignments))
+    return assignments
 
 
 
 @router.post("")
 async def assign_tasks(body: AssignRequest, settings: Annotated[Settings, Depends(get_settings)]):
     if not settings.gemini_api_key:
+        logger.error("Task assignment requested but GEMINI_API_KEY is not set")
         return failure("Task assignment is not configured. Set GEMINI_API_KEY.", 503)
     try:
         eboard = load_eboard()
