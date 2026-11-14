@@ -12,7 +12,7 @@ export async function checkHealth(signal?: AbortSignal): Promise<void> {
   if (data.status !== 'ok' || data.service !== 'winnie-api') throw new Error('Unexpected health response');
 }
 
-export interface SavedRecording { filename: string; audioFilename: string }
+export interface SavedRecording { id: string; filename: string; audioFilename: string }
 
 export async function saveRecording(recording: unknown): Promise<SavedRecording> {
   let response: Response;
@@ -24,5 +24,13 @@ export async function saveRecording(recording: unknown): Promise<SavedRecording>
   } catch { throw new Error('Cannot reach the backend. Start the API on port 8000, or download locally.'); }
   const result = await response.json().catch(() => null);
   if (!response.ok || !result?.success) throw new Error(result?.error?.message || `Saving failed (HTTP ${response.status}).`);
-  return { filename: result.data.filename, audioFilename: result.data.audioFilename };
+  return { id: result.data.id, filename: result.data.filename, audioFilename: result.data.audioFilename };
+}
+
+export interface Assignment { title: string; description: string; assignee: string | null; seat: string; deadline: string | null; rationale: string; needs_review: boolean }
+export async function assignTasks(id: string): Promise<{data: {assignments: Assignment[]}; meta: {source: string}}> {
+  const response = await fetch(`${apiBase}/recordings/${encodeURIComponent(id)}/assignments`, {method: 'POST', signal: AbortSignal.timeout(200000)});
+  const result = await response.json();
+  if (!response.ok || !result.success) throw new Error(result?.error?.message || 'Task assignment failed');
+  return result;
 }

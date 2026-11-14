@@ -1,3 +1,4 @@
+from pathlib import Path
 """POST /api/recordings: receive a browser recording (audio + transcript JSON) and save the JSON
 and the audio file.
 
@@ -11,22 +12,10 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from app.schemas import MAX_JSON_BYTES, Recording
+from app.schemas import MAX_JSON_BYTES, Recording, failure
 from app.services.recordings import save_recording
 
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
-
-
-def failure(message: str, status: int):
-    return JSONResponse(
-        status_code=status,
-        content={
-            "success": False,
-            "data": None,
-            "error": {"message": message},
-            "meta": {},
-        },
-    )
 
 
 @router.post("", status_code=201)
@@ -46,5 +35,16 @@ async def create_recording(request: Request):
         saved = await run_in_threadpool(save_recording, recording)
     except OSError:
         return failure("Could not save the recording. Please retry or download locally.", 503)
-    data = {"filename": saved.json_filename, "audioFilename": saved.audio_filename}
+    data = {"id": Path(saved.json_filename).stem, "filename": saved.json_filename, "audioFilename": saved.audio_filename}
     return {"success": True, "data": data, "error": None, "meta": {}}
+
+@router.post("/{recording_id}/assignments")
+async def recording_assignments(recording_id: str):
+    from app.services.meeting_tasks import assign_for_recording
+    from app.services.task_assignment import get_settings
+    try:
+        return await assign_for_recording(recording_id, get_settings())
+    except (FileNotFoundError, ValueError):
+        return failure("Recording not found.", 404)
+    except OSError:
+        return failure("Could not persist task assignments.", 503)

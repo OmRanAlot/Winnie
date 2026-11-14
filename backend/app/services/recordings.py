@@ -46,3 +46,10 @@ def save_recording(recording: Recording) -> SavedRecording:
         json_path.unlink(missing_ok=True)
         raise
     return saved
+
+
+def load_recording(recording_id: str) -> Recording:
+    import re
+    if not re.fullmatch(r"conversation-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", recording_id):
+        raise FileNotFoundError(recording_id)
+    return Recording.model_validate_json((RECORDINGS_DIR / f"{recording_id}.json").read_text(encoding="utf-8"))

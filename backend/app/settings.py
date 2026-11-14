@@ -7,6 +7,7 @@ Planned settings for the integrations are listed in app/__init__.py.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,8 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    task_transcript_source: Literal["example", "recording"] = "example"
 
     app_name: str = "Winnie API"
     environment: str = "development"

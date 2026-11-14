@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from google.genai import errors
 
 from app.main import app
-from app.routes import assign_task_from_gemini as route
+from app.services import task_assignment as route
 from app.settings import Settings
 
 URL = "/api/assign_task_from_gemini"
