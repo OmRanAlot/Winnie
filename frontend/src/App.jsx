@@ -9,6 +9,7 @@ import EvaluationPanel from "./EvaluationPanel.jsx";
 import UploadMeeting from "./UploadMeeting.jsx";
 import { supabase } from "./lib/supabase.js";
 import { reassignmentStore } from "./lib/reassignments.js";
+import { orderProfiles } from "./lib/profileOrder.js";
 const requestsStore = reassignmentStore(supabase);
 
 // All board records come from the backend. No sample data fallback.
@@ -738,12 +739,12 @@ export default function App({ profile, admin, signOut }) {
   const Ident = ({ q, sub }) => (
     <div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div><h2>{q.name}</h2><p>{q.role}</p></div></div>
   );
-  const Grid = ({ title, tag, onPick, extra, description }) => (
+  const Grid = ({ title, tag, onPick, extra, description, people = PEOPLE }) => (
     <>
       <Top title={title} tag={tag} />
       {description && <p className="grid-intro">{description}</p>}
-      <div className="grid2"><div className="divider" style={{ gridRow: `1/${Math.ceil(PEOPLE.length / 2) + 1}` }} />
-        {PEOPLE.map((q, i, all) => (
+      <div className="grid2"><div className="divider" style={{ gridRow: `1/${Math.ceil(people.length / 2) + 1}` }} />
+        {people.map((q, i, all) => (
           <div className="row" key={q.id} style={{ gridColumn: i < Math.ceil(all.length / 2) ? 1 : 3, gridRow: (i % Math.ceil(all.length / 2)) + 1 }}>
             <Avatar p={q} onClick={() => onPick(q)} /><button className="pill" onClick={() => onPick(q)}>{q.name} | {q.role}</button>
           </div>
@@ -815,7 +816,7 @@ export default function App({ profile, admin, signOut }) {
       break;
     }
     case "profiles":
-      page = <Grid title="Profiles" onPick={(q) => go("profile", { id: q.id })} />;
+      page = <Grid title="Profiles" people={orderProfiles(PEOPLE)} onPick={(q) => go("profile", { id: q.id })} />;
       break;
     case "profile": {
       const q = person(p.id) ?? me, ts = TASKS.filter((t) => owns(t, q.id));
@@ -875,10 +876,10 @@ export default function App({ profile, admin, signOut }) {
           <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
           <div className="row" style={{ gap: 8 }}>
-            {isAdminView && <button type="button" className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }}
+            {isAdminView && t.status !== "Completed" && <button type="button" className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }}
               aria-label={`Nudge assignee for ${t.title}`}
-              title={t.status === "Completed" ? "Completed tasks do not need a reminder" : "Notification delivery is not connected yet"}
-              disabled={t.status === "Completed" || !t.assignee}
+              title="Notification delivery is not connected yet"
+              disabled={!t.assignee}
               onClick={(e) => { e.stopPropagation(); say("Nudge delivery is not connected yet; no reminder was sent."); }}>
               Nudge
             </button>}
@@ -1045,7 +1046,7 @@ export default function App({ profile, admin, signOut }) {
                     return <rect key={label} x={center - chartBarWidth / 2} y={y} width={chartBarWidth} height={height} fill={color}
                       stroke={label === "Reassigned" && count > 0 ? "var(--line)" : "none"} strokeWidth="1" />;
                   });
-                  const labelY = chartBaseline + 32;
+                  const labelY = chartBaseline + 50;
                   return <g className="chart-member" key={member.id} role="button" tabIndex="0"
                     aria-label={`${member.name}: ${segments.map(([label, count]) => `${count} ${label.toLowerCase()}`).join(", ")}`}
                     onClick={() => go("memberStatus", { id: member.id })}

@@ -162,3 +162,38 @@ test('nudge control is admin-only and never claims a reminder was sent', async (
     delete globalThis.window;
   }
 });
+
+test('completed tasks do not show an admin nudge control', async () => {
+  setup();
+  globalThis.__dashboard.tasks[0].status = 'Completed';
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(renderer, 'Tasks').props.onClick());
+    assert.equal(renderer.root.findAllByType('button').find(
+      b => b.props['aria-label'] === 'Nudge assignee for Database task',
+    ), undefined);
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    delete globalThis.window;
+  }
+});
+
+test('metrics overview places member names below the chart x-axis', async () => {
+  setup();
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(renderer, 'ADMIN SETTINGS').props.onClick());
+    await act(async () => button(renderer, 'Metrics Overview').props.onClick());
+
+    const chart = renderer.root.findAllByType('svg').find(node => node.props.className === 'task-metrics-chart');
+    const axisY = Math.max(...chart.findAllByType('line').map(line => Number(line.props.y1)));
+    const labels = chart.findAllByType('text').filter(label => label.props.transform?.startsWith('rotate(-45'));
+    assert.ok(labels.length > 0);
+    assert.ok(labels.every(label => Number(label.props.y) >= axisY + 45));
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    delete globalThis.window;
+  }
+});
