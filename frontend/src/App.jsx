@@ -869,6 +869,17 @@ export default function App({ profile, admin, signOut }) {
       refresh().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); }
   };
+  const archiveRequest = async (r, archived) => {
+    if (mutationLock.current || requestDataError || !admin || r.status === "pending") return;
+    mutationLock.current = true; setRequestBusy(true); setRequestError("");
+    try {
+      const saved = await requestsStore.archive(r.id, archived);
+      setReqs(current => current.map(request => request.id === r.id ? { ...request, ...saved } : request));
+      say(archived ? "Request archived." : "Request restored to history.");
+    } catch (e) {
+      setRequestError(e.message);
+    } finally { mutationLock.current = false; setRequestBusy(false); }
+  };
   const canEditTask = (t) => admin || (!!profile.member_code && owns(t, profile.member_code));
   const changeStatus = async (t, status) => {
     if (!canEditTask(t)) return;
@@ -1104,7 +1115,7 @@ export default function App({ profile, admin, signOut }) {
   );
 
   let page;
-  const adminPages = ["admin", "editlist", "edit", "eval", "evals", "taskmetrics", "tm", "meetmetrics", "mm", "reassigned", "sheetSync"];
+  const adminPages = ["admin", "editlist", "edit", "eval", "evals", "taskmetrics", "tm", "meetmetrics", "mm", "reassigned", "requestArchive", "sheetSync"];
   switch (!admin && adminPages.includes(p.n) ? "dash" : p.n) {
     case "dash": {
       // Live: the Gantt picks the week itself; admins see everyone's tasks, members their own.
@@ -1593,10 +1604,14 @@ export default function App({ profile, admin, signOut }) {
         {done.map((t) => <div className="due" key={t.id}><span style={{ width: 110, fontSize: 18 }}>{t.finished}:</span><button className="pill" onClick={() => go("task", { id: t.id })}>{t.title}</button></div>)}</>);
       break;
     }
+      case "requestArchive":
       case "reassigned":
       case "review": {
+        const archivedOnly = p.n === "requestArchive";
         const approvedOnly = p.n === "reassigned";
-        const visible = approvedOnly ? reqs.filter(r => r.status === "approved") : reqs;
+        const visible = archivedOnly ? reqs.filter(r => r.archived_at)
+          : approvedOnly ? reqs.filter(r => r.status === "approved" && !r.archived_at)
+            : reqs.filter(r => !r.archived_at);
         const pending = visible.filter(r => r.status === "pending");
         const history = visible.filter(r => r.status !== "pending");
         const card = (r) => <div className="req" key={r.id}>
@@ -1621,14 +1636,19 @@ export default function App({ profile, admin, signOut }) {
             <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "approved")}>Approve</button>
             <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Deny</button>
           </>}
+          {admin && r.status !== "pending" && <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError}
+            onClick={() => archiveRequest(r, !archivedOnly)}>{archivedOnly ? "Restore from archive" : "Archive request"}</button>}
         </div>;
-        page = <><Top title={approvedOnly ? "Approved Reassignments" : admin ? "Reassignment Requests" : "Your Reassignment Requests"} tag={admin} />
+        page = <><Top title={archivedOnly ? "Archived Reassignment Requests" : approvedOnly ? "Approved Reassignments" : admin ? "Reassignment Requests" : "Your Reassignment Requests"} tag={admin} />
+          {archivedOnly && <button className="btn alt" onClick={() => go("review")}>Back to Task Reassignment Requests</button>}
           <button className="btn alt" onClick={() => refresh().catch(() => {})}>Refresh</button>
           {admin && <button className="btn alt" onClick={() => dispatchPhotonNotifications().then(result => say(result.queued ? "Pending text notifications queued." : "Photon webhook delivery is not enabled.")).catch(e => setRequestError(e.message))}>Retry text notifications</button>}
+          {admin && !archivedOnly && <button className="btn alt" onClick={() => go("requestArchive")}>Archived requests ({reqs.filter(r => !!r.archived_at).length})</button>}
           {requestError && <p role="alert">{requestError}</p>}
-          {!approvedOnly && <><h2>Pending ({pending.length})</h2>{pending.map(card)}
+          {!approvedOnly && !archivedOnly && <><h2>Pending ({pending.length})</h2>{pending.map(card)}
             {!loading && !dataError && !requestDataError && !pending.length && <p className="empty">No pending requests.</p>}</>}
-          <h2>{approvedOnly ? "Approved" : "History"}</h2>{history.map(card)}
+          <h2>{archivedOnly ? "Archived" : approvedOnly ? "Approved" : "History"}</h2>{history.map(card)}
+          {!loading && !dataError && !requestDataError && !history.length && <p className="empty">{archivedOnly ? "No archived requests." : approvedOnly ? "No approved reassignments." : "No request history."}</p>}
         </>;
         break;
       }
