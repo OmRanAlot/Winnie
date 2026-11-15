@@ -122,6 +122,9 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .board-profile-sections{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
 .board-profile-card{min-width:0;padding:var(--s5);background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
 .board-profile-card h3{margin:0 0 var(--s3);padding-bottom:var(--s2);border-bottom:1px solid var(--line);font-size:19px}
+.board-profile-summary{margin:0 0 var(--s3);line-height:1.65}
+.board-profile-card h4{margin:var(--s3) 0 var(--s2);font-size:15px}
+.board-profile-responsibilities{margin:0;padding-left:20px;line-height:1.7}
 .board-profile-card-wide{grid-column:1/-1}
 .board-profile-tags,.board-profile-list{display:flex;flex-wrap:wrap;gap:var(--s2);margin:0;padding:0;list-style:none}
 .board-profile-tags li,.board-profile-list li{padding:6px 11px;border-radius:999px;background:#f3ebe2;border:1px solid var(--line);font-size:14px;line-height:1.35}
