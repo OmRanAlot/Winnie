@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     message_memory_max_turns: int = Field(default=6, ge=1, le=8)
     message_memory_ttl_seconds: int = Field(default=7200, ge=60, le=86400)
     reminders_enabled: bool = False
+    notifications_enabled: bool = False
+    scheduler_service_account: str = ""
+    scheduler_audience: str = ""
     reminder_transport: Literal["mock", "photon"] = "mock"
     reminder_timezone: str = "America/New_York"
     reminder_daytime_hour: int = Field(default=9, ge=0, le=23)

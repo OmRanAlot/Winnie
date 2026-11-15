@@ -12,6 +12,13 @@ export async function dispatchPhotonNotifications() {
   return (await request('/photon/dispatch', { method: 'POST' })).data;
 }
 
+export async function nudgeTask(id) {
+  return (await request(`/notifications/tasks/${encodeURIComponent(id)}/nudge`, { method: 'POST' })).data;
+}
+export async function getAutomationStatus() {
+  return (await request('/automation/status', {signal: AbortSignal.timeout(30000)})).data;
+}
+
 export async function previewSheetSync(source, resolutions = {}) {
   return (await request(`/sheet-sync/${encodeURIComponent(source)}/preview`, {
     method: 'POST', body: JSON.stringify({ resolutions }), signal: AbortSignal.timeout(90000),

@@ -6,10 +6,10 @@ from httpx import HTTPError
 from postgrest.exceptions import APIError
 
 from app.integrations.supabase import StorageUnavailable, create_task_client
-from app.services.members import normalize_sender
+from app.services.members import normalize_sender, resolve_member_choice
 
 RESPONSE = re.compile(r'(accept|deny|approve|reject)\s+REQ-(\d+)', re.IGNORECASE)
-PROPOSE = re.compile(r'(?:reassign|transfer)\s+(WIN-\d{6}-\d+)\s+to\s+([A-Z][A-Z0-9_-]{0,49})', re.IGNORECASE)
+PROPOSE = re.compile(r'(?:reassign|transfer)\s+(WIN-\d{6}-\d+)\s+to\s+(.+)', re.IGNORECASE)
 
 
 class MessagingReassignmentStore:
@@ -35,12 +35,12 @@ class MessagingReassignmentStore:
 def response_text(result):
     code = f"REQ-{result['request_no']}"
     if result['status'] == 'approved':
-        return f'{code} approved. Ownership transferred after recipient acceptance and admin approval.'
+        return f'{code} completed. Ownership transferred after admin approval and recipient consent; the outgoing owner is recorded in transfer history.'
     if result['status'] in ('declined', 'rejected'):
         return f'{code} denied. Ownership is unchanged.'
-    if result['recipient_decision'] == 'accepted':
-        return f'{code} accepted. Awaiting admin approval; ownership is unchanged.'
-    return f'{code} saved. The recipient must accept first, then an admin can approve. Open Requests to follow its status.'
+    if result.get('admin_decision') == 'approved':
+        return f'{code}: admin approved. The recipient will now be asked to accept or deny. Ownership is unchanged until acceptance.'
+    return f'{code} saved for admin review first. If approved, the recipient will be asked to consent. Open Requests to follow its status.'
 
 
 async def reassignment_reply(message, members, tasks, store, settings):
@@ -65,8 +65,8 @@ async def reassignment_reply(message, members, tasks, store, settings):
                 return 'No pending reassignment requests for your account.'
             lines = ['Pending requests (also visible under Requests in Winnie):']
             for row in result['requests']:
-                action = 'awaiting admin approval' if row['recipient_decision'] == 'accepted' else 'awaiting recipient'
-                if row['incoming'] and row['recipient_decision'] == 'pending':
+                action = 'awaiting recipient consent' if row.get('admin_decision') == 'approved' else 'awaiting admin approval first'
+                if row['incoming'] and row.get('admin_decision') == 'approved' and row['recipient_decision'] == 'pending':
                     action = f"text accept REQ-{row['request_no']} / deny REQ-{row['request_no']}"
                 lines.append(f"REQ-{row['request_no']}: {row['title'][:100]} ({row['task_code']}) — {action}")
             return '\n'.join(lines)
@@ -80,9 +80,17 @@ async def reassignment_reply(message, members, tasks, store, settings):
             task = await run_in_threadpool(tasks.by_task_code, task_code.upper(), settings.active_semester)
             if not task:
                 return 'Task not found in the active semester. Text tasks to check its code.'
+            people = await run_in_threadpool(members.list_active)
+            if proposed.strip().lstrip('#').isdigit():
+                return 'Use a full name for a direct transfer, or reply with a number to the saved suggestions.'
+            proposed_code = resolve_member_choice(proposed, [
+                {'code': p['code'], 'name': p['display_name']} for p in people
+            ])
+            if not proposed_code:
+                return 'I could not identify one active member by that name. Use their full name, or choose a name/number from the saved suggestions.'
             result = await run_in_threadpool(store.act, message, 'submit', {
                 'task_id': str(task['id']), 'semester': settings.active_semester,
-                'proposed_code': proposed.upper(), 'reason': 'Requested through Photon',
+                'proposed_code': proposed_code, 'reason': 'Requested through Photon',
             })
         return response_text(result)
     except ValueError as exc:

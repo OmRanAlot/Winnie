@@ -54,8 +54,8 @@ no always-running worker. Plan notices do not require the separate help-workflow
 Physical sends require an active consenting member with a verified, opted-in iMessage identity.
 Missing identities leave notices pending. Changed owners/completed tasks cancel unsent
 assignment notices. Provider acceptance is recorded separately from approval; uncertain sends
-are not blindly retried. These are initial assignment texts, not deadline scheduling or
-dependency-ready notifications, which remain separate work.
+are not blindly retried. These are initial assignment texts. Deadline scheduling and dependency-ready notices are
+now wired separately through [AUTOMATION.md](AUTOMATION.md).
 
 ## Acceptance checks
 

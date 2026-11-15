@@ -111,3 +111,5 @@ do not run the deadline worker on a timer. New reassignment notifications are ev
 Sources: [Stable Spectrum webhooks](https://photon.codes/docs/webhooks/overview),
 [delivery/retries](https://photon.codes/docs/webhooks/delivery),
 [Cloud Tasks pricing](https://cloud.google.com/tasks/pricing).
+
+Scheduled reminders, Nudge, dependency notices and automatic tracker updates are now wired through [AUTOMATION.md](AUTOMATION.md); apply its additional migrations and configure the scheduler jobs.

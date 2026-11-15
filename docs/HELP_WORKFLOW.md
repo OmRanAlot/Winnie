@@ -1,72 +1,51 @@
 # Shared Photon and browser reassignment workflow
 
-The active workflow now uses `task_reassignment_requests` for both channels. Apply
-`20261115150000_reassignment_recipient_consent.sql` and then
-`20261115160000_unify_photon_reassignments.sql` once, after the earlier migrations.
-Deploy the updated backend and frontend, then restart the Photon listener. The older
-HELP approval commands and RPC ownership-changing path are disabled. HELP records
-retain the saved Gemini recommendations and link the selected proposal to a shared
-REQ record. Eligible existing pending HELP proposals are linked during migration;
-ones with unverifiable accounts or ownership require administrator review.
+The current order is **owner request → administrator approval → recipient consent → transfer**.
+Apply `20261115195000_admin_first_reassignment.sql` after the existing migrations, then
+redeploy backend and frontend. Earlier recipient-first instructions are superseded.
 
-The flow is:
+1. Text a task-specific request such as “I need a replacement for room booking,” or
+   `help WIN-202611-1`. Gemini proposes candidates using roles, skills and current workload.
+2. Suggestions are numbered and show names. Reply `Taylor Example`, an unambiguous first
+   name, or `1`. Explicit `choose HELP-5 Taylor Example` also works without chat context.
+   Member codes remain accepted for compatibility but are never required by the prompt.
+   Ambiguous names do not create a request; use a full name or saved list number.
+3. Alternatively, text `reassign WIN-202611-1 to Taylor Example` for a specific active member.
+   Numbers in direct transfer commands are not resolved against an undisplayed roster.
+4. The shared REQ enters admin review. Only administrators/reviewers are notified at this stage.
+   They use Requests or text `approve REQ-5` / `reject REQ-5`.
+5. Approval records the administrator and time but leaves the original ownership unchanged.
+   It then queues a consent message for the recipient, who uses Requests or `accept REQ-5`
+   / `deny REQ-5`. The recipient cannot accept before admin authorization.
+6. Acceptance transfers ownership atomically and records `handoff_completed_at`, the outgoing
+   owner/assignee snapshot, requester, administrator and recipient response. The original
+   assignee remains unchanged. Only completed transfers count in transfer metrics.
+   Administrator rejection or recipient denial preserves ownership.
 
-1. The owner texts `help WIN-...`, or asks Gemini for a replacement for one specific task.
-2. Gemini suggests eligible members using the saved role/skills and current workload.
-3. The owner selects `choose HELP-... MEMBER_CODE`. This saves a **REQ-number** in the same
-   queue as frontend requests. Alternatively, `reassign WIN-... to MEMBER_CODE` requests
-   a specific member directly.
-4. The recipient opens **Requests** and accepts/denies, or texts `accept REQ-...` / `deny REQ-...`.
-5. After acceptance, an admin reviews **Requests**, or texts `approve REQ-...` / `reject REQ-...`.
-6. Ownership transfers only after both acceptance and approval. Denial keeps the owner.
+Text `requests` to inspect the current stage. A bare yes/no never approves a transfer.
+The model proposes; deterministic RPCs verify identities, stages, active roster/consent,
+password setup, current ownership and completion state. It cannot transfer tasks directly.
+An obsolete/completed task cannot be accepted. The recipient may deny an obsolete request
+so a fresh one can be created. Admin approval is not a completed transfer.
 
-Text `requests` to see pending requests and their REQ numbers. Bare yes/no does not
-accept a transfer. The Gemini interpreter can identify a request for help; it never
-selects or approves a replacement. Ambiguous task references prompt clarification.
+Historical completed decisions remain intact. On upgrade, open pre-admin recipient responses
+are retained in `legacy_recipient_response`, and fresh consent is requested after admin review.
+Unsent open-request messages advertising the old order are cancelled and admin review notices
+are queued. The migration itself sends nothing.
 
-Text actions use the same verified profile and admin/role checks as browser RPCs.
-A separate `members.messaging_admin` flag is no longer used for REQ decisions. Members
-need an active, consenting, verified messaging identity and a linked Auth profile with
-completed password setup. Shared/ambiguous imported assignments require review before
-text transfer; the adapter never silently removes other co-owners.
+Browser and Photon use the same `task_reassignment_requests` record. Phone identities must be
+verified and linked to active, consenting profiles with completed password setup. The app's
+`is_admin` flag or approved President/VP role determines review rights; the separate old
+`messaging_admin` flag does not authorize REQ decisions. Multi-owner text handoffs still fail
+closed when the outgoing owner cannot be represented safely; no other co-owner is discarded.
 
-The existing notification worker polls the new durable outbox before historical help
-notifications. Requests, accepted proposals, and final decisions queue only one notice
-per event/member. Delivery requires an active consenting member and a verified iMessage
-identity with `reminders_enabled=true`. Uncertain sends are recorded, not blindly retried.
-New reassignments use DMs and the shared queue; they do not create Photon group chats.
-No message is sent by applying SQL alone; sends occur when the configured listener polls.
+Use [PHOTON_WEBHOOK.md](PHOTON_WEBHOOK.md) for cloud inbound/reply delivery and
+[AUTOMATION.md](AUTOMATION.md) for scheduled recovery of pending notices. Keep the local
+stream listener stopped in webhook mode. Configure `WINNIE_MESSAGE_AI_ENABLED=true` and
+`WINNIE_HELP_WORKFLOW_ENABLED=true`; keep provider and bridge credentials server-side.
+New transfers use direct messages and do not create group chats.
 
-For the deployed demo, set these Cloud Run environment variables:
-
-```dotenv
-WINNIE_MESSAGE_AI_ENABLED=true
-WINNIE_HELP_WORKFLOW_ENABLED=true
-WINNIE_HELP_GROUPS_ENABLED=false
-```
-
-Keep the Gemini API key and matching bridge secret in backend secrets. On the machine
-running Photon, `messaging/.env` must contain:
-
-```dotenv
-BACKEND_URL=https://hack-princeton-514716.web.app
-HELP_POLL_ENABLED=true
-```
-
-Keep its existing `PROJECT_ID`, `PROJECT_SECRET` and `MESSAGING_BRIDGE_SECRET` private.
-Restart with `npm start` from `messaging/`. Deploying FastAPI does not run this separate
-Spectrum listener automatically.
-The listener allows up to 60 seconds for a backend reply because natural-language
-help can require both Gemini interpretation and candidate matching.
-
-Test with a disposable task: text a help request, choose a candidate, find the REQ in
-both accounts, verify admin approval is blocked before acceptance, accept from the
-recipient, approve as admin, and reload the task in both accounts. Repeat with denial,
-an unrelated sender, a duplicate message ID, and a task edited before approval. Check
-that failed/stale requests do not transfer ownership. Automated tests use synthetic
-identities and exercise these guards without sending actual Photon messages.
-
-For laptop-independent operation, use [signed Photon webhooks](PHOTON_WEBHOOK.md)
-on the existing backend. In that mode Cloud Tasks replaces the development listener's
-notification poll; no additional always-running server is required. The listener
-instructions above remain useful only for development/stream mode.
+Test: request by name → admin gets review notice → approval leaves owner unchanged →
+recipient gets consent notice → acceptance changes owner and preserves original owner/history.
+Repeat with rejection, denial, wrong actor, revoked access, changed ownership, duplicate provider
+IDs and a stopped laptop. Automated tests use synthetic identities and send no real messages.

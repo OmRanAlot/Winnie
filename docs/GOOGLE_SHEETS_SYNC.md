@@ -1,5 +1,7 @@
 # Live Google Sheets synchronization
 
+For the deployed automatic runner, see [AUTOMATION.md](AUTOMATION.md). Only configured sources with auto_apply=true are written, and conflicts still require review.
+
 Winnie can read a private Google tracker directly, preview its changes, and apply
 them to Supabase. A separate worker can repeat the sync every five minutes. The
 spreadsheet stays private; this feature does not write back to Google Sheets.

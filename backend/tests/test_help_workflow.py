@@ -144,7 +144,7 @@ async def test_existing_recommender_is_reused_but_does_not_transfer(monkeypatch)
     monkeypatch.setattr("app.services.help_workflow.suggest_candidates", recommender)
     monkeypatch.setattr("app.services.help_workflow.load_skills", dict)
     reply = await help_workflow_reply(message("help WIN-202610-1"), Members(), Tasks(), store, config())
-    assert "choose HELP-1" in reply and "admin approval" in reply
+    assert "choose HELP-1" in reply and "admin reviews first" in reply
     recommender.assert_awaited_once()
     assert [v["p_action"] for _, v in store.calls] == ["candidates"]
 
@@ -152,7 +152,8 @@ async def test_existing_recommender_is_reused_but_does_not_transfer(monkeypatch)
 @pytest.mark.asyncio
 async def test_only_requester_can_choose_and_only_saved_choice_is_sent_to_rpc():
     store = Store()
-    await help_workflow_reply(message("choose HELP-1 TWO"), Members(), Tasks(), store, config())
+    store.row["candidates"] = [{"code":"TWO","name":"Demo Two"}]
+    await help_workflow_reply(message("choose HELP-1 Demo Two"), Members(), Tasks(), store, config())
     assert store.calls[0][1]["p_action"] == "select"
     store.calls.clear()
     store.row["requester_code"] = "OTHER"

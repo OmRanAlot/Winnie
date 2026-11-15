@@ -1,6 +1,7 @@
 // Admin review of live Google tracker changes; edits and conflicts are explicit before apply.
 import { useEffect, useState } from 'react';
 import { applySheetSync, getSheetSyncSources, previewSheetSync } from './lib/api.js';
+import AutomationStatus from './AutomationStatus.jsx';
 
 const display = value => value == null || value === '' ? '(empty)' : String(value);
 
@@ -38,7 +39,7 @@ export default function SheetSync({ onApplied }) {
       }}>{sources.map(s => <option key={s.key} value={s.key}>{s.key} · {s.semester_code}</option>)}</select></label>
       {source && <p><a href={`https://docs.google.com/spreadsheets/d/${encodeURIComponent(source.spreadsheet_id)}/edit${source.tab_id != null ? `#gid=${source.tab_id}` : ''}`} target="_blank" rel="noreferrer">Open source workbook</a>
         {' · '}{source.tab_name || `Tab gid ${source.tab_id}`}<br />
-        Automatic sync: {source.auto_apply ? 'enabled when the sync worker is running' : 'off'}<br />
+        Automatic sync: {source.auto_apply ? 'enabled when the scheduled runner is configured' : 'off'}<br />
         Last applied: {source.last_run ? new Date(source.last_run.created_at).toLocaleString() : 'Never'}</p>}
       <button className="btn alt" disabled={busy} onClick={build}>Build Preview</button>
     </>}
@@ -69,5 +70,6 @@ export default function SheetSync({ onApplied }) {
       })}>Apply Reviewed Changes</button>
     </>}
     {message && <p role="status">{message}</p>}
+    <AutomationStatus />
   </div>;
 }

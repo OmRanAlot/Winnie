@@ -9,11 +9,11 @@ from httpx import HTTPError
 
 from app.services.help_requests import HELP_COMMAND, help_request_reply
 from app.services.member_skills import load_skills, with_skills
-from app.services.members import assignment_members, task_assignments
+from app.services.members import assignment_members, resolve_member_choice, task_assignments
 from app.services.task_matching import suggest_candidates, workload
 from app.services.tasks import TaskNotFound
 
-CHOOSE = re.compile(r"choose HELP-(\d+) ([A-Z0-9_-]+)", re.IGNORECASE)
+CHOOSE = re.compile(r"choose HELP-(\d+)\s+(.+)", re.IGNORECASE)
 DECIDE = re.compile(r"(approve|deny) HELP-(\d+) v(\d+)", re.IGNORECASE)
 PROGRESS = re.compile(r"\b(blocked|stuck|waiting for|waiting on|need help|delayed|rescheduled|booked|submitted|sent|finished|completed)\b", re.IGNORECASE)
 
@@ -56,7 +56,7 @@ def transfer_assignment(task, request, members, semester):
 
 
 def decide_request(store, tasks, members, settings, number, revision, action, actor=None):
-    raise ValueError("Use the shared Requests queue or approve/reject REQ-number after recipient acceptance.")
+    raise ValueError("Use the shared Requests queue or approve/reject REQ-number before recipient consent.")
 
 
 async def help_workflow_reply(message, members, tasks, store, settings):
@@ -74,13 +74,16 @@ async def help_workflow_reply(message, members, tasks, store, settings):
             return "Your messaging account is not linked. Text whoami for setup details."
         try:
             if decision:
-                return "Use Requests or text approve/reject REQ-number after recipient acceptance. Legacy HELP approvals are disabled."
+                return "Use Requests or text approve/reject REQ-number for admin review first. Recipient consent follows approval. Legacy HELP approvals are disabled."
             number, selected = choice.groups()
             request = await run_in_threadpool(store.get, int(number))
             if not request or request["requester_code"] != member["code"]:
                 return "I couldn't find that help request for your account."
+            selected_code = resolve_member_choice(selected, request.get('candidates', []))
+            if not selected_code:
+                return 'Choose one saved suggestion by full name or list number. Ambiguous names cannot create a transfer.'
             result = await run_in_threadpool(store.rpc, "help_transition", p_request=int(number),
-                p_revision=request["revision"], p_action="select", p_actor=member["code"], p_selected=selected.upper())
+                p_revision=request["revision"], p_action="select", p_actor=member["code"], p_selected=selected_code)
             return result["reply"]
         except ValueError as exc:
             return str(exc)
@@ -89,7 +92,7 @@ async def help_workflow_reply(message, members, tasks, store, settings):
         return reply
     request = await run_in_threadpool(store.receipt, message)
     if not request or request["status"] not in ("awaiting_recommendations", "suggestions_ready"):
-        return "Your help request is already being reviewed. Ownership changes only after admin approval."
+        return "Your help request is already being reviewed. Ownership changes only after admin approval and subsequent recipient consent."
     task = await run_in_threadpool(tasks.get, request["task_id"])
     if task.get("semester_code") != settings.active_semester:
         return "That task belongs to another semester. Ask the project admin to review it."
@@ -114,9 +117,9 @@ async def help_workflow_reply(message, members, tasks, store, settings):
     if not candidates:
         return f"I couldn't find a suitable replacement for {task['task_code']}. No ownership changed. Contact the admin for help."
     lines = [f"HELP-{request['request_no']}: suggested replacements for {task['task_code']}:"]
-    for candidate in candidates:
-        lines.append(f"{candidate['name']} ({candidate['code']}): {candidate['reason']} — {candidate['open']} open tasks.")
-    lines.append(f"Reply choose HELP-{request['request_no']} MEMBER_CODE. The recipient must accept before admin approval; ownership is unchanged.")
+    for number, candidate in enumerate(candidates, 1):
+        lines.append(f"{number}. {candidate['name']}: {candidate['reason']} — {candidate['open']} open tasks.")
+    lines.append(f"Reply with a name or number, or choose HELP-{request['request_no']} NAME. An admin reviews first; after approval, the recipient is asked to consent. Ownership stays unchanged until both steps finish.")
     return "\n".join(lines)
 
 
