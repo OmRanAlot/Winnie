@@ -40,7 +40,7 @@ await build({
         export const getDependencies = () => Promise.resolve(globalThis.__dashboard.dependencies ?? []);
         export const getTaskDraft = () => Promise.resolve(null);
         export const saveTaskDraft = form => { globalThis.__dashboard.draft = form; return Promise.resolve(form); };
-        export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return Promise.resolve({
+        export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return globalThis.__dashboard.planResponse ?? Promise.resolve({
           mode:'deepagents', questions:['Confirm room capacity.'], warnings:['Review suggested dates.'],
           tasks:[
             {id:'planned',title:'Planned action',suggested_role:'Industry Partnerships Chair',kind:'highlander_hub',due_date:'2026-11-25',phase:'before',dependency_ids:[],evidence_ids:['source-1'],rationale:'Post event details.'},
@@ -206,7 +206,22 @@ test('generated event plans receive one date and time and save as plans, not tas
     await change(renderer.root.findAllByType('textarea').find(node => node.props.maxLength === 6000), 'Invite alumni for a career discussion.');
     await change(renderer.root.findAllByType('input').find(node => node.props.type === 'date'), '2026-12-03');
     await change(renderer.root.findAllByType('input').find(node => node.props.type === 'time'), '17:00');
-    await act(async () => button(renderer, 'Generate Event Plan').props.onClick());
+    let finishPlan, generation;
+    globalThis.__dashboard.planResponse = new Promise(resolve => { finishPlan = resolve; });
+    await act(async () => { generation = button(renderer, 'Generate Event Plan').props.onClick(); });
+    assert.ok(renderer.root.findAllByProps({ role: 'status' }).some(n => text(n).includes('Winnie is shaping')));
+    assert.equal(button(renderer, 'Enter Manually').props.disabled, true);
+    await act(async () => {
+      finishPlan({
+        mode: 'deepagents', questions: ['Confirm room capacity.'], warnings: ['Review suggested dates.'],
+        tasks: [
+          { id: 'planned', title: 'Planned action', suggested_role: 'Industry Partnerships Chair', kind: 'highlander_hub', due_date: '2026-11-25', phase: 'before', dependency_ids: [], evidence_ids: ['source-1'], rationale: 'Post event details.' },
+          { id: 'materials', title: 'Prepare materials', suggested_role: 'Treasurer', kind: 'materials_list', due_date: '2026-11-26', phase: 'before', dependency_ids: ['planned'], evidence_ids: [], rationale: 'Collect supplies before the event.' },
+        ],
+      });
+      await generation;
+    });
+    assert.equal(renderer.root.findAllByProps({ className: 'plan-loading' }).length, 0);
     assert.equal(globalThis.__dashboard.plan.event_date, '2026-12-03');
     assert.ok(globalThis.__dashboard.plan.idea.includes('Requested time: 17:00'));
     assert.equal(renderer.root.findAllByType('input').filter(node => node.props.type === 'date').length, 1);

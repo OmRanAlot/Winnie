@@ -172,7 +172,11 @@ Unmatched tracker groups such as Elections and Mentorship Chats remain unjoined;
 they are not silently treated as tasks for an unrelated calendar event.
 
 The source files and generated context stay in gitignored `backend/data/planning/`.
-Fresh checkouts must prepare their own context. To rebuild from exported CSVs,
+Fresh checkouts must prepare their own context to use historical examples. The
+single-shot `/drafts` endpoint in `deepagents` mode can plan from the event idea
+when this file is absent, with an explicit warning and no historical citations.
+Mock mode still requires the file; corrupt or unreadable history remains an error.
+To rebuild from exported CSVs,
 run from `backend/`, using a new output filename:
 
 ```powershell
@@ -187,6 +191,13 @@ until interval planning is added. Refreshing Google Sheets is a separate operati
 this endpoint only reads the prepared local file.
 
 ## Run locally
+
+The dashboard's single-shot generator uses one structured Gemini call, avoiding
+the general-purpose agent loop. Both the HTTP route and dashboard bound the wait
+to 90 seconds (a lower configured server timeout still applies). The dashboard
+shows an animated checklist and elapsed time, and offers retry/manual entry after
+a timeout. Animation respects reduced-motion preferences. Other providers and
+the staged pipeline retain their agent workflow.
 
 The default `WINNIE_PLANNING_MODE=mock` requires no model key. It produces a
 deduplicated historical checklist with unknown dates/roles and **does not reason

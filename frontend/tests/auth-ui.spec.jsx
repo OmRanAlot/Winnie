@@ -5,23 +5,24 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 
 const sdk = vi.hoisted(() => ({
   session: null, listener: null, signIn: vi.fn(), reset: vi.fn(), update: vi.fn(),
-  signOut: vi.fn(), unsubscribe: vi.fn(), getProfile: vi.fn(),
+  signOut: vi.fn(), unsubscribe: vi.fn(), getProfile: vi.fn(), getSession: vi.fn(), emitInitial: true,
 }));
 vi.mock('../src/lib/supabase.js', () => ({ authConfigured: true, supabase: { auth: {
   signInWithPassword: sdk.signIn, resetPasswordForEmail: sdk.reset, updateUser: sdk.update,
   signOut: sdk.signOut,
-  getSession: async () => ({ data: { session: sdk.session }, error: null }),
+  getSession: sdk.getSession,
   onAuthStateChange: callback => {
     sdk.listener = callback;
-    queueMicrotask(() => callback('INITIAL_SESSION', sdk.session));
+    if (sdk.emitInitial) queueMicrotask(() => callback('INITIAL_SESSION', sdk.session));
     return { data: { subscription: { unsubscribe: sdk.unsubscribe } } };
   },
 } } }));
 vi.mock('../src/lib/api.js', () => ({ getCurrentUser: sdk.getProfile }));
 vi.mock('../src/auth/Shell.tsx', () => ({ Shell: ({ children }) => <main>{children}</main> }));
 
-import { AuthProvider } from '../src/auth/AuthProvider.jsx';
+import { ACCOUNT_TIMEOUT_MS, AuthProvider } from '../src/auth/AuthProvider.jsx';
 import AuthGate from '../src/auth/AuthGate.jsx';
+import { authHeaders } from '../src/lib/authToken.js';
 
 const session = { access_token: 'synthetic', user: { id: 'alice' } };
 const profile = { id: 'alice', email: 'alice@example.com', password_setup_complete: true };
@@ -33,16 +34,70 @@ async function openLogin() {
 function event(type, value) { sdk.session = value; sdk.listener(type, value); }
 
 beforeEach(() => {
-  vi.clearAllMocks(); sdk.session = null;
+  vi.clearAllMocks(); sdk.session = null; sdk.emitInitial = true;
+  sdk.getSession.mockImplementation(() => new Promise(() => {}));
   sdk.getProfile.mockResolvedValue(profile);
   sdk.signIn.mockResolvedValue({ error: null });
   sdk.reset.mockResolvedValue({ error: null });
   sdk.update.mockResolvedValue({ error: null });
   sdk.signOut.mockImplementation(async () => { event('SIGNED_OUT', null); return { error: null }; });
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('authentication screens', () => {
+  it('uses auth-event tokens without waiting on getSession and updates them on refresh', async () => {
+    sdk.session = session;
+    mount();
+    await screen.findByText('Board dashboard');
+    expect(await authHeaders()).toEqual({ Authorization: 'Bearer synthetic' });
+    await act(async () => event('TOKEN_REFRESHED', { ...session, access_token: 'new-token' }));
+    expect(await authHeaders()).toEqual({ Authorization: 'Bearer new-token' });
+    expect(sdk.getSession).not.toHaveBeenCalled();
+    await act(async () => event('SIGNED_OUT', null));
+    expect(await authHeaders()).toEqual({});
+  });
+
+  it('times out a missing initial session event and can retry session initialization', async () => {
+    vi.useFakeTimers();
+    sdk.emitInitial = false;
+    mount();
+    await act(async () => vi.advanceTimersByTimeAsync(ACCOUNT_TIMEOUT_MS));
+    expect(screen.getByRole('alert').textContent).toContain('took too long');
+    expect(screen.queryByRole('status')).toBeNull();
+    sdk.emitInitial = true;
+    sdk.session = session;
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Try again' })));
+    expect(screen.getByText('Board dashboard')).toBeTruthy();
+  });
+
+  it('bounds a hung profile request, ignores its late response, and retries', async () => {
+    vi.useFakeTimers();
+    sdk.session = session;
+    let finish;
+    sdk.getProfile.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    mount();
+    await act(async () => {});
+    await act(async () => vi.advanceTimersByTimeAsync(ACCOUNT_TIMEOUT_MS));
+    expect(screen.getByRole('alert').textContent).toContain('took too long');
+    expect(sdk.getProfile.mock.calls[0][0].aborted).toBe(true);
+    await act(async () => finish(profile));
+    expect(screen.queryByText('Board dashboard')).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Try again' })));
+    expect(screen.getByText('Board dashboard')).toBeTruthy();
+  });
+
+  it('does not restore a private screen from a profile response after sign-out', async () => {
+    sdk.session = session;
+    let finish;
+    sdk.getProfile.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    mount();
+    await act(async () => {});
+    await act(async () => event('SIGNED_OUT', null));
+    await act(async () => finish(profile));
+    expect(screen.queryByText('Board dashboard')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Login' })).toBeTruthy();
+  });
+
   it('shows login errors and opens the dashboard after a valid session', async () => {
     mount();
     expect(await screen.findByRole('button', { name: 'Login' })).toBeTruthy();

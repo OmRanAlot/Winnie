@@ -6,6 +6,8 @@ import { getCurrentUser } from '../lib/api.js';
 import { callbackState } from './authFlow.js';
 const initial = callbackState(window.location);
 const AuthContext = createContext(null);
+export const ACCOUNT_TIMEOUT_MS = 10000;
+const ACCOUNT_TIMEOUT_MESSAGE = 'Loading your account took too long. Check your connection and try again.';
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -18,36 +20,57 @@ export function AuthProvider({ children }) {
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
   const activeUser = useRef(null);
+  const sessionRef = useRef(null);
   useEffect(() => {
     if (!supabase) return;
-    setTokenProvider(async () => {
-      const { data, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) throw sessionError;
-      return data.session?.access_token || null;
-    });
+    let disposed = false;
+    setLoading(true);
+    setError('');
+    // Auth events already supply the current token, including token refreshes.
+    // Calling getSession again can wait on the SDK's auth lock before fetch starts.
+    setTokenProvider(async () => sessionRef.current?.access_token || null);
+    const timer = setTimeout(() => {
+      if (!disposed) { setError(ACCOUNT_TIMEOUT_MESSAGE); setLoading(false); }
+    }, ACCOUNT_TIMEOUT_MS);
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, next) => {
+      if (disposed) return;
+      clearTimeout(timer);
+      sessionRef.current = next;
       if (next && next.user.id !== activeUser.current) { setLoading(true); setProfile(null); }
       activeUser.current = next?.user.id || null;
       setSession(next);
       if (event === 'PASSWORD_RECOVERY') setPasswordMode(true);
       if (!next) { setProfile(null); setError(''); setLoading(false); }
     });
-    return () => { subscription.unsubscribe(); setTokenProvider(async () => null); };
-  }, []);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      subscription.unsubscribe();
+      setTokenProvider(async () => null);
+    };
+  }, [revision]);
   useEffect(() => {
     const current = ++generation.current;
     if (!session) return;
     if (!profile || profile.id !== session.user.id) { setProfile(null); setLoading(true); }
     setError('');
     const controller = new AbortController();
-    getCurrentUser(AbortSignal.any([controller.signal, AbortSignal.timeout(15000)])).then(value => {
-      if (current === generation.current) setProfile(value);
+    // Bound the whole operation even if a transport ignores AbortSignal.
+    const timer = setTimeout(() => {
+      controller.abort();
+      if (current === generation.current) {
+        setProfile(null); setError(ACCOUNT_TIMEOUT_MESSAGE); setLoading(false);
+      }
+    }, ACCOUNT_TIMEOUT_MS);
+    getCurrentUser(controller.signal).then(value => {
+      if (!controller.signal.aborted && current === generation.current) setProfile(value);
     }).catch(cause => {
       if (!controller.signal.aborted && current === generation.current) { setProfile(null); setError(cause.message); }
     }).finally(() => {
+      clearTimeout(timer);
       if (!controller.signal.aborted && current === generation.current) setLoading(false);
     });
-    return () => controller.abort();
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [session?.access_token, revision]);
   async function signOut() {
     const { error: signOutError } = await supabase.auth.signOut();

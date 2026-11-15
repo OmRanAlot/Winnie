@@ -12,6 +12,7 @@ export function callbackState(location) {
 export function authScreen({ loading, session, profile, error, passwordMode, linkFailed }) {
   if (linkFailed) return 'link-error';
   if (loading) return 'loading';
+  if (error) return 'blocked';
   if (!session) return 'login';
   if (error || !profile) return 'blocked';
   if (passwordMode || !profile.password_setup_complete) return 'password';
