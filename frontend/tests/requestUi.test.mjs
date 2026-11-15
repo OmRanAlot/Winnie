@@ -27,17 +27,23 @@ await build({
       ` : args.path.includes('api.js') ? `
         export const getTasks = () => Promise.resolve(globalThis.__dashboard.tasks);
         export const getMembers = () => Promise.resolve(globalThis.__dashboard.people);
-        export const getAssignments = () => Promise.resolve({byTask: {task1: [globalThis.__dashboard.tasks[0].ownerCode]}});
+        export const getAssignments = () => Promise.resolve({byTask: globalThis.__dashboard.assignments || {task1: [globalThis.__dashboard.tasks[0].ownerCode]}});
         export const weekStart = () => new Date('2026-11-09T00:00:00');
         export const getCandidates = () => Promise.resolve([]);
         export const getEventLabels = () => Promise.resolve({});
-        export const updateTaskStatus = () => Promise.resolve();
+        export const updateTaskStatus = (id,status) => {
+          if (globalThis.__dashboard.updateStatus) return globalThis.__dashboard.updateStatus(id,status);
+          const saved={...globalThis.__dashboard.tasks.find(t=>t.id===id),status};
+          globalThis.__dashboard.tasks=globalThis.__dashboard.tasks.map(t=>t.id===id?saved:t);
+          return Promise.resolve(saved);
+        };
         export const reviewHelpRequests = () => Promise.resolve([]);
         export const decideHelpRequest = () => Promise.resolve({reply: 'Reviewed'});
         export const getMeetings = () => Promise.resolve([]);
         export const createMeeting = () => Promise.resolve({id: 'synthetic-meeting'});
         export const saveAttendance = () => Promise.resolve();
-        export const getDependencies = () => Promise.resolve(globalThis.__dashboard.dependencies ?? []);
+        export const getDependencies = () => globalThis.__dashboard.dependencies ? globalThis.__dashboard.dependencies() : Promise.resolve([]);
+        export const dispatchPhotonNotifications = () => Promise.resolve({queued:true});
         export const getTaskDraft = () => Promise.resolve(null);
         export const saveTaskDraft = form => { globalThis.__dashboard.draft = form; return Promise.resolve(form); };
         export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return globalThis.__dashboard.planResponse ?? Promise.resolve({
@@ -53,7 +59,7 @@ await build({
         export const getEvaluation = () => Promise.resolve({comments:''});
         export const saveEvaluation = () => Promise.resolve();
         export const ingestMeetingAudio = () => Promise.resolve();
-      ` : args.path.includes('reassignments') ? 'export const reassignmentStore = () => ({list: () => globalThis.__dashboard.list(), review: (...a) => globalThis.__dashboard.review(...a), submit: (...a) => globalThis.__dashboard.submit(...a)});'
+      ` : args.path.includes('reassignments') ? 'export const reassignmentStore = () => ({list: () => globalThis.__dashboard.list(), review: (...a) => globalThis.__dashboard.review(...a), respond: (...a) => globalThis.__dashboard.respond(...a), submit: (...a) => globalThis.__dashboard.submit(...a)});'
         : args.path.includes('supabase') ? 'export const supabase = {};'
         : 'export default function Recorder() { return null; }',
     }));
@@ -74,6 +80,10 @@ function setup() {
     eventPlans: [],
     rows: [{ id: 'request1', task_id: 'task1', requester_code: 'MEMBER', proposed_assignee_code: 'OTHER', status: 'pending', reason: 'Busy', created_at: '2026-11-14T12:00:00Z' }],
     list() { return Promise.resolve(this.rows); },
+    respond(id, decision) {
+      this.rows = this.rows.map(r => r.id === id ? { ...r, recipient_decision: decision, status: decision === 'denied' ? 'declined' : 'pending' } : r);
+      return Promise.resolve();
+    },
     review(_id, decision) {
       this.rows = this.rows.map(r => ({ ...r, status: decision }));
       if (decision === 'approved') this.tasks = this.tasks.map(t => ({ ...t, ownerCode: 'OTHER', assigneeText: 'Other' }));
@@ -88,6 +98,7 @@ function setup() {
 
 test('admin decisions reload persisted queue and task assignment; failures remain visible', async () => {
   setup(); let renderer;
+  globalThis.__dashboard.rows[0].recipient_decision = 'accepted';
   try {
     await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
     await act(async () => button(renderer, 'Requests (1)').props.onClick());
@@ -298,6 +309,134 @@ test('nudge control is admin-only and never claims a reminder was sent', async (
     if (memberRenderer) await act(async () => memberRenderer.unmount());
     delete globalThis.window;
   }
+});
+
+test('incoming recipient can accept or deny; failed responses stay actionable and saved responses survive reload', async () => {
+  for (const decision of ['accepted','denied']) {
+    setup(); let renderer;
+    const recipient = { ...profile, id:'other-profile', member_code:'OTHER', name:'Other' };
+    try {
+      await act(async () => { renderer = TestRenderer.create(React.createElement(App,{profile:recipient,admin:false,signOut(){}})); });
+      await act(async () => button(renderer,'Requests (1)').props.onClick());
+      assert.ok(button(renderer,'Accept')); assert.ok(button(renderer,'Deny'));
+      assert.equal(button(renderer,'Approve'),undefined);
+      const respond = globalThis.__dashboard.respond;
+      globalThis.__dashboard.respond = async () => { throw new Error('Storage unavailable'); };
+      await act(async () => button(renderer,decision==='accepted'?'Accept':'Deny').props.onClick());
+      assert.ok(renderer.root.findAllByProps({role:'alert'}).some(n => text(n).includes('Storage unavailable')));
+      assert.ok(button(renderer,'Accept'));
+      globalThis.__dashboard.respond = respond;
+      await act(async () => button(renderer,decision==='accepted'?'Accept':'Deny').props.onClick());
+      assert.equal(globalThis.__dashboard.tasks[0].ownerCode,'MEMBER','a recipient response alone must not transfer the task');
+      assert.equal(globalThis.__dashboard.rows[0].recipient_decision,decision);
+      assert.equal(button(renderer,'Accept'),undefined); assert.equal(button(renderer,'Deny'),undefined);
+      await act(async () => renderer.unmount());
+      await act(async () => { renderer = TestRenderer.create(React.createElement(App,{profile:recipient,admin:false,signOut(){}})); });
+      await act(async () => button(renderer,decision==='accepted'?'Requests (1)':'Requests (0)').props.onClick());
+      assert.equal(button(renderer,'Accept'),undefined);
+      assert.ok(text(renderer.toJSON()).includes(decision==='accepted'?'awaiting administrator approval':'Recipient denied'));
+    } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
+  }
+});
+
+test('requester cannot answer for recipient; administrator cannot approve unanswered requests',async()=>{
+  setup(); let renderer;
+  try {
+    await act(async () => {renderer=TestRenderer.create(React.createElement(App,{profile,admin:true,signOut(){}}));});
+    await act(async () => button(renderer,'Requests (1)').props.onClick());
+    assert.equal(button(renderer,'Accept'),undefined); assert.equal(button(renderer,'Deny'),undefined);
+    assert.equal(button(renderer,'Approve').props.disabled,true);
+    assert.equal(button(renderer,'Reject request').props.disabled,false);
+  } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
+});
+
+test('task refresh survives secondary outages and admin Gantt defaults to all board members',async()=>{
+  setup(); let renderer;
+  const scheduled = {...globalThis.__dashboard.tasks[0],dueIso:'2026-11-12',due:'11/12/2026',start:'11/12/2026'};
+  globalThis.__dashboard.tasks = [scheduled,{...scheduled,id:'task2',title:'Other member task',ownerCode:'OTHER'}];
+  globalThis.__dashboard.list = async()=>{throw new Error('Request history offline');};
+  globalThis.__dashboard.dependencies = async()=>{throw new Error('Links offline');};
+  try {
+    await act(async()=>{renderer=TestRenderer.create(React.createElement(App,{profile,admin:true,signOut(){}}));});
+    const rows=()=>renderer.root.findAll(n=>n.props.className==='gr');
+    assert.equal(rows().length,2,'secondary errors must not hide fresh tasks');
+    assert.ok(rows().some(n=>text(n).includes('Other member task')));
+    assert.ok(text(renderer.toJSON()).includes('Request history offline'));
+    assert.ok(text(renderer.toJSON()).includes('Tasks refreshed at'));
+    globalThis.__dashboard.tasks[1] = {...globalThis.__dashboard.tasks[1],title:'Updated other task',status:'Completed'};
+    await act(async()=>button(renderer,'Refresh tasks').props.onClick());
+    assert.ok(rows().some(n=>text(n).includes('Updated other task')));
+    const filter=renderer.root.findAllByType('button').find(b=>b.props['aria-label']?.startsWith('Gantt view:'));
+    await act(async()=>filter.props.onClick());
+    assert.equal(rows().length,1,'My tasks still restricts the chart to the signed-in member');
+    assert.ok(!rows().some(n=>text(n).includes('Updated other task')));
+  } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
+});
+
+test('members still see only their assigned Gantt rows after default admin view changes',async()=>{
+  setup(); let renderer;
+  const scheduled={...globalThis.__dashboard.tasks[0],dueIso:'2026-11-12',due:'11/12/2026',start:'11/12/2026'};
+  globalThis.__dashboard.tasks=[scheduled,{...scheduled,id:'foreign',title:'Other member task',ownerCode:'OTHER'}];
+  try {
+    await act(async()=>{renderer=TestRenderer.create(React.createElement(App,{profile,admin:false,signOut(){}}));});
+    const rows=renderer.root.findAll(n=>n.props.className==='gr');
+    assert.equal(rows.length,1); assert.ok(!text(rows[0]).includes('Other member task'));
+  } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
+});
+
+test('own completed imported task renders in My tasks through its verified alias assignment',async()=>{
+  setup(); let renderer;
+  globalThis.__dashboard.tasks=[{...globalThis.__dashboard.tasks[0],ownerCode:null,assignee:null,
+    status:'Completed',title:'Imported completed task',dueIso:'2026-11-11',due:'11/11/2026',start:'11/11/2026'}];
+  globalThis.__dashboard.assignments={task1:['MEMBER']};
+  try {
+    await act(async()=>{renderer=TestRenderer.create(React.createElement(App,{profile,admin:true,signOut(){}}));});
+    const toggle=renderer.root.findAllByType('button').find(b=>b.props['aria-label']?.startsWith('Gantt view:'));
+    await act(async()=>toggle.props.onClick());
+    const rows=renderer.root.findAll(n=>n.props.className==='gr');
+    assert.equal(rows.length,1); assert.ok(text(rows[0]).includes('Imported completed task'));
+    assert.ok(rows[0].findAll(n=>n.props.className?.includes('bar') && n.props.style?.background==='#7a2c22').length);
+  } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
+});
+
+test('Due Soon completion shows Saving, commits once, and persists after reload',async()=>{
+  setup(); let renderer, release;
+  globalThis.__dashboard.tasks[0].status='In-Progress';
+  let writes=0;
+  globalThis.__dashboard.updateStatus=async(id,status)=>{
+    writes++; await new Promise(resolve=>{release=resolve;});
+    const saved={...globalThis.__dashboard.tasks[0],status}; globalThis.__dashboard.tasks=[saved]; return saved;
+  };
+  try {
+    await act(async()=>{renderer=TestRenderer.create(React.createElement(App,{profile,admin:false,signOut(){}}));});
+    let pending;
+    const toggle=()=>renderer.root.findAllByType('button').find(b=>b.props['aria-label']==='Mark Database task completed');
+    await act(async()=>{pending=toggle().props.onClick();});
+    assert.equal(text(toggle()),'Saving…'); assert.equal(toggle().props.disabled,true);
+    await act(async()=>{toggle().props.onClick();}); assert.equal(writes,1,'duplicate saves must be blocked');
+    await act(async()=>{release(); await pending;});
+    assert.equal(toggle(),undefined,'completed tasks leave Due Soon');
+    assert.ok(text(renderer.toJSON()).includes('marked Completed and moved out of Due Soon'));
+    assert.equal(globalThis.__dashboard.tasks[0].status,'Completed');
+    await act(async()=>renderer.unmount());
+    await act(async()=>{renderer=TestRenderer.create(React.createElement(App,{profile,admin:false,signOut(){}}));});
+    assert.equal(toggle(),undefined,'reload reads the persisted completed status');
+  } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
+});
+
+test('Due Soon failures keep the original status and a persistent actionable error',async()=>{
+  setup(); let renderer;
+  globalThis.__dashboard.tasks[0].status='In-Progress';
+  globalThis.__dashboard.updateStatus=async()=>{throw new Error('Task storage unavailable');};
+  try {
+    await act(async()=>{renderer=TestRenderer.create(React.createElement(App,{profile,admin:false,signOut(){}}));});
+    const toggle=()=>renderer.root.findAllByType('button').find(b=>b.props['aria-label']==='Mark Database task completed');
+    await act(async()=>toggle().props.onClick());
+    assert.equal(text(toggle()),'In progress'); assert.equal(toggle().props.disabled,false);
+    assert.equal(globalThis.__dashboard.tasks[0].status,'In-Progress');
+    assert.ok(renderer.root.findAllByProps({role:'alert'}).some(n=>text(n).includes('Task storage unavailable')));
+    assert.ok(button(renderer,'Dismiss'));
+  } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
 });
 
 test('completed tasks do not show an admin nudge control', async () => {

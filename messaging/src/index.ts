@@ -73,7 +73,8 @@ for await (const [space, message] of app.messages) {
         `${backendUrl}/api/messages`,
         {
           ...bridgeRequest(payload, bridgeSecret),
-          signal: AbortSignal.timeout(30_000),
+          // Natural-language help can run interpretation and candidate matching.
+          signal: AbortSignal.timeout(60_000),
         }
       );
       httpStatus = response.status;

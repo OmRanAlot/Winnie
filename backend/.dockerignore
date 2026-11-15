@@ -1,4 +1,6 @@
 .git
+node_modules
+photon/node_modules
 .env
 .env.*
 .venv

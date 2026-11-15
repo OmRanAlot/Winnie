@@ -56,15 +56,7 @@ def transfer_assignment(task, request, members, semester):
 
 
 def decide_request(store, tasks, members, settings, number, revision, action, actor=None):
-    request = store.get(number)
-    if not request:
-        raise ValueError("Help request not found.")
-    task = tasks.get(request["task_id"])
-    if task.get("semester_code") != settings.active_semester:
-        raise ValueError("This request belongs to another semester.")
-    replacement = transfer_assignment(task, request, members, settings.active_semester) if action == "approve" else None
-    return store.rpc("help_transition", p_request=number, p_revision=revision,
-                     p_action=action, p_actor=actor, p_assignee=replacement)["reply"]
+    raise ValueError("Use the shared Requests queue or approve/reject REQ-number after recipient acceptance.")
 
 
 async def help_workflow_reply(message, members, tasks, store, settings):
@@ -82,11 +74,7 @@ async def help_workflow_reply(message, members, tasks, store, settings):
             return "Your messaging account is not linked. Text whoami for setup details."
         try:
             if decision:
-                if not await run_in_threadpool(store.is_admin, member["code"]):
-                    return "Only a designated project admin can approve or deny a transfer."
-                action, number, revision = decision.groups()
-                return await run_in_threadpool(decide_request, store, tasks, members, settings,
-                                               int(number), int(revision), action.lower(), member["code"])
+                return "Use Requests or text approve/reject REQ-number after recipient acceptance. Legacy HELP approvals are disabled."
             number, selected = choice.groups()
             request = await run_in_threadpool(store.get, int(number))
             if not request or request["requester_code"] != member["code"]:
@@ -128,7 +116,7 @@ async def help_workflow_reply(message, members, tasks, store, settings):
     lines = [f"HELP-{request['request_no']}: suggested replacements for {task['task_code']}:"]
     for candidate in candidates:
         lines.append(f"{candidate['name']} ({candidate['code']}): {candidate['reason']} — {candidate['open']} open tasks.")
-    lines.append(f"Reply choose HELP-{request['request_no']} MEMBER_CODE. This requests an ownership transfer; admin approval is required.")
+    lines.append(f"Reply choose HELP-{request['request_no']} MEMBER_CODE. The recipient must accept before admin approval; ownership is unchanged.")
     return "\n".join(lines)
 
 
@@ -154,6 +142,9 @@ async def group_reply(message, members, tasks, completions, interpreter, store, 
         from app.services.conversation import conversation_reply
         personal = message.model_copy(update={"conversation_type": "dm"})
         reply = await run_in_threadpool(conversation_reply, personal, members, HandoffTasks(tasks, task), completions, interpreter, settings)
+        from app.services.conversation import HelpIntent
+        if isinstance(reply, HelpIntent):
+            return f"Request replacement suggestions in a direct message: help {reply.task_code}."
         current = await run_in_threadpool(tasks.get, task["id"])
         # The database completion trigger queues one admin notification atomically.
         if current["status"] != "done" and PROGRESS.search(text):
