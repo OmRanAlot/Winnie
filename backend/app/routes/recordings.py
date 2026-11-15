@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from app.schemas.api import MAX_JSON_BYTES, Recording, failure
+from app.schemas.api import MAX_JSON_BYTES, Recording, RecordingAssignmentRequest, failure
 from app.services.recordings import save_recording
 
 logger = logging.getLogger(__name__)
@@ -48,12 +48,12 @@ async def create_recording(request: Request):
 
 
 @router.post("/{recording_id}/assignments")
-async def recording_assignments(recording_id: str):
+async def recording_assignments(recording_id: str, request: RecordingAssignmentRequest | None = None):
     from app.services.meeting_tasks import assign_for_recording
     from app.services.task_assignment import get_settings
     logger.info("Assignment requested for recording %s", recording_id)
     try:
-        return await assign_for_recording(recording_id, get_settings())
+        return await assign_for_recording(recording_id, get_settings(), request)
     except (FileNotFoundError, ValueError):
         logger.warning("Recording %s not found or unreadable", recording_id, exc_info=True)
         return failure("Recording not found.", 404)
