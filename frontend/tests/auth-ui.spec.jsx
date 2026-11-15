@@ -45,7 +45,10 @@ afterEach(cleanup);
 describe('authentication screens', () => {
   it('shows login errors and opens the dashboard after a valid session', async () => {
     mount();
+    expect(await screen.findByRole('button', { name: 'Login' })).toBeTruthy();
+    expect(document.querySelectorAll('.fairy-lights')).toHaveLength(1);
     fireEvent.change(await openLogin(), { target: { value: 'alice@example.com' } });
+    expect(document.querySelectorAll('.fairy-lights')).toHaveLength(1);
     fireEvent.change(screen.getByLabelText('Password:'), { target: { value: 'synthetic-password' } });
     sdk.signIn.mockResolvedValueOnce({ error: { message: 'Invalid login credentials' } });
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
@@ -53,6 +56,7 @@ describe('authentication screens', () => {
     sdk.signIn.mockImplementationOnce(async () => { event('SIGNED_IN', session); return { error: null }; });
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
     expect(await screen.findByText('Board dashboard')).toBeTruthy();
+    expect(document.querySelectorAll('.fairy-lights')).toHaveLength(0);
   });
 
   it('restores a saved session and fetches its verified profile', async () => {
@@ -66,6 +70,7 @@ describe('authentication screens', () => {
     mount();
     await openLogin();
     fireEvent.click(screen.getByRole('button', { name: 'Reset your password' }));
+    expect(document.querySelectorAll('.fairy-lights')).toHaveLength(1);
     fireEvent.change(screen.getByLabelText('Email:'), { target: { value: 'alice@example.com' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send reset link' }));
     expect(await screen.findByText(/If that email has an account/)).toBeTruthy();
@@ -79,6 +84,7 @@ describe('authentication screens', () => {
     sdk.getProfile.mockResolvedValue({ ...profile, password_setup_complete: false });
     mount();
     fireEvent.change(await screen.findByLabelText('New password'), { target: { value: 'Long-example-password!' } });
+    expect(document.querySelectorAll('.fairy-lights')).toHaveLength(1);
     fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'Other-example-password!' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save password and sign in' }));
     expect(await screen.findByText('The passwords do not match.')).toBeTruthy();
@@ -103,6 +109,7 @@ describe('authentication screens', () => {
     sdk.getProfile.mockRejectedValue(new Error('Not on the approved roster.'));
     mount();
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Not on the approved roster.');
+    expect(document.querySelectorAll('.fairy-lights')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('button', { name: 'Login' })).toBeTruthy();
     expect(screen.queryByText('Board dashboard')).toBeNull();

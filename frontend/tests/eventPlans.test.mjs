@@ -21,9 +21,11 @@ test('event plans persist in this browser and can be reopened and updated', asyn
     const saved = await createEventPlan({
       event_name: 'WiCS Career Panel', description: 'Alumni discussion.',
       event_date: '2027-04-20', event_time: '18:30', plan_text: 'Reserve a room.',
+      tasks: [{ id: 'reserve', title: 'Reserve a room.', rationale: 'Ensure space is available.' }],
     });
     assert.ok(saved.id);
     assert.equal((await getEventPlan(saved.id)).event_time, '18:30');
+    assert.equal((await getEventPlan(saved.id)).tasks[0].title, 'Reserve a room.');
     assert.deepEqual((await getEventPlans()).map(plan => plan.id), [saved.id]);
 
     const updated = await updateEventPlan(saved.id, { plan_text: 'Room reserved.' });

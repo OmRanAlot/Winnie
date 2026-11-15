@@ -13,7 +13,6 @@ import { reassignmentStore } from "./lib/reassignments.js";
 import { orderProfiles } from "./lib/profileOrder.js";
 import { PIXEL_ARROW_CURSOR, PIXEL_HAND_CURSOR, CUTE_CSS } from "./lib/pixelCursor.js";
 import CursorFx from "./lib/CursorFx.jsx";
-import FairyLights from "./FairyLights.jsx";
 const requestsStore = reassignmentStore(supabase);
 
 // All board records come from the backend. No sample data fallback.
@@ -21,7 +20,9 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
 const REASSIGNED_COLOR = "#f3ebe2";
 const EMPTY_EVENT_INPUT = { name: "", description: "", date: "", time: "" };
-const EMPTY_EVENT_PLAN = { ...EMPTY_EVENT_INPUT, planText: "" };
+const EMPTY_EVENT_PLAN = {
+  ...EMPTY_EVENT_INPUT, planText: "", tasks: [], questions: [], warnings: [], planMode: "",
+};
 // Shared display helpers resolve only the currently loaded board records.
 let currentPeople = [];
 let currentTasks = [];
@@ -218,6 +219,18 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .create-task-grid .panel{min-width:0}
 .create-task-fields{display:grid;grid-template-columns:1fr;gap:var(--s3)}
 .task-summary{min-height:260px;resize:vertical}
+.event-plan-task-list{display:flex;flex-direction:column;gap:var(--s3);max-height:480px;overflow-y:auto;padding:4px}
+.event-plan-task-card{overflow:hidden;border:1px solid var(--line);border-radius:var(--r);background:#f9f4ee}
+.event-plan-task-toggle{display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:var(--s3);padding:var(--s4);border:0;background:transparent;color:var(--ink);text-align:left;font:inherit}
+.event-plan-task-title{display:block;font-weight:700}
+.event-plan-task-meta{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s2);color:var(--muted);font-size:14px}
+.event-plan-task-meta span{padding:2px var(--s2);border-radius:999px;background:var(--surface)}
+.event-plan-task-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3);padding:var(--s4);border-top:1px solid var(--line)}
+.event-plan-task-detail dt{font-weight:700}
+.event-plan-task-detail dd{margin:2px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.event-plan-task-detail.wide{grid-column:1/-1}
+.event-plan-review-notes{display:grid;gap:var(--s3);margin-top:var(--s4)}
+.event-plan-review-notes ul{margin:var(--s2) 0 0;padding-left:var(--s5)}
 .plan-error{max-width:920px;margin:var(--s4) auto 0;padding:var(--s3) var(--s4);background:#f4e3d7;border:1px solid var(--rust);border-radius:var(--r);color:var(--maroon);font-weight:600}
 .dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 510px);pointer-events:none}
 .app button:not(:disabled),.app .avatar,.app .chart-member rect{transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease,filter .16s ease}
@@ -267,6 +280,8 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .home h3{font-size:19px}
   .plan-task-form,.plan-task-dates{grid-template-columns:1fr}
   .plan-task-form .wide{grid-column:auto}
+  .event-plan-task-details{grid-template-columns:1fr}
+  .event-plan-task-detail.wide{grid-column:auto}
   .gantt-controls,.gantt-controls.admin-controls{align-items:flex-start;flex-direction:column}
   .nav{gap:var(--s1);padding:var(--s2)}
   .nav button{min-width:0;padding:var(--s2) 4px;font-size:clamp(12px,3.7vw,16px)}
@@ -455,6 +470,7 @@ export default function App({ profile, admin, signOut }) {
   const refreshVersion = useRef(0);
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
+  const [expandedEventTaskId, setExpandedEventTaskId] = useState(null);
   const [eventPlans, setEventPlans] = useState([]);
   const [eventPlansLoading, setEventPlansLoading] = useState(false);
   const [eventPlansError, setEventPlansError] = useState("");
@@ -579,10 +595,12 @@ export default function App({ profile, admin, signOut }) {
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
   const openEventPlanEditor = (form, eventPlanId = null, generated = false) => {
     setEventPlanForm(form);
+    setExpandedEventTaskId(null);
     setEventPlanError("");
     go("eventPlan", { eventPlanId, generated });
   };
   const enterEventPlanManually = () => openEventPlanEditor({
+    ...EMPTY_EVENT_PLAN,
     ...eventInput,
     name: eventInput.name.trim(),
     planText: "",
@@ -611,29 +629,14 @@ export default function App({ profile, admin, signOut }) {
       if (!Array.isArray(draft.tasks) || !draft.tasks.length) {
         throw new Error("The planner returned no event plan suggestions.");
       }
-      const titleById = Object.fromEntries(draft.tasks.map((t) => [t.id, t.title]));
-      const generatedSummary = [
-        draft.mode === 'mock' ? 'Demo planning template: review and edit before saving.' : '',
-        draft.tasks.map((t, i) => {
-          const due = t.due_date ? ` · due ${t.due_date}` : "";
-          const role = t.suggested_role ? ` · suggested role: ${t.suggested_role}` : "";
-          const dependencies = (t.dependency_ids ?? []).map((id) => titleById[id] ?? id);
-          return [
-            `${i + 1}. ${t.title}${due}${role}`,
-            t.rationale,
-            dependencies.length ? `Depends on: ${dependencies.join(", ")}` : "",
-          ].filter(Boolean).join("\n");
-        }).join("\n\n"),
-        draft.questions?.length ? `Questions to review:\n${draft.questions.map((q) => `• ${q}`).join("\n")}` : "",
-        draft.warnings?.length ? `Planning notes:\n${draft.warnings.map((w) => `• ${w}`).join("\n")}` : "",
-      ].filter(Boolean).join("\n\n");
       openEventPlanEditor({
+        ...EMPTY_EVENT_PLAN,
         ...eventInput,
         name,
-        description: eventInput.description,
-        date: eventInput.date,
-        time: eventInput.time,
-        planText: generatedSummary,
+        tasks: draft.tasks,
+        questions: draft.questions ?? [],
+        warnings: draft.warnings ?? [],
+        planMode: draft.mode ?? "",
       }, null, true);
     } catch (e) {
       setPlanError(`Could not generate the event plan: ${e.message}`);
@@ -651,7 +654,11 @@ export default function App({ profile, admin, signOut }) {
         description: saved.description || "",
         date: saved.event_date,
         time: saved.event_time?.slice(0, 5) || "",
-        planText: saved.plan_text,
+        planText: saved.plan_text || "",
+        tasks: saved.tasks ?? [],
+        questions: saved.questions ?? [],
+        warnings: saved.warnings ?? [],
+        planMode: saved.plan_mode ?? "",
       }, saved.id);
     } catch (e) { setEventPlansError(e.message); }
     finally { setOpeningEventPlanId(null); }
@@ -664,8 +671,12 @@ export default function App({ profile, admin, signOut }) {
       event_date: eventPlanForm.date,
       event_time: eventPlanForm.time || null,
       plan_text: eventPlanForm.planText.trim(),
+      tasks: eventPlanForm.tasks ?? [],
+      questions: eventPlanForm.questions ?? [],
+      warnings: eventPlanForm.warnings ?? [],
+      plan_mode: eventPlanForm.planMode || null,
     };
-    if (!payload.event_name || !payload.event_date || !payload.plan_text) {
+    if (!payload.event_name || !payload.event_date || (!payload.plan_text && !payload.tasks.length)) {
       setEventPlanError("Enter an event name, date, and event plan before saving.");
       return;
     }
@@ -944,7 +955,9 @@ export default function App({ profile, admin, signOut }) {
             : !eventPlansError && <p>No saved event plans yet.</p>}
         </section></>);
       break;
-    case "eventPlan":
+    case "eventPlan": {
+      const planTasks = Array.isArray(eventPlanForm.tasks) ? eventPlanForm.tasks : [];
+      const titleById = Object.fromEntries(planTasks.map((task) => [task.id, task.title]));
       page = (<><Top title={p.eventPlanId ? "Edit Event Plan" : p.generated ? "Review Event Plan" : "Enter Event Plan"} tag />
         <div className="plan-task-form">
           <label className="wide">Event Name
@@ -965,11 +978,56 @@ export default function App({ profile, admin, signOut }) {
                 onChange={(e) => setEventPlanForm({ ...eventPlanForm, time: e.target.value })} />
             </label>
           </div>
-          <label className="wide">Event Plan
+          {planTasks.length ? <section className="panel wide">
+            <h2>Task Summary ({planTasks.length})</h2>
+            <p>Select a task to expand its details. Scroll the list to review the full plan.</p>
+            {eventPlanForm.planMode === "mock" && <p role="note">Demo planning template: review these suggestions before saving.</p>}
+            <div className="event-plan-task-list">
+              {planTasks.map((task, index) => {
+                const expanded = expandedEventTaskId === task.id;
+                const dependencies = (task.dependency_ids ?? []).map((id) => titleById[id] ?? id);
+                const kind = (task.kind || "general").replace(/_/g, " ");
+                return <article className="event-plan-task-card" key={task.id}>
+                  <button className="event-plan-task-toggle" type="button" aria-expanded={expanded}
+                    aria-controls={`event-plan-task-details-${index}`}
+                    onClick={() => setExpandedEventTaskId(expanded ? null : task.id)}>
+                    <span>
+                      <span className="event-plan-task-title">{index + 1}. {task.title}</span>
+                      <span className="event-plan-task-meta">
+                        <span>{task.due_date ? `Due ${task.due_date}` : "No date proposed"}</span>
+                        <span>{task.suggested_role || "Role not specified"}</span>
+                        <span>{task.phase || "Phase not specified"}</span>
+                      </span>
+                    </span>
+                    <span>{expanded ? "Collapse" : "Expand"}</span>
+                  </button>
+                  {expanded && <div className="event-plan-task-details" id={`event-plan-task-details-${index}`}>
+                    <dl className="event-plan-task-detail"><dt>Task ID</dt><dd>{task.id}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Task type</dt><dd>{kind}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Suggested role</dt><dd>{task.suggested_role || "Not specified"}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Phase</dt><dd>{task.phase || "Not specified"}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Due date</dt><dd>{task.due_date || "No date proposed"}</dd></dl>
+                    <dl className="event-plan-task-detail wide"><dt>Rationale</dt><dd>{task.rationale || "No rationale provided."}</dd></dl>
+                    <dl className="event-plan-task-detail wide"><dt>Dependencies</dt><dd>{dependencies.length ? dependencies.join(", ") : "None"}</dd></dl>
+                    <dl className="event-plan-task-detail wide"><dt>Evidence</dt><dd>{task.evidence_ids?.length ? task.evidence_ids.join(", ") : "No source evidence linked."}</dd></dl>
+                  </div>}
+                </article>;
+              })}
+            </div>
+            {(eventPlanForm.questions?.length > 0 || eventPlanForm.warnings?.length > 0) &&
+              <div className="event-plan-review-notes">
+                {eventPlanForm.questions?.length > 0 && <div><b>Questions to review</b><ul>
+                  {eventPlanForm.questions.map((question, index) => <li key={`question-${index}`}>{question}</li>)}
+                </ul></div>}
+                {eventPlanForm.warnings?.length > 0 && <div><b>Planning notes</b><ul>
+                  {eventPlanForm.warnings.map((warning, index) => <li key={`warning-${index}`}>{warning}</li>)}
+                </ul></div>}
+              </div>}
+          </section> : <label className="wide">Event Plan
             <textarea className="field task-summary" maxLength={20000} rows={12} value={eventPlanForm.planText}
               placeholder="Add the event outline, preparation steps, and details."
               onChange={(e) => setEventPlanForm({ ...eventPlanForm, planText: e.target.value })} />
-          </label>
+          </label>}
         </div>
         {eventPlanError && <p className="plan-error" role="alert">{eventPlanError}</p>}
         <div className="plan-task-actions">
@@ -979,6 +1037,7 @@ export default function App({ profile, admin, signOut }) {
           </button>
         </div></>);
       break;
+    }
     case "admin":
       page = (<><Top title="Admin Settings" tag noBack /><div className="admin-menu">
         <button onClick={() => go("editlist")}>Board Information</button>
@@ -1206,7 +1265,7 @@ export default function App({ profile, admin, signOut }) {
 
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
-    <div className={`app${p.n === "dash" ? " home-lights" : " inner-page"}`}><style>{CSS}{CUTE_CSS}</style><CursorFx />{p.n === "dash" && <FairyLights />}<header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
+    <div className={`app${p.n === "dash" ? "" : " inner-page"}`}><style>{CSS}{CUTE_CSS}</style><CursorFx /><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
         <button className="link" onClick={() => go("review")}>Requests ({reqs.filter(r => r.status === "pending").length})</button>
         <button className="link" onClick={() => signOut().catch(e => say(e.message))}>Sign out</button>
       </header>
