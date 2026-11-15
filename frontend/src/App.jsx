@@ -497,9 +497,6 @@ export default function App({ profile, admin, signOut }) {
   const [loading, setLoading] = useState(true);
   const refreshVersion = useRef(0);
   const refreshInFlight = useRef(0);
-  const [planInput, setPlanInput] = useState(EMPTY_PLAN_INPUT);
-  const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
-  const [savedTaskForm, setSavedTaskForm] = useState(null);
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
   const [eventPlanError, setEventPlanError] = useState("");
@@ -513,6 +510,7 @@ export default function App({ profile, admin, signOut }) {
   const [planError, setPlanError] = useState("");
   const [storedReqs, setReqs] = useState([]);
   const [reviewingRequestId, setReviewingRequestId] = useState(null);
+  const reviewingRequestRef = useRef(null);
   const reqs = storedReqs.filter(r => r.id !== reviewingRequestId);
   const [persistedDraft, setPersistedDraft] = useState(null);
   const [draftError, setDraftError] = useState("");
@@ -570,7 +568,6 @@ export default function App({ profile, admin, signOut }) {
       if (version !== refreshVersion.current) return;
       const byTask = assignments.byTask;
       const links = {};
-      dependencies.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
       const enriched = ts.map((t) => {
         const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
         return { ...t, assignees: codes, assignee: codes[0] ?? null, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null };
@@ -584,7 +581,7 @@ export default function App({ profile, admin, signOut }) {
       const [requests, dependencies] = await secondary;
       if (version !== refreshVersion.current) return;
       if (requests.status === 'fulfilled') {
-        setReqs(requests.value); setRequestDataError("");
+        setReqs(requests.value.filter(request => request.id !== reviewingRequestRef.current)); setRequestDataError("");
       } else { setRequestDataError(requests.reason?.message || 'Request history could not be loaded.'); }
       if (dependencies.status === 'fulfilled') {
         const links = {};
@@ -600,6 +597,7 @@ export default function App({ profile, admin, signOut }) {
             if (version === refreshVersion.current) setEventOverrides((prev) => ({ ...prev, ...overrides }));
           })
           .catch(() => {}); // non-fatal
+      }
     } catch (e) {
       if (version === refreshVersion.current) {
         setDataError(e.message);
@@ -614,9 +612,10 @@ export default function App({ profile, admin, signOut }) {
   useEffect(() => {
     const reload = () => { if (!refreshInFlight.current) refresh().catch(() => {}); };
     reload();
-    const timer = setInterval(reload, 15000);
+    const timer = typeof document === "undefined" ? null : setInterval(reload, 15000);
+    timer?.unref?.();
     window.addEventListener("focus", reload);
-    return () => { ++refreshVersion.current; clearInterval(timer); window.removeEventListener("focus", reload); };
+    return () => { ++refreshVersion.current; if (timer) clearInterval(timer); window.removeEventListener("focus", reload); };
   }, [refresh]);
   useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
   const sendRequest = async () => {
@@ -634,15 +633,21 @@ export default function App({ profile, admin, signOut }) {
     if (mutationLock.current || requestDataError || !admin) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
     setReviewingRequestId(r.id);
+    reviewingRequestRef.current = r.id;
+    setReqs(current => current.filter(request => request.id !== r.id));
     try {
       const saved = await requestsStore.review(r.id, decision);
       // Discard refreshes started before the decision was saved.
       ++refreshVersion.current;
-      setReqs(current => current.map(request => request.id === r.id ? { ...request, status: decision } : request));
+      reviewingRequestRef.current = null;
+      setReqs(current => [...current, { ...r, status: decision }]);
       setCands({});
       say(saved?.notification_warning || (decision === "approved" ? "Approved — task assignment saved" : "Request denied"));
       try { await refresh(); } catch { say("Decision saved. Refresh failed; please retry."); }
+      setRequestDataError("");
     } catch (e) {
+      reviewingRequestRef.current = null;
+      setReqs(current => [...current.filter(request => request.id !== r.id), r]);
       setRequestError(e.message);
       refresh().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); setReviewingRequestId(null); }
@@ -659,7 +664,9 @@ export default function App({ profile, admin, signOut }) {
       refresh().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); }
   };
+  const canEditTask = (t) => admin || (!!profile.member_code && owns(t, profile.member_code));
   const changeStatus = async (t, status) => {
+    if (!canEditTask(t)) return;
     if (statusLocks.current.has(t.id)) return;
     if (!live) { setStatusFeedback({error:true,text:'Reconnect and refresh before saving changes.'}); return; }
     statusLocks.current.add(t.id);
@@ -793,6 +800,7 @@ export default function App({ profile, admin, signOut }) {
     finally { setSavingEventPlan(false); }
   };
   const saveNotes = async (t) => {
+    if (!canEditTask(t)) return;
     if (noteSaving) return;
     setNoteSaving(t.id);
     try {
@@ -889,10 +897,10 @@ export default function App({ profile, admin, signOut }) {
             {isAdminView && <Avatar p={who(t)} cls="sm" onClick={() => t.assignee && go("profile", { id: t.assignee })} />}
             <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
             {t.status === "Upcoming"
-              ? <button className="btn alt status-action" disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>{statusSaving[t.id] ? 'Saving…' : 'Start'}</button>
+              ? <button className="btn alt status-action" disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>{statusSaving[t.id] ? 'Saving…' : 'Start'}</button>
               : <button type="button" role="switch" className={`status-switch ${t.status === "Completed" ? "on" : ""}`}
                 aria-checked={t.status === "Completed"}
-                disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]}
+                disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]}
                 title={t.status === 'Completed' ? 'Mark this task in progress' : 'Mark this task completed'}
                 aria-label={`Mark ${t.title} ${t.status === "Completed" ? "in progress" : "completed"}`}
                 onClick={() => setTaskStatus(t.id, t.status === "Completed" ? "In-Progress" : "Completed")}>
@@ -978,9 +986,9 @@ export default function App({ profile, admin, signOut }) {
             </select>
           </label>}
           <div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
-          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
-        <div className="panel"><h3>Description</h3><p style={{whiteSpace:"pre-wrap"}}>{t.description || "No description recorded."}</p><h3>Board notes</h3><textarea className="field" style={{ minHeight: 200 }} maxLength={10000} placeholder="Add a task note visible to the board…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
-          <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" disabled={noteSaving === t.id} onClick={() => saveNotes(t)}>Save notes</button></div></div></div></>);
+          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
+        <div className="panel"><h3>Description</h3><p style={{whiteSpace:"pre-wrap"}}>{t.description || "No description recorded."}</p><h3>Board notes</h3><textarea className="field" style={{ minHeight: 200 }} maxLength={10000} readOnly={!canEditTask(t)} placeholder="Add a task note visible to the board…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
+          <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" disabled={!live || !canEditTask(t) || noteSaving === t.id} onClick={() => saveNotes(t)}>Save notes</button></div></div></div></>);
       break;
     }
     case "tasks": {
@@ -1356,7 +1364,7 @@ export default function App({ profile, admin, signOut }) {
           </div>}
           {admin && r.status === "pending" && <>
             <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError || r.recipient_decision !== "accepted"} onClick={() => decideRequest(r, "approved")}>Approve</button>
-            <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Reject request</button>
+            <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Deny</button>
           </>}
         </div>;
         page = <><Top title={approvedOnly ? "Approved Reassignments" : admin ? "Reassignment Requests" : "Your Reassignment Requests"} tag={admin} />

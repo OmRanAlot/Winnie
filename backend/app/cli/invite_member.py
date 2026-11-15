@@ -13,13 +13,15 @@ from supabase_auth.errors import AuthError
 
 from app.integrations.supabase import StorageUnavailable, create_task_client
 
+DEFAULT_REDIRECT_TO = "https://hack-princeton-514716.web.app/auth/set-password"
+
 
 def prepare_invitation(client, email: str, redirect_to: str):
     email = email.strip().lower()
     url = urlsplit(redirect_to)
     if (url.scheme != "https" and not (
         url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1"}
-    )) or url.username or url.password or url.fragment or url.query:
+    )) or not url.hostname or url.username or url.password or url.fragment or url.query:
         raise ValueError("Use an HTTPS callback URL, or HTTP localhost for development.")
     if url.path != "/auth/set-password":
         raise ValueError("Invitation callback must end with /auth/set-password.")
@@ -35,12 +37,15 @@ def prepare_invitation(client, email: str, redirect_to: str):
     }}
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("email")
-    parser.add_argument("--redirect-to", default="http://localhost:5173/auth/set-password")
+    parser.add_argument(
+        "--redirect-to", default=DEFAULT_REDIRECT_TO,
+        help="Password setup callback (defaults to the deployed Winnie site).",
+    )
     parser.add_argument("--send", action="store_true", help="Send this invitation through Supabase Auth.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     client = create_task_client()
     try:
         invitation = prepare_invitation(client, args.email, args.redirect_to)

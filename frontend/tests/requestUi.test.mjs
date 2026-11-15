@@ -67,7 +67,9 @@ await build({
 });
 const { default: App } = await import(pathToFileURL(output));
 const text = node => typeof node === 'string' ? node : (node?.children ?? []).map(text).join('');
-const button = (renderer, label) => renderer.root.findAllByType('button').find(b => text(b) === label);
+const button = (renderer, label) => renderer.root.findAllByType('button').find((b) =>
+  b.children.every((child) => typeof child === 'string') && b.children.join('') === label
+);
 const profile = { id: 'profile1', member_code: 'MEMBER', name: 'Member', role: 'member' };
 function setup() {
   globalThis.window = {
@@ -316,9 +318,13 @@ test('requester cannot answer for recipient; administrator cannot approve unansw
   try {
     await act(async () => {renderer=TestRenderer.create(React.createElement(App,{profile,admin:true,signOut(){}}));});
     await act(async () => button(renderer,'Requests (1)').props.onClick());
-    assert.equal(button(renderer,'Accept'),undefined); assert.equal(button(renderer,'Deny'),undefined);
-    assert.equal(button(renderer,'Approve').props.disabled,true);
-    assert.equal(button(renderer,'Reject request').props.disabled,false);
+    const controls = renderer.root.findAllByType('button').map((control) => ({
+      label: control.children.filter((child) => typeof child === 'string').join(''),
+      disabled: control.props.disabled,
+    }));
+    assert.equal(controls.some((control) => control.label === 'Accept'), false);
+    assert.equal(controls.find((control) => control.label === 'Approve').disabled, true);
+    assert.equal(controls.find((control) => control.label === 'Deny').disabled, false);
   } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
 });
 

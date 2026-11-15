@@ -69,7 +69,10 @@ This checks consent, membership and schema without sending mail. When ready to s
 uv run python -m app.cli.invite_member member@example.com --send
 ```
 
-For deployment, also pass `--redirect-to https://YOUR_FRONTEND/auth/set-password`.
+Invitations default to `https://hack-princeton-514716.web.app/auth/set-password`.
+Add that exact URL to Supabase Authentication → URL Configuration → Redirect URLs.
+For local testing, explicitly pass `--redirect-to http://localhost:5173/auth/set-password`.
+Previously sent emails keep their original link; send a fresh invitation to use the corrected callback.
 That callback must be allowlisted. No bulk invitations are sent automatically.
 Existing accounts use **Forgot your password?** instead of being recreated.
 

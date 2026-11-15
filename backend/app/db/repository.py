@@ -287,6 +287,11 @@ def _hydrate(rows: Sequence[Row], db: Client) -> list[Task]:
     return result
 
 
+def task_from_record(row: Row, client: Client | None = None) -> Task:
+    """Project an already-saved canonical row into the compatibility timeline contract."""
+    return _hydrate([row], _db(client))[0]
+
+
 def _timeline_order(task: Task) -> tuple[bool, float, float, str]:
     """Scheduled tasks first, by deadline; then unscheduled; ties by creation time and id."""
     deadline = task.deadline_at.timestamp() if task.deadline_at else 0.0

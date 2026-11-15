@@ -87,6 +87,15 @@ are not browser endpoints requiring provider secrets.
 
 ## Recipient consent for reassignment
 
+Task edits enforce the same policy on both the records PATCH and compatibility status
+endpoint: members may save only status and notes on verified assignments in the active
+semester (including fully resolved co-assignments). Administrators may edit other task
+metadata and status. General edits reject `owner_code` and `assignee_text` for every
+caller; use the reassignment RPC workflow to transfer ownership. Saves check the task's
+`updated_at` revision atomically and return HTTP 409 if it changed during authorization.
+No new database migration is required for this policy; deploy the updated backend and
+frontend. Imports and approved database handoffs retain their separate server-side paths.
+
 Photon and browser requests share this queue after applying
 `20261115160000_unify_photon_reassignments.sql` after the recipient-consent migration.
 See [the shared workflow and demo test](HELP_WORKFLOW.md) for text commands,
