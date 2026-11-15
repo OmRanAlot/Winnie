@@ -43,7 +43,14 @@ await build({
         export const getMeetings = () => Promise.resolve([]);
         export const createMeeting = () => Promise.resolve({id: 'synthetic-meeting'});
         export const saveAttendance = () => Promise.resolve();
-        export const getDependencies = () => globalThis.__dashboard.dependencies ? globalThis.__dashboard.dependencies() : Promise.resolve([]);
+        export const getDependencies = () => {
+          const dependencies = globalThis.__dashboard.dependencies;
+          return typeof dependencies === 'function' ? dependencies() : Promise.resolve(dependencies ?? []);
+        };
+        export const saveTaskDependencies = edges => {
+          globalThis.__dashboard.savedDependencies = edges;
+          return Promise.resolve({ added: edges.length });
+        };
         export const dispatchPhotonNotifications = () => Promise.resolve({queued:true});
         export const getAutomationStatus = () => Promise.resolve({jobs:[],notifications:{}});
         export const nudgeTask = id => { globalThis.__dashboard.nudged=id; return Promise.resolve({queued:1}); };
@@ -68,7 +75,7 @@ await build({
     }));
   } }],
 });
-const { default: App } = await import(pathToFileURL(output));
+const { default: App, Gantt } = await import(pathToFileURL(output));
 const text = node => typeof node === 'string' ? node : (node?.children ?? []).map(text).join('');
 const button = (renderer, label) => renderer.root.findAllByType('button').find((b) =>
   b.children.every((child) => typeof child === 'string') && b.children.join('') === label
@@ -265,7 +272,72 @@ test('generated event plans receive one date and time and save as plans, not tas
   } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
 });
 
-test('nudge control is admin-only and queues a real backend action without claiming delivery', async () => {
+test('linked-task arrows appear for admin and member Gantt views', async () => {
+  for (const admin of [true, false]) {
+    setup();
+    const tasks = [
+      { id: 'dependent', title: 'Dependent task', status: 'Upcoming', priority: 'high', ownerCode: 'MEMBER', dueIso: '2026-11-14', startIso: '2026-11-13', due: '11/14/2026', start: '11/13/2026', finished: '', dependsOn: ['prerequisite'] },
+      { id: 'prerequisite', title: 'Prerequisite task', status: 'Upcoming', ownerCode: 'OTHER', dueIso: '2026-11-12', startIso: '2026-11-10', due: '11/12/2026', start: '11/10/2026', finished: '' },
+    ];
+    let renderer;
+    try {
+      await act(async () => { renderer = TestRenderer.create(React.createElement(Gantt, {
+        tasks: admin ? tasks : [tasks[0]], allTasks: tasks, people: [], isAdminView: admin,
+        showAll: true, onShowAllChange() {}, onOpen() {},
+      })); });
+      assert.equal(renderer.root.findAllByProps({ className: 'dependency-lines' }).length, 0);
+      const linkedTasksToggle = renderer.root.findAllByType('button').find(node => text(node).includes('Show linked tasks'));
+      assert.ok(linkedTasksToggle, 'the linked-task toggle is visible');
+      await act(async () => linkedTasksToggle.props.onClick());
+      const svg = renderer.root.findByProps({ className: 'dependency-lines' });
+      const dependencyPath = svg.findAll(node => node.type === 'path' && node.props.markerEnd);
+      assert.equal(dependencyPath.length, 1);
+      assert.equal(dependencyPath[0].props.markerEnd, 'url(#gantt-dependency-arrowhead)');
+      assert.ok(text(svg).includes('Dependent task depends on Prerequisite task'));
+      assert.equal(renderer.root.findAllByProps({ className: 'gr' }).length, 2);
+      assert.equal(renderer.root.findAllByProps({ className: 'bar-star' }).length, 1);
+      assert.ok(text(renderer.root.findByProps({ className: 'gantt-key' })).includes('High priority'));
+      const dependentRow = renderer.root.findAllByProps({ className: 'gr' }).find(node => text(node).includes('Dependent task'));
+      await act(async () => dependentRow.props.onMouseEnter());
+      assert.equal(renderer.root.findAll(node => node.props.className?.includes('linked-highlight')).length, 2);
+    } finally {
+      if (renderer) await act(async () => renderer.unmount());
+      delete globalThis.window;
+    }
+  }
+});
+
+test('Gantt draws inferred candidate recruitment dependency arrows when linked tasks are enabled', async () => {
+  setup();
+  const tasks = [
+    { id: 'shortlist', title: 'Shortlist interview candidates', status: 'Upcoming', dueIso: '2026-11-10', startIso: '2026-11-10', due: '11/10/2026', start: '11/10/2026', finished: '', event: 'E-Board Recruitment', assignee: 'VP' },
+    { id: 'deliberation', title: 'External E-Board deliberation', status: 'Upcoming', dueIso: '2026-11-11', startIso: '2026-11-11', due: '11/11/2026', start: '11/11/2026', finished: '', event: 'E-Board Recruitment', assignee: 'PRESIDENT' },
+    { id: 'announcement', title: 'Announce E-Board candidate decisions', status: 'Upcoming', priority: 'high', dueIso: '2026-11-12', startIso: '2026-11-12', due: '11/12/2026', start: '11/12/2026', finished: '', event: 'E-Board Recruitment', assignee: 'PRESIDENT' },
+  ];
+  const people = [
+    { id: 'PRESIDENT', name: 'President', role: 'President' },
+    { id: 'VP', name: 'Vice President', role: 'Vice President' },
+  ];
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(Gantt, {
+      tasks, allTasks: tasks, people, isAdminView: true, showAll: true,
+      onShowAllChange() {}, onOpen() {},
+    })); });
+    const linkedTasksToggle = renderer.root.findAllByType('button').find(node => text(node).includes('Show linked tasks'));
+    await act(async () => linkedTasksToggle.props.onClick());
+    const svg = renderer.root.findByProps({ className: 'dependency-lines' });
+    const paths = svg.findAll(node => node.type === 'path' && node.props.markerEnd);
+    assert.equal(paths.length, 2);
+    assert.ok(text(svg).includes('External E-Board deliberation is a dependency for Announce E-Board candidate decisions'));
+    assert.ok(text(svg).includes('Shortlist interview candidates is a dependency for External E-Board deliberation'));
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    delete globalThis.window;
+  }
+});
+
+test('nudge control is admin-only and never claims a reminder was sent', async () => {
   setup(); let adminRenderer, memberRenderer;
   try {
     await act(async () => { adminRenderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });

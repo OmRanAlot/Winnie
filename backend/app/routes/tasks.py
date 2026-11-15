@@ -6,6 +6,7 @@ Timeline compatibility view, UUID ids, approved Supabase membership required:
 
 Task records (CRUD for backend clients), uuid ids, verified Bearer token or scoped server key:
     POST/GET /api/tasks/records, GET/PATCH/DELETE /api/tasks/records/{task_id}
+    POST /api/tasks/records/dependencies (admin-only, cycle-checked batch insert)
 
 Thin: validates input, calls services/tasks.py, wraps results in the {success, data, error, meta}
 envelope.
@@ -28,6 +29,7 @@ from app.schemas.tasks import (
     SemesterCode,
     StakeholderCode,
     TaskCreate,
+    TaskDependencyBatch,
     TaskStatus,
     TaskUpdate,
 )
@@ -129,7 +131,7 @@ def list_task_records(
     semester_code: SemesterCode | None = None,
     status: TaskStatus | None = None,
     stakeholder_code: StakeholderCode | None = None,
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=250),
     offset: int = Query(default=0, ge=0, le=100000),
 ):
     meta = {"limit": limit, "offset": offset}
@@ -154,6 +156,24 @@ def get_task(task_id: UUID, store: Store):
 @records.patch("/{task_id}")
 def update_task(task_id: UUID, changes: TaskUpdate, store: Store, members: Members, actor: Actor):
     return run_operation(lambda: update_authorized(task_id, changes, actor, store, members))
+
+
+@records.post("/dependencies", dependencies=[Depends(require_admin)])
+def add_task_dependencies(body: TaskDependencyBatch):
+    pairs = [(str(edge.task_id), str(edge.depends_on_id)) for edge in body.edges]
+    try:
+        added = task_service.add_dependencies(pairs)
+    except repository.NotFound as error:
+        return failure(str(error), 404)
+    except ValueError as error:
+        return failure(str(error), 422)
+    except task_service.STORAGE_ERRORS:
+        logger.exception("Could not save inferred task dependencies")
+        return failure(STORE_UNAVAILABLE, 503)
+    return envelope({
+        "edges": [edge.model_dump(mode="json") for edge in added],
+        "added": len(added),
+    })
 
 
 @records.delete("/{task_id}", dependencies=[Depends(require_admin)])

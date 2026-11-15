@@ -17,7 +17,7 @@ from httpx import HTTPError
 from postgrest.exceptions import APIError
 
 from app.db import repository
-from app.domain.models import ExtractedTask, Task
+from app.domain.models import ExtractedTask, Task, TaskDependency
 from app.integrations.supabase import StorageUnavailable, create_task_client
 from app.integrations.supabase_client import SupabaseNotConfigured
 from app.schemas.api import TaskView
@@ -66,7 +66,10 @@ def store_meeting_tasks(
     A meeting left without tasks by an earlier failed insert is filled now.
     """
     meeting_id, created = repository.find_or_create_meeting(held_at, title, transcript, recording_id)
-    if not created and (existing := repository.tasks_for_meeting(meeting_id)):
+    existing = [] if created else repository.tasks_for_meeting(meeting_id)
+    # Only skip re-insertion when we got the same or more tasks last time; a prior
+    # partial extraction (fewer tasks than now) is replaced by the new full result.
+    if existing and len(existing) >= len(tasks):
         return StoredTasks([to_view(task) for task in existing], reused=True)
     stored = repository.insert_extracted_tasks(meeting_id, tasks)
     return StoredTasks([to_view(task) for task in stored], reused=False)
@@ -81,6 +84,10 @@ def list_task_views(
 
 def set_status(task_id: str, status: str) -> TaskView:
     return to_view(repository.update_task_status(task_id, status))
+
+
+def add_dependencies(edges: list[tuple[str, str]]) -> list[TaskDependency]:
+    return repository.add_dependencies(edges)
 
 
 # --- Task records (TaskStore, uuid-backed) ----------------------------------

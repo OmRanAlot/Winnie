@@ -118,6 +118,38 @@ def test_record_api_and_timeline_share_ingested_uuid_tasks(client, db):
         app.dependency_overrides.pop(get_task_store, None)
 
 
+def test_dependency_batch_endpoint_persists_only_admin_validated_links(client, db):
+    from app.core.auth import require_admin
+    from app.routes.tasks import authorize_tasks
+
+    seed(db)
+    task_ids = [task["id"] for task in db.tables["tasks"]]
+    app.dependency_overrides[authorize_tasks] = lambda: None
+    app.dependency_overrides[require_admin] = lambda: None
+    try:
+        body = {"edges": [
+            {"task_id": task_ids[0], "depends_on_id": task_ids[1]},
+            {"task_id": task_ids[1], "depends_on_id": task_ids[2]},
+        ]}
+        response = client.post("/api/tasks/records/dependencies", json=body)
+        assert response.status_code == 200
+        assert response.json()["data"]["added"] == 2
+        assert len(db.tables["task_dependencies"]) == 2
+
+        repeated = client.post("/api/tasks/records/dependencies", json=body)
+        assert repeated.status_code == 200
+        assert repeated.json()["data"]["added"] == 0
+
+        cycle = client.post("/api/tasks/records/dependencies", json={"edges": [
+            {"task_id": task_ids[2], "depends_on_id": task_ids[0]},
+        ]})
+        assert cycle.status_code == 422
+        assert len(db.tables["task_dependencies"]) == 2
+    finally:
+        app.dependency_overrides.pop(authorize_tasks, None)
+        app.dependency_overrides.pop(require_admin, None)
+
+
 def test_unconfigured_store_returns_503(client, monkeypatch):
     def not_configured():
         raise SupabaseNotConfigured("Missing SUPABASE_URL")

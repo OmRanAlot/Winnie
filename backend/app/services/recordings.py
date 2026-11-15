@@ -21,9 +21,32 @@ RECORDINGS_DIR = Path(__file__).resolve().parents[2] / "data" / "recordings"
 AUDIO_EXTENSIONS = {
     "audio/webm": "webm",
     "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",   # macOS / Safari
+    "audio/m4a": "m4a",
+    "video/mp4": "m4a",     # some browsers label .m4a as video/mp4
     "audio/ogg": "ogg",
     "audio/wav": "wav",
+    "audio/wave": "wav",    # older browsers
+    "audio/x-wav": "wav",
     "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/aac": "m4a",
+}
+
+# Browser MIME → what Gemini's API accepts for inline audio
+GEMINI_MIME = {
+    "audio/webm": "audio/webm",
+    "audio/mp4": "audio/mp4",
+    "audio/x-m4a": "audio/mp4",
+    "audio/m4a": "audio/mp4",
+    "video/mp4": "audio/mp4",
+    "audio/ogg": "audio/ogg",
+    "audio/wav": "audio/wav",
+    "audio/wave": "audio/wav",
+    "audio/x-wav": "audio/wav",
+    "audio/mpeg": "audio/mpeg",
+    "audio/mp3": "audio/mpeg",
+    "audio/aac": "audio/aac",
 }
 
 

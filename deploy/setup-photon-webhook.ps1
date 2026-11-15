@@ -14,14 +14,20 @@ if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {throw 'Install Goo
 $pythonCandidates=@((Join-Path $backendPath '.venv-auth/Scripts/python.exe'),(Join-Path $backendPath '.venv/Scripts/python.exe'))
 $pythonPath=$pythonCandidates | Where-Object {Test-Path -LiteralPath $_} | Select-Object -First 1
 if (-not $pythonPath) {throw 'Run uv sync in backend first so its Python dependencies are available.'}
-function Invoke-Gcloud([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments) {
+function Invoke-Gcloud([string[]]$Arguments) {
  & gcloud @Arguments
  if ($LASTEXITCODE -ne 0) {throw 'Google Cloud command failed. No later setup steps were run.'}
 }
 Push-Location $backendPath
 try {
  # An absent migration fails before a deployment or webhook registration.
- & $pythonPath -c 'from app.integrations.photon import PhotonInbox; PhotonInbox()._execute("photon_inbox", lambda q: q.select("id").limit(0)); print("Webhook inbox migration verified.")'
+ # Code goes over stdin: Windows PowerShell 5.1 strips embedded double quotes from native-command arguments.
+ $checkCode=@'
+from app.integrations.photon import PhotonInbox
+PhotonInbox()._execute("photon_inbox", lambda q: q.select("id").limit(0))
+print("Webhook inbox migration verified.")
+'@
+ $checkCode | & $pythonPath -
  if ($LASTEXITCODE -ne 0) {throw 'Apply 20261115170000_photon_webhook_inbox.sql first (after the shared workflow migrations).'}
  # This first deploy adds the route, initially disabled until credentials are configured.
  Invoke-Gcloud @('run','deploy',$Service,'--source','.','--project',$ProjectId,'--region',$Region,'--quiet')
@@ -44,7 +50,13 @@ try {
  & $pythonPath -m app.cli.photon_webhook --url $WebhookUrl
  if ($LASTEXITCODE -ne 0) {throw 'Webhook registration not completed; check deployed route and Photon credentials.'}
  # Capture private settings in memory, never print them to the terminal.
- $configText=& $pythonPath -c 'import json; from app.core.settings import Settings; s=Settings(); print(json.dumps({"project_id":s.photon_project_id,"project_secret":s.photon_project_secret.get_secret_value(),"webhook_id":s.photon_webhook_id,"webhook_secret":s.photon_webhook_secret.get_secret_value()}))'
+ $configCode=@'
+import json
+from app.core.settings import Settings
+s=Settings()
+print(json.dumps({"project_id":s.photon_project_id,"project_secret":s.photon_project_secret.get_secret_value(),"webhook_id":s.photon_webhook_id,"webhook_secret":s.photon_webhook_secret.get_secret_value()}))
+'@
+ $configText=$configCode | & $pythonPath -
  if ($LASTEXITCODE -ne 0) {throw 'Could not load saved Photon settings.'}
  $config=$configText | ConvertFrom-Json
  $secrets=@{'WINNIE_PHOTON_PROJECT_SECRET'=$config.project_secret;'WINNIE_PHOTON_WEBHOOK_SECRET'=$config.webhook_secret}

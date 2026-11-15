@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import SessionGate from "./auth/SessionGate.jsx";
+import { PIXEL_HAND_CURSOR } from "./lib/pixelCursor.js";
 
 function ButtonClickBurst() {
   useEffect(() => {
@@ -107,7 +108,7 @@ function ButtonClickBurst() {
     return () => document.removeEventListener("click", handleClick, true);
   }, []);
 
-  return null;
+  return <style>{`button:hover,button:hover *,.app [role="button"]:hover,.app [role="button"]:hover *,.app .sum .pill:hover,.app .sum .pill:hover *{cursor:${PIXEL_HAND_CURSOR} !important}`}</style>;
 }
 
 createRoot(document.getElementById("root")).render(

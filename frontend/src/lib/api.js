@@ -2,7 +2,7 @@
 // Backend tasks are translated into the shape App.jsx's design uses, so the screens don't change.
 
 import { authHeaders } from './authToken.js';
-const PAGE = 100; // the backend's maximum page size for GET /api/tasks/records
+const PAGE = 250; // the backend's maximum page size for GET /api/tasks/records
 
 export async function getSheetSyncSources() {
   return (await request('/sheet-sync/sources')).data;
@@ -61,6 +61,20 @@ export async function request(path, options = {}) {
 // "2026-12-15" -> "12/15/2026"
 const usDate = (iso) => (iso ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}` : "");
 
+// Give tasks without an explicit start date a useful Gantt span. Date-only
+// arithmetic avoids timezone shifts when the API returns YYYY-MM-DD values.
+export function defaultTaskStartDate(dueIso, today = new Date()) {
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  if (!dueIso || !/^\d{4}-\d{2}-\d{2}$/.test(dueIso)) return todayIso;
+  const todayDay = Date.parse(`${todayIso}T00:00:00Z`);
+  const dueDay = Date.parse(`${dueIso}T00:00:00Z`);
+  if (!Number.isFinite(dueDay) || dueDay <= todayDay) return dueIso;
+  const daysUntilDue = (dueDay - todayDay) / 86400000;
+  if (daysUntilDue < 7) return todayIso;
+  const start = new Date(dueDay - 7 * 86400000);
+  return `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}-${String(start.getUTCDate()).padStart(2, "0")}`;
+}
+
 // Monday of the current week, at midnight local time.
 export function weekStart(today = new Date()) {
   const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -71,6 +85,7 @@ export function weekStart(today = new Date()) {
 export function toUiTask(t, monday = weekStart()) {
   const due = t.due_date ? new Date(`${t.due_date}T00:00:00`) : null;
   const day = due ? Math.round((due - monday) / 86400000) : -1; // 0 = Monday of this week
+  const startIso = t.start_date || defaultTaskStartDate(t.due_date);
   const ownerCode = t.current_assignee_code ?? t.owner_code ?? null;
   const originalAssigneeCode = t.original_assignee_code ?? t.initial_assignee_code ?? t.owner_code ?? null;
   return {
@@ -80,8 +95,8 @@ export function toUiTask(t, monday = weekStart()) {
     originalAssigneeCode,
     title: t.title,
     assigned: usDate(t.created_at?.slice(0, 10)),
-    start: usDate(t.start_date || t.due_date) || "—",
-    startIso: t.start_date || null,
+    start: usDate(startIso) || "—",
+    startIso,
     dueTime: t.due_time?.slice(0, 5) || '',
     due: usDate(t.due_date) || t.deadline_text || "No date",
     dueIso: t.due_date,
@@ -168,6 +183,12 @@ export async function getCurrentUser(signal) {
 }
 
 export async function getDependencies() { return (await request('/dashboard/dependencies')).data; }
+export async function saveTaskDependencies(edges) {
+  return (await request('/tasks/records/dependencies', {
+    method: 'POST',
+    body: JSON.stringify({ edges: edges.map(({ task_id, depends_on_id }) => ({ task_id, depends_on_id })) }),
+  })).data;
+}
 export async function saveTaskNotes(id, notes) {
   return (await request(`/tasks/records/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ notes }) })).data;
 }
