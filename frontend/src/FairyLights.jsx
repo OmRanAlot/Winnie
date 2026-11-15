@@ -31,7 +31,7 @@ export default function FairyLights() {
   return (
     <div className="fairy-lights" aria-hidden="true">
       <style>{`
-        .fairy-lights{position:absolute;top:0;left:0;width:100%;height:92px;overflow:hidden;pointer-events:none;z-index:4}
+        .fairy-lights{position:absolute;top:0;left:50%;width:100vw;height:92px;overflow:hidden;pointer-events:none;z-index:4;transform:translateX(-50%)}
         .fairy-lights svg{display:block;overflow:visible}
         .fl-glow{animation:flGlow 3.2s ease-in-out infinite alternate}
         @keyframes flGlow{from{opacity:.18}to{opacity:.62}}
