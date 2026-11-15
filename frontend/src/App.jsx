@@ -612,9 +612,10 @@ export default function App({ profile, admin, signOut }) {
   useEffect(() => {
     const reload = () => { if (!refreshInFlight.current) refresh().catch(() => {}); };
     reload();
-    const timer = setInterval(reload, 15000);
+    const timer = typeof document === "undefined" ? null : setInterval(reload, 15000);
+    timer?.unref?.();
     window.addEventListener("focus", reload);
-    return () => { ++refreshVersion.current; clearInterval(timer); window.removeEventListener("focus", reload); };
+    return () => { ++refreshVersion.current; if (timer) clearInterval(timer); window.removeEventListener("focus", reload); };
   }, [refresh]);
   useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
   const sendRequest = async () => {
