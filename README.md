@@ -56,33 +56,27 @@ in `backend/app/services/<feature>.py`, a call to an outside system in
 
 ## Run locally
 
-Prerequisites: [uv](https://docs.astral.sh/uv/) (installs Python 3.13 for you), Node.js 22.12+ with npm, and [Docker Desktop](https://www.docker.com/products/docker-desktop/) (only for the local database). Commands below use PowerShell, starting in the repository root. On macOS/Linux, use `cp` instead of `Copy-Item` and `cd` instead of `Set-Location`.
+Prerequisites: [uv](https://docs.astral.sh/uv/) (installs Python 3.13 for you) and Node.js 22.12+ with npm. Commands below use PowerShell, starting in the repository root. On macOS/Linux, use `cp` instead of `Copy-Item` and `cd` instead of `Set-Location`.
 
-### Local mode (recommended)
+### Local mode
 
-`WINNIE_MODE` is `local` for any local testing and `prod` for deployments (the default). Local mode reads gitignored `.env.local` files that are never built into the Cloud Run image or the Firebase bundle, and the backend refuses to start if `SUPABASE_URL` points anywhere but your machine, so nothing you do on localhost can touch the deployed database.
+`WINNIE_MODE` is `local` for any local testing and `prod` for deployments (the default when unset). Local mode reads gitignored `.env.local` files, which are never built into the Cloud Run image or the Firebase bundle, and `npm run dev:local` reads a Vite mode file that `vite build` never touches. Your deployed services only ever get their config from Cloud Run env vars and Secret Manager, so running locally does not change them.
 
-1. **Start the local database** (Docker must be running; migrations in `supabase/migrations/` are applied automatically):
+Supabase is the hosted API in both modes: your existing `backend/.env` keeps supplying `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `GEMINI_API_KEY`. No Docker or local database is needed. Note that localhost therefore reads and writes the same Supabase project as the deployed app; point `.env.local` at a separate dev project if you want isolated data.
 
-   ```powershell
-   npm install                  # once, at the repo root: installs the Supabase CLI
-   npx supabase start
-   npx supabase status -o env   # prints the API URL plus the publishable (anon) and secret (service-role) keys
-   ```
-
-2. **Configure the backend.** Copy the template, then paste the secret (service-role) key into `SUPABASE_SECRET_KEY`. `WINNIE_MODE=local` and `SUPABASE_URL=http://127.0.0.1:54321` are already set. Optionally add your own `GEMINI_API_KEY` for task assignment.
+1. **Configure the backend.** Copy the template. It only sets `WINNIE_MODE=local`, debug logging and CORS; do not leave any variable blank in it, because a blank value overrides the real one from `.env`.
 
    ```powershell
    Copy-Item .env.local.example .env.local
    ```
 
-3. **Configure the frontend.** Copy the template, then paste the publishable (anon) key into `VITE_SUPABASE_PUBLISHABLE_KEY`.
+2. **Configure the frontend.** Copy the template, then fill in the Supabase URL and publishable key (the same values as in `frontend/.env`).
 
    ```powershell
    Copy-Item frontend/.env.localdev.example frontend/.env.localdev
    ```
 
-4. **Run the backend**, terminal 1:
+3. **Run the backend**, terminal 1:
 
    ```powershell
    Set-Location backend
@@ -90,7 +84,7 @@ Prerequisites: [uv](https://docs.astral.sh/uv/) (installs Python 3.13 for you), 
    uv run fastapi dev app/main.py
    ```
 
-5. **Run the frontend**, terminal 2:
+4. **Run the frontend**, terminal 2:
 
    ```powershell
    Set-Location frontend
@@ -98,13 +92,13 @@ Prerequisites: [uv](https://docs.astral.sh/uv/) (installs Python 3.13 for you), 
    npm run dev:local
    ```
 
-Open [the dashboard](http://localhost:5173) and [the API docs](http://localhost:8000/docs). The dashboard reaches the backend through Vite's `/api` proxy to port 8000. The backend's startup log shows `mode=local`; if it says `mode=prod`, your `.env.local` was not picked up. Stop the database with `npx supabase stop`.
+Open [the dashboard](http://localhost:5173) and [the API docs](http://localhost:8000/docs). The dashboard reaches the backend through Vite's `/api` proxy to port 8000. The backend's startup log must show `mode=local`; if it says `mode=prod`, `.env.local` was not picked up (it belongs in the repository root, next to `.env.example`).
 
-The messaging sidecar (`messaging/`) is optional. To use it locally, set the same `MESSAGING_BRIDGE_SECRET` in `messaging/.env` as `WINNIE_MESSAGING_BRIDGE_SECRET` in `.env.local`, then run `npm install; npm run dev` there.
+The messaging sidecar (`messaging/`) is optional. Its `MESSAGING_BRIDGE_SECRET` in `messaging/.env` must match `WINNIE_MESSAGING_BRIDGE_SECRET` in your backend env; then run `npm install; npm run dev` there.
 
 ### Quick start without a database
 
-If you only want the UI and API shell, skip Docker and Supabase. Task endpoints will return 503, but `/api/health` and the docs work:
+If you only want the UI and API shell, skip Supabase. Task endpoints will return 503, but `/api/health` and the docs work:
 
 ```powershell
 Copy-Item .env.example .env

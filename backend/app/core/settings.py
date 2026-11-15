@@ -8,12 +8,10 @@ Planned settings for the integrations are listed in app/__init__.py.
 
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "host.docker.internal"})
 REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/core/settings.py -> repo root
 
 
@@ -21,7 +19,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="WINNIE_",
         # backend/.env.example says to copy it to backend/.env, so read that too.
-        env_file=(REPO_ROOT / ".env", REPO_ROOT / "backend" / ".env"),
+        # Later files win: the .env.local files are the "local mode" overrides (WINNIE_MODE=local).
+        # They are gitignored and excluded from the Docker / gcloud builds (.env.*), so they
+        # can never reach a deployment.
+        env_file=(
+            REPO_ROOT / ".env",
+            REPO_ROOT / "backend" / ".env",
+            REPO_ROOT / ".env.local",
+            REPO_ROOT / "backend" / ".env.local",
+        ),
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
@@ -34,9 +40,6 @@ class Settings(BaseSettings):
     # "prod" for deployments. Defaults to "prod" so a deploy that sets nothing is safe.
     mode: Literal["local", "prod"] = "prod"
     environment: str = "development"
-    # In local mode the backend refuses a non-local Supabase URL so a stray hosted key in
-    # .env can't make localhost write to the deployed database. Set true to opt out.
-    allow_remote_in_local: bool = False
     log_level: str = "INFO"  # WINNIE_LOG_LEVEL=DEBUG for more detail
     cors_origins: list[str] = ["http://localhost:5173"]
 
@@ -84,14 +87,3 @@ class Settings(BaseSettings):
     def is_local(self) -> bool:
         return self.mode == "local"
 
-    def check_local_isolation(self) -> None:
-        """In local mode, raise if Supabase points anywhere but this machine."""
-        if not self.is_local or self.allow_remote_in_local or not self.supabase_url:
-            return
-        host = urlparse(self.supabase_url).hostname or ""
-        if host not in LOCAL_HOSTS:
-            raise RuntimeError(
-                f"WINNIE_MODE=local but SUPABASE_URL host is '{host}', not local. "
-                "Point it at `supabase start` (http://127.0.0.1:54321) in .env.local, or set "
-                "WINNIE_ALLOW_REMOTE_IN_LOCAL=true if you really want a remote database."
-            )
