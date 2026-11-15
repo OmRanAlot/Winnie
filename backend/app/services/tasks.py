@@ -141,6 +141,13 @@ class TaskStore:
             raise TaskNotFound
         return result.data[0]
 
+    def get_many(self, task_ids):
+        """One bounded read to re-authorize remembered task references."""
+        ids = list({str(value) for value in task_ids})
+        if len(ids) > 100:
+            raise ValueError("Too many remembered tasks")
+        return self._execute(lambda table: table.select("*").in_("id", ids)).data if ids else []
+
     def update(self, task_id: UUID, changes: TaskUpdate):
         result = self._execute(
             lambda table: table.update(changes.model_dump(mode="json", exclude_unset=True)).eq(

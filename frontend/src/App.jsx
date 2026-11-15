@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { getAssignments, getCandidates, getEventLabels, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
-import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan } from "./lib/eventPlans.js";
+import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan, reviewEventPlan } from "./lib/eventPlans.js";
 import Recorder from "./Recorder.jsx";
 import PlanLoading from "./PlanLoading.jsx";
 import Attendance from "./Attendance.jsx";
@@ -768,6 +768,10 @@ export default function App({ profile, admin, signOut }) {
         questions: saved.questions ?? [],
         warnings: saved.warnings ?? [],
         planMode: saved.plan_mode ?? "",
+        revision: saved.revision,
+        savedStatus: saved.status,
+        reviewNote: saved.review_note,
+        dirty: false,
       }, saved.id);
     } catch (e) { setEventPlansError(e.message); }
     finally { setOpeningEventPlanId(null); }
@@ -792,13 +796,29 @@ export default function App({ profile, admin, signOut }) {
     setSavingEventPlan(true);
     setEventPlanError("");
     try {
-      if (p.eventPlanId) await updateEventPlan(p.eventPlanId, payload);
+      if (p.eventPlanId) await updateEventPlan(p.eventPlanId, payload, eventPlanForm.revision);
       else await createEventPlan(payload);
       say(p.eventPlanId ? "Event plan updated." : "Event plan saved.");
       back();
     } catch (e) { setEventPlanError(e.message); }
     finally { setSavingEventPlan(false); }
   };
+  const decideEventPlan = async (decision) => {
+    if (savingEventPlan || !p.eventPlanId || eventPlanForm.dirty || eventPlanForm.savedStatus !== 'draft') return;
+    if (decision === 'approved' && (!eventPlanForm.tasks.length || eventPlanForm.tasks.some(t => !t.owner_code || !t.due_date))) return;
+    setSavingEventPlan(true); setEventPlanError('');
+    try {
+      const saved = await reviewEventPlan(p.eventPlanId, eventPlanForm.revision, decision);
+      say(saved.notification_warning || (decision === 'approved' ? 'Event plan approved. Tasks created.' : 'Event plan rejected. No tasks created.'));
+      await Promise.allSettled([refresh(), reloadEventPlans()]);
+      back();
+    } catch (e) { setEventPlanError(e.message); }
+    finally { setSavingEventPlan(false); }
+  };
+  const editEventPlan = (changes) => setEventPlanForm(current => ({ ...current, ...changes, dirty: true }));
+  const editPlanTask = (id, changes) => editEventPlan({
+    tasks: eventPlanForm.tasks.map(t => t.id === id ? { ...t, ...changes } : t),
+  });
   const saveNotes = async (t) => {
     if (!canEditTask(t)) return;
     if (noteSaving) return;
@@ -1053,12 +1073,12 @@ export default function App({ profile, admin, signOut }) {
         </div>
         <section className="panel" style={{ maxWidth: 920, margin: "var(--s5) auto 0" }}>
           <h2>Saved Event Plans</h2>
-          <p style={{ color: "var(--muted)" }}>Saved event plans stay in this browser and are not shared across devices.</p>
+          <p style={{ color: "var(--muted)" }}>Plans are shared with administrators. Saving keeps a draft; approval creates assigned tasks.</p>
           {eventPlansError && <p role="alert">{eventPlansError} <button type="button" className="btn alt" onClick={reloadEventPlans}>Retry</button></p>}
           {eventPlansLoading ? <p role="status">Loading saved event plans…</p> : eventPlans.length
             ? eventPlans.map((item) => <div className="due" key={item.id}>
               <span style={{ flex: 1 }}><b>{item.event_name}</b><small style={{ display: "block" }}>
-                {item.event_date}{item.event_time ? ` · ${item.event_time.slice(0, 5)}` : ""}
+                {item.event_date}{item.event_time ? ` · ${item.event_time.slice(0, 5)}` : ""} · {item.status || 'draft'} · revision {item.revision || 1}
               </small></span>
               <button className="btn alt" type="button" disabled={openingEventPlanId === item.id}
                 onClick={() => openSavedEventPlan(item)}>
@@ -1070,25 +1090,26 @@ export default function App({ profile, admin, signOut }) {
       break;
     case "eventPlan": {
       const planTasks = Array.isArray(eventPlanForm.tasks) ? eventPlanForm.tasks : [];
+      const planLocked = eventPlanForm.savedStatus === 'approved';
       const titleById = Object.fromEntries(planTasks.map((task) => [task.id, task.title]));
       page = (<><Top title={p.eventPlanId ? "Edit Event Plan" : p.generated ? "Review Event Plan" : "Enter Event Plan"} tag />
-        <div className="plan-task-form">
+        <fieldset className="plan-task-form" disabled={savingEventPlan} style={{border:0}}>
           <label className="wide">Event Name
-            <input className="field" maxLength={200} value={eventPlanForm.name}
-              onChange={(e) => setEventPlanForm({ ...eventPlanForm, name: e.target.value })} />
+            <input className="field" maxLength={200} value={eventPlanForm.name} readOnly={planLocked}
+              onChange={(e) => editEventPlan({ name: e.target.value })} />
           </label>
           <label className="wide">Event Description
-            <textarea className="field" maxLength={6000} rows={4} value={eventPlanForm.description}
-              onChange={(e) => setEventPlanForm({ ...eventPlanForm, description: e.target.value })} />
+            <textarea className="field" maxLength={6000} rows={4} value={eventPlanForm.description} readOnly={planLocked}
+              onChange={(e) => editEventPlan({ description: e.target.value })} />
           </label>
           <div className="wide plan-task-dates">
             <label>Date
-              <input className="field" type="date" value={eventPlanForm.date}
-                onChange={(e) => setEventPlanForm({ ...eventPlanForm, date: e.target.value })} />
+              <input className="field" type="date" value={eventPlanForm.date} readOnly={planLocked}
+                onChange={(e) => editEventPlan({ date: e.target.value })} />
             </label>
             <label>Time
-              <input className="field" type="time" value={eventPlanForm.time}
-                onChange={(e) => setEventPlanForm({ ...eventPlanForm, time: e.target.value })} />
+              <input className="field" type="time" value={eventPlanForm.time} readOnly={planLocked}
+                onChange={(e) => editEventPlan({ time: e.target.value })} />
             </label>
           </div>
           {planTasks.length ? <section className="panel wide">
@@ -1121,6 +1142,22 @@ export default function App({ profile, admin, signOut }) {
                     <span>{expanded ? "Collapse" : "Expand"}</span>
                   </button>
                   {expanded && <div className="event-plan-task-details" id={`event-plan-task-details-${index}`}>
+                    <label>Task title<input className="field" value={task.title} maxLength={200} readOnly={planLocked}
+                      onChange={e => editPlanTask(task.id, {title:e.target.value})} /></label>
+                    <label>Owner<select className="field" value={task.owner_code || ''} disabled={planLocked}
+                      onChange={e => editPlanTask(task.id, {owner_code:e.target.value || null})}>
+                      <option value="">Choose an owner</option>{PEOPLE.map(member => <option key={member.id} value={member.id}>{member.name} · {member.role}</option>)}
+                    </select></label>
+                    <label>Task deadline<input className="field" type="date" value={task.due_date || ''} readOnly={planLocked}
+                      onChange={e => editPlanTask(task.id, {due_date:e.target.value || null})} /></label>
+                    <label>Phase<select className="field" value={task.phase || 'before'} disabled={planLocked}
+                      onChange={e => editPlanTask(task.id, {phase:e.target.value})}>
+                      {['before','during','after'].map(value => <option key={value}>{value}</option>)}
+                    </select></label>
+                    <label>Depends on<select className="field" multiple value={task.dependency_ids || []} disabled={planLocked}
+                      onChange={e => editPlanTask(task.id, {dependency_ids:Array.from(e.target.selectedOptions, option => option.value)})}>
+                      {planTasks.filter(other => other.id !== task.id).map(other => <option key={other.id} value={other.id}>{other.title}</option>)}
+                    </select></label>
                     <dl className="event-plan-task-detail"><dt>Task ID</dt><dd>{task.id}</dd></dl>
                     <dl className="event-plan-task-detail"><dt>Task type</dt><dd>{kind}</dd></dl>
                     <dl className="event-plan-task-detail"><dt>Suggested role</dt><dd>{suggestedRole ? suggestedRoleLabel : "Not specified"}</dd></dl>
@@ -1142,17 +1179,29 @@ export default function App({ profile, admin, signOut }) {
                 </ul></div>}
               </div>}
           </section> : <label className="wide">Event Plan
-            <textarea className="field task-summary" maxLength={20000} rows={12} value={eventPlanForm.planText}
+            <textarea className="field task-summary" maxLength={20000} rows={12} value={eventPlanForm.planText} readOnly={planLocked}
               placeholder="Add the event outline, preparation steps, and details."
-              onChange={(e) => setEventPlanForm({ ...eventPlanForm, planText: e.target.value })} />
+              onChange={(e) => editEventPlan({ planText: e.target.value })} />
           </label>}
-        </div>
+          <button className="btn alt" type="button" disabled={planLocked} onClick={() => editEventPlan({tasks:[...planTasks, {
+            id:crypto.randomUUID(),title:'New task',rationale:'Added during administrator review.',
+            owner_code:null,due_date:eventPlanForm.date || null,phase:'before',dependency_ids:[],evidence_ids:[],
+          }]})}>Add task to plan</button>
+        </fieldset>
+        {p.eventPlanId && <p role="status">Status: {eventPlanForm.savedStatus || 'draft'} · revision {eventPlanForm.revision}.
+          {eventPlanForm.savedStatus === 'approved' ? ' Approved plans are locked; their tasks are on the board.' : ' Save changes and reopen the plan before reviewing its saved revision.'}</p>}
         {eventPlanError && <p className="plan-error" role="alert">{eventPlanError}</p>}
         <div className="plan-task-actions">
           <button className="btn alt" type="button" disabled={savingEventPlan} onClick={back}>Cancel</button>
-          <button className="btn" type="button" disabled={savingEventPlan} onClick={saveEventPlan}>
+          <button className="btn" type="button" disabled={savingEventPlan || eventPlanForm.savedStatus === 'approved'} onClick={saveEventPlan}>
             {savingEventPlan ? "Saving…" : p.eventPlanId ? "Update Event Plan" : "Save Event Plan"}
           </button>
+          {p.eventPlanId && eventPlanForm.savedStatus === 'draft' && <>
+            <button className="btn" disabled={savingEventPlan || eventPlanForm.dirty || !planTasks.length || planTasks.some(t => !t.owner_code || !t.due_date)}
+              onClick={() => decideEventPlan('approved')}>Approve and create tasks</button>
+            <button className="btn alt" disabled={savingEventPlan || eventPlanForm.dirty}
+              onClick={() => decideEventPlan('rejected')}>Reject plan</button>
+          </>}
         </div></>);
       break;
     }

@@ -136,6 +136,22 @@ def test_clear_statement_completes_one_owned_task_and_replies_from_committed_res
     assert {task["id"] for task in flow.interpreter.calls[0][1]} == {A, B}
 
 
+@pytest.mark.parametrize("direct", [False, True])
+def test_approved_plan_owner_does_not_require_a_display_name_alias(flow, direct):
+    flow.tasks.rows[A].update(owner_code="ONE", assignee_text="Reviewed plan owner name")
+    msg = message("done WIN-202610-1") if direct else message()
+    assert flow.run(msg) == "Marked WIN-202610-1 done."
+    assert flow.completions.writes == 1
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_explicit_owner_prevents_a_stale_name_alias_authorizing_completion(flow, direct):
+    flow.tasks.rows[A]["owner_code"] = "TWO"
+    msg = message("done WIN-202610-1") if direct else message()
+    flow.run(msg)
+    assert flow.completions.writes == 0
+
+
 @pytest.mark.parametrize("text", [
     "I haven't finished booking the room.", "The room isn't done.", "I'm almost done booking the room.",
     "I will finish booking the room.", "If I finished booking the room, what next?",

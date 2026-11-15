@@ -183,3 +183,26 @@ def test_registration_requires_deployed_route_and_saves_secret_without_exposing_
     with httpx.Client(transport=httpx.MockTransport(lambda r:(seen.append(r.method) or httpx.Response(404)))) as client, pytest.raises(ValueError,match='Deploy the updated backend'):
         photon_webhook.register('https://example.com/api/photon/webhook',session=client)
     assert seen==['GET']
+
+
+@pytest.mark.parametrize('failed', [False, True])
+async def test_plan_notifications_dispatch_without_help_workflow_and_record_outcome(monkeypatch, failed):
+    from app.routes import photon
+
+    monkeypatch.setenv('WINNIE_HELP_WORKFLOW_ENABLED', 'false')
+    calls, notices = [], [{'id': 'notice', 'claim_token': 'token', 'text': 'Assignment', 'recipient': '+15555550123'}]
+
+    def rpc(name, **values):
+        calls.append((name, values))
+        if name == 'claim_event_plan_notification':
+            return notices.pop() if notices else None
+        return values.get('p_outcome')
+
+    monkeypatch.setattr(photon, 'HelpRequestStore', lambda: SimpleNamespace(rpc=rpc))
+    sender = SimpleNamespace(send=AsyncMock(return_value='provider', side_effect=PhotonUnavailable() if failed else None))
+    assert await photon.dispatch_notifications(sender) is False
+    assert not any(name == 'claim_reassignment_notification' for name, _ in calls)
+    result = next(values for name, values in calls if name == 'finish_event_plan_notification')
+    assert result['p_outcome'] == ('uncertain' if failed else 'sent')
+    assert result['p_provider_id'] == (None if failed else 'provider')
+    sender.send.assert_awaited_once()
