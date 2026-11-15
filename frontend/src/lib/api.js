@@ -248,9 +248,15 @@ export async function saveRecording(recording) {
 }
 
 // Ask the backend (Gemini) to pull tasks out of a saved recording's transcript.
-export async function assignRecordingTasks(id) {
+export async function assignRecordingTasks(id, recording) {
   const body = await request(`/recordings/${encodeURIComponent(id)}/assignments`, {
-    method: "POST", signal: AbortSignal.timeout(200000),
+    method: "POST",
+    body: JSON.stringify({
+      title: recording.title,
+      startedAt: recording.startedAt,
+      transcription: recording.transcription,
+    }),
+    signal: AbortSignal.timeout(200000),
   });
   return body.data.assignments; // [{title, description, seat, assignee, deadline, rationale, needs_review}]
 }
