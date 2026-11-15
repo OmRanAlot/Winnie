@@ -75,6 +75,10 @@ class MemoryState(TypedDict, total=False):
     turns: list[dict]
     turn: dict | None
     focus_task_id: str | None
+    pending_intent: str | None
+    question_task_ids: list[str]
+    awaiting_answer: bool
+    pending_help_no: int | None
 
 
 def memory_graph(saver, max_turns):

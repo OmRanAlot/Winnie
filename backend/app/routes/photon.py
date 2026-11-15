@@ -62,6 +62,7 @@ Reassignments = Annotated[object, Depends(get_reassignment_store)]
 def webhook_status():
     s = Settings()
     return {'integration': 'winnie-photon-spectrum', 'enabled': s.photon_enabled,
+        'conversation_memory_enabled': s.message_memory_enabled, 'conversation_protocol': 2,
         'configured': bool(s.photon_webhook_secret.get_secret_value() and s.photon_webhook_id
             and s.photon_queue and s.photon_task_url and s.photon_project_id and s.photon_project_secret.get_secret_value())}
 
