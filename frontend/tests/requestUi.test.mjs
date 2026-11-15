@@ -162,4 +162,3 @@ test('nudge control is admin-only and never claims a reminder was sent', async (
     delete globalThis.window;
   }
 });
-});
