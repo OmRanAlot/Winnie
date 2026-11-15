@@ -43,6 +43,8 @@ const compareByDueDate = (a, b) => {
 };
 // Live tasks have no member link yet: fall back to the tracker's assignee cell.
 const who = (t) => person(t.assignee) ?? { id: null, name: t.assigneeText ? t.assigneeText.split("\n")[0] : "Unassigned" };
+const normalizeRole = (role) => String(role ?? "").trim().toLowerCase()
+  .replace(/\bpartnerships\b/g, "partnership").replace(/\s+/g, " ");
 
 /* ---------- Styles (palette pulled from the logo) ---------- */
 export const CSS = `
@@ -219,12 +221,14 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .create-task-grid .panel{min-width:0}
 .create-task-fields{display:grid;grid-template-columns:1fr;gap:var(--s3)}
 .task-summary{min-height:260px;resize:vertical}
-.event-plan-task-list{display:flex;flex-direction:column;gap:var(--s3);max-height:480px;overflow-y:auto;padding:4px}
-.event-plan-task-card{overflow:hidden;border:1px solid var(--line);border-radius:var(--r);background:#f9f4ee}
+.event-plan-task-list{display:flex;flex-direction:column;gap:var(--s4);max-height:520px;overflow-y:auto;padding:8px}
+.event-plan-task-card{flex:0 0 auto;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#fffaf5;box-shadow:0 3px 8px rgba(58,20,16,.08)}
 .event-plan-task-toggle{display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:var(--s3);padding:var(--s4);border:0;background:transparent;color:var(--ink);text-align:left;font:inherit}
+.event-plan-task-toggle>span:first-child{min-width:0}
 .event-plan-task-title{display:block;font-weight:700}
 .event-plan-task-meta{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s2);color:var(--muted);font-size:14px}
 .event-plan-task-meta span{padding:2px var(--s2);border-radius:999px;background:var(--surface)}
+.event-plan-task-meta .event-plan-task-assignment{color:var(--ink);font-weight:650}
 .event-plan-task-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3);padding:var(--s4);border-top:1px solid var(--line)}
 .event-plan-task-detail dt{font-weight:700}
 .event-plan-task-detail dd{margin:2px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
@@ -470,6 +474,7 @@ export default function App({ profile, admin, signOut }) {
   const refreshVersion = useRef(0);
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
+  const [eventPlanError, setEventPlanError] = useState("");
   const [expandedEventTaskId, setExpandedEventTaskId] = useState(null);
   const [eventPlans, setEventPlans] = useState([]);
   const [eventPlansLoading, setEventPlansLoading] = useState(false);
@@ -995,6 +1000,13 @@ export default function App({ profile, admin, signOut }) {
                 const expanded = expandedEventTaskId === task.id;
                 const dependencies = (task.dependency_ids ?? []).map((id) => titleById[id] ?? id);
                 const kind = (task.kind || "general").replace(/_/g, " ");
+                const suggestedRole = task.suggested_role?.trim();
+                const roleMembers = suggestedRole
+                  ? PEOPLE.filter((member) => normalizeRole(member.role) === normalizeRole(suggestedRole))
+                  : [];
+                const suggestedRoleLabel = roleMembers.length
+                  ? `${roleMembers[0].role}: ${roleMembers.map((member) => member.name).join(", ")}`
+                  : suggestedRole || "Role not specified";
                 return <article className="event-plan-task-card" key={task.id}>
                   <button className="event-plan-task-toggle" type="button" aria-expanded={expanded}
                     aria-controls={`event-plan-task-details-${index}`}
@@ -1003,8 +1015,7 @@ export default function App({ profile, admin, signOut }) {
                       <span className="event-plan-task-title">{index + 1}. {task.title}</span>
                       <span className="event-plan-task-meta">
                         <span>{task.due_date ? `Due ${task.due_date}` : "No date proposed"}</span>
-                        <span>{task.suggested_role || "Role not specified"}</span>
-                        <span>{task.phase || "Phase not specified"}</span>
+                        <span className="event-plan-task-assignment">{suggestedRoleLabel}</span>
                       </span>
                     </span>
                     <span>{expanded ? "Collapse" : "Expand"}</span>
@@ -1012,8 +1023,7 @@ export default function App({ profile, admin, signOut }) {
                   {expanded && <div className="event-plan-task-details" id={`event-plan-task-details-${index}`}>
                     <dl className="event-plan-task-detail"><dt>Task ID</dt><dd>{task.id}</dd></dl>
                     <dl className="event-plan-task-detail"><dt>Task type</dt><dd>{kind}</dd></dl>
-                    <dl className="event-plan-task-detail"><dt>Suggested role</dt><dd>{task.suggested_role || "Not specified"}</dd></dl>
-                    <dl className="event-plan-task-detail"><dt>Phase</dt><dd>{task.phase || "Not specified"}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Suggested role</dt><dd>{suggestedRole ? suggestedRoleLabel : "Not specified"}</dd></dl>
                     <dl className="event-plan-task-detail"><dt>Due date</dt><dd>{task.due_date || "No date proposed"}</dd></dl>
                     <dl className="event-plan-task-detail wide"><dt>Rationale</dt><dd>{task.rationale || "No rationale provided."}</dd></dl>
                     <dl className="event-plan-task-detail wide"><dt>Dependencies</dt><dd>{dependencies.length ? dependencies.join(", ") : "None"}</dd></dl>
