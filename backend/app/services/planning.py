@@ -47,7 +47,19 @@ async def create_draft(request: PlanningRequest, *, knowledge_path: Path,
     logger.info("draft start mode=%s timeout=%.0fs", mode, timeout)
     started = time.perf_counter()
     try:
-        examples, warnings = load_examples(knowledge_path, request)
+        try:
+            examples, warnings = load_examples(knowledge_path, request)
+        except FileNotFoundError:
+            # Private history is not shipped with a fresh checkout. AI planning
+            # can use the idea alone, but the offline historical checklist cannot.
+            if mode != "deepagents":
+                raise
+            examples = []
+            warnings = [
+                ("Historical planning context is not available. This plan is based only on "
+                 "your event idea; tasks, roles and dates are inferred and require review."),
+            ]
+            logger.warning("draft historical context missing; planning from the event idea only")
         logger.info("draft loaded %d historical example event(s)", len(examples))
         if mode == "mock":
             contents = mock_plan(request, examples)

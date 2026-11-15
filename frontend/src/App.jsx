@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { getAssignments, getCandidates, getEventLabels, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
+import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan } from "./lib/eventPlans.js";
 import Recorder from "./Recorder.jsx";
+import PlanLoading from "./PlanLoading.jsx";
 import Attendance from "./Attendance.jsx";
 import SheetSync from "./SheetSync.jsx";
 import HelpReview from "./HelpReview.jsx";
@@ -11,14 +13,18 @@ import { supabase } from "./lib/supabase.js";
 import { dispatchPhotonNotifications } from "./lib/api.js";
 import { reassignmentStore } from "./lib/reassignments.js";
 import { orderProfiles } from "./lib/profileOrder.js";
+import { PIXEL_ARROW_CURSOR, PIXEL_HAND_CURSOR, CUTE_CSS } from "./lib/pixelCursor.js";
+import CursorFx from "./lib/CursorFx.jsx";
 const requestsStore = reassignmentStore(supabase, { notify: dispatchPhotonNotifications });
 
 // All board records come from the backend. No sample data fallback.
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
 const REASSIGNED_COLOR = "#f3ebe2";
-const EMPTY_PLAN_INPUT = { name: "", description: "", startDate: "", dueDate: "", time: "" };
-const EMPTY_TASK_FORM = { title: "", description: "", startDate: "", dueDate: "", time: "", priority: "normal", summary: "", ownerCode: "" };
+const EMPTY_EVENT_INPUT = { name: "", description: "", date: "", time: "" };
+const EMPTY_EVENT_PLAN = {
+  ...EMPTY_EVENT_INPUT, planText: "", tasks: [], questions: [], warnings: [], planMode: "",
+};
 // Shared display helpers resolve only the currently loaded board records.
 let currentPeople = [];
 let currentTasks = [];
@@ -41,13 +47,18 @@ const compareByDueDate = (a, b) => {
 };
 // Live tasks have no member link yet: fall back to the tracker's assignee cell.
 const who = (t) => person(t.assignee) ?? { id: null, name: t.assigneeText ? t.assigneeText.split("\n")[0] : "Unassigned" };
+const normalizeRole = (role) => String(role ?? "").trim().toLowerCase()
+  .replace(/\bpartnerships\b/g, "partnership").replace(/\s+/g, " ");
 
 /* ---------- Styles (palette pulled from the logo) ---------- */
 export const CSS = `
 :root{--ink:#3a1410;--maroon:#5a0d05;--rust:#b5472a;--paper:#f3ebe2;--surface:#eadfd2;--hover:#e0d0bf;--line:#d6c4b2;--muted:#7a6459;--sun:#e0b25a;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--r:6px;--frame-band:clamp(12px,6.6vw,96px)}
 html{scrollbar-gutter:stable both-edges}
 *{box-sizing:border-box}
-body{margin:0;background:var(--maroon);color:var(--ink);font-family:"Kabel","Josefin Sans","Hanken Grotesk","Segoe UI",system-ui,sans-serif;font-size:16px;line-height:1.5}
+body{margin:0;background:var(--maroon);color:var(--ink);font-family:"Kabel","Josefin Sans","Hanken Grotesk","Segoe UI",system-ui,sans-serif;font-size:16px;line-height:1.5;cursor:${PIXEL_ARROW_CURSOR}}
+.app{cursor:${PIXEL_ARROW_CURSOR}}
+button:not(:disabled),a[href],select,[role="button"],.gr,.tog,.sum .pill,[style*="cursor"]{cursor:${PIXEL_HAND_CURSOR}}
+button:disabled,[aria-disabled="true"]{cursor:${PIXEL_ARROW_CURSOR}}
 a{color:var(--maroon)}
 a:hover{color:var(--rust)}
 h1,h2,h3,h4,.big{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif;letter-spacing:.07em}
@@ -70,7 +81,7 @@ button{font-family:inherit}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
 .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s4);padding-bottom:var(--s6)}
 .center h2{font-size:40px;margin:0;font-weight:700;letter-spacing:.07em;border-bottom:2px solid var(--ink);padding:0 var(--s6) var(--s3);width:min(640px,100%);text-align:center}
-.logo{width:132px;height:132px;object-fit:contain}
+.logo{width:297px;height:297px;object-fit:contain}
 .form{display:grid;grid-template-columns:auto 280px;gap:var(--s3) var(--s4);align-items:center;text-align:right;font-weight:600}
 .field{border:1px solid var(--line);background:#f9f4ee;border-radius:var(--r);padding:var(--s3) var(--s4);font-size:16px;color:var(--ink);font-family:inherit;width:100%}
 textarea.field{min-height:110px;resize:vertical}
@@ -85,7 +96,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .avatar{width:52px;height:52px;border-radius:50%;background:#f0c9b3;border:2px solid var(--maroon);box-shadow:2px 2px 0 var(--maroon);display:grid;place-items:center;font-weight:700;color:var(--maroon);flex:none;cursor:pointer;padding:0;font-size:16px}
 .avatar:hover{background:var(--sun)}
 .avatar.sm{width:40px;height:40px;font-size:13px}
-.avatar.lg{width:104px;height:104px;font-size:34px;cursor:default;box-shadow:4px 4px 0 var(--maroon)}
+.avatar.lg{width:104px;height:104px;font-size:34px;cursor:${PIXEL_ARROW_CURSOR};box-shadow:4px 4px 0 var(--maroon)}
 .id{display:flex;gap:var(--s5);align-items:center;margin-bottom:var(--s4)}
 .id h2{margin:0;font-size:32px;font-weight:700;border-bottom:2px solid var(--ink);padding-bottom:var(--s2);flex:1;max-width:640px}
 .id p{margin:var(--s2) 0 0;font-size:18px;color:var(--muted)}
@@ -209,15 +220,48 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .plan-task-form{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4);max-width:920px;margin:0 auto;width:100%}
 .plan-task-form .wide{grid-column:1/-1}
 .plan-task-form label,.create-task-grid label{display:flex;flex-direction:column;gap:var(--s2);font-weight:600}
-.plan-task-dates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+.plan-task-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4)}
 .plan-task-actions,.create-task-actions{display:flex;justify-content:center;align-items:center;gap:var(--s3);flex-wrap:wrap;margin:var(--s5) auto 0}
 .create-task-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:var(--s5)}
 .create-task-grid .panel{min-width:0}
 .create-task-fields{display:grid;grid-template-columns:1fr;gap:var(--s3)}
 .task-summary{min-height:260px;resize:vertical}
+.event-plan-task-list{display:flex;flex-direction:column;gap:var(--s4);max-height:520px;overflow-y:auto;padding:8px}
+.event-plan-task-card{flex:0 0 auto;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#fffaf5;box-shadow:0 3px 8px rgba(58,20,16,.08)}
+.event-plan-task-toggle{display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:var(--s3);padding:var(--s4);border:0;background:transparent;color:var(--ink);text-align:left;font:inherit}
+.event-plan-task-toggle>span:first-child{min-width:0}
+.event-plan-task-title{display:block;font-weight:700}
+.event-plan-task-meta{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s2);color:var(--muted);font-size:14px}
+.event-plan-task-meta span{padding:2px var(--s2);border-radius:999px;background:var(--surface)}
+.event-plan-task-meta .event-plan-task-assignment{color:var(--ink);font-weight:650}
+.event-plan-task-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3);padding:var(--s4);border-top:1px solid var(--line)}
+.event-plan-task-detail dt{font-weight:700}
+.event-plan-task-detail dd{margin:2px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.event-plan-task-detail.wide{grid-column:1/-1}
+.event-plan-review-notes{display:grid;gap:var(--s3);margin-top:var(--s4)}
+.event-plan-review-notes ul{margin:var(--s2) 0 0;padding-left:var(--s5)}
 .plan-error{max-width:920px;margin:var(--s4) auto 0;padding:var(--s3) var(--s4);background:#f4e3d7;border:1px solid var(--rust);border-radius:var(--r);color:var(--maroon);font-weight:600}
+.plan-loading{max-width:920px;margin:var(--s4) auto;display:flex;align-items:center;gap:20px;padding:22px;border:1px solid #dbc5ae;border-radius:18px;background:linear-gradient(120deg,#fffaf0,#f4e8d9);box-shadow:0 6px 24px #3a14100a;color:var(--maroon)}
+.plan-loading-paper{position:relative;flex-shrink:0;width:56px;padding:12px 8px;border:1px solid #d5bba0;border-radius:8px;background:#fffdf7;transform:rotate(-5deg);animation:plan-float 2.8s ease-in-out infinite}
+.plan-loading-paper>span{position:absolute;right:-9px;top:-14px;font-size:27px;color:var(--rust)}
+.plan-loading-paper i{display:flex;align-items:center;gap:5px;margin:8px 0;animation:plan-line 1.8s ease-in-out infinite;animation-delay:calc(var(--row) * .25s)}
+.plan-loading-paper b{width:8px;height:8px;border:1.5px solid var(--rust);border-radius:2px}
+.plan-loading-paper em{height:4px;flex:1;background:#bba18a;border-radius:4px}
+.plan-loading-copy{flex:1;min-width:0}.plan-loading-copy strong{font-size:18px}.plan-loading-copy p{margin:7px 0;color:var(--muted);font-size:14px}.plan-loading-copy small{font-size:12px;color:var(--muted)}
+.plan-loading-time{font-size:12px;font-variant-numeric:tabular-nums;align-self:flex-start;white-space:nowrap}
+@keyframes plan-float{50%{transform:translateY(-5px) rotate(3deg)}}
+@keyframes plan-line{50%{opacity:.3;transform:translateX(2px)}}
+@media(max-width:520px){.plan-loading{gap:12px;padding:16px}.plan-loading-paper{width:40px}.plan-loading-copy strong{font-size:16px}}
 .dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 510px);pointer-events:none}
-@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.app button:not(:disabled),.app .avatar,.app .chart-member rect{transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease,filter .16s ease}
+@media(hover:hover){
+  .app button:not(:disabled):hover:not(.back):not(.avatar):not(.bell):not(.chev):not(.rb){transform:translateY(-1px);box-shadow:0 4px 10px rgba(58,20,16,.1)}
+  .app .avatar:not(.lg):hover{transform:translateY(-2px) rotate(-3deg)}
+  .app .back:hover{transform:translateX(-2px)}
+  .app .chart-member:hover rect{filter:brightness(1.07)}
+}
+.app button:not(:disabled):active{transform:translateY(1px) scale(.98)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 @media(max-width:800px){
   .app{padding:var(--s4)}
   .nav{margin:0 calc(var(--s4) * -1);padding:var(--s3) var(--s4);gap:var(--s2)}
@@ -248,7 +292,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .adm{min-width:0;font-size:11px}
   .back{width:38px;height:38px}
   .center h2{font-size:clamp(24px,8vw,34px);padding-right:var(--s3);padding-left:var(--s3)}
-  .logo{width:104px;height:104px}
+  .logo{width:234px;height:234px}
   .form{grid-template-columns:minmax(0,1fr);gap:var(--s2);width:min(100%,360px);text-align:left}
   .id{gap:var(--s3)}
   .avatar.lg{width:80px;height:80px;font-size:26px}
@@ -256,6 +300,8 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .home h3{font-size:19px}
   .plan-task-form,.plan-task-dates{grid-template-columns:1fr}
   .plan-task-form .wide{grid-column:auto}
+  .event-plan-task-details{grid-template-columns:1fr}
+  .event-plan-task-detail.wide{grid-column:auto}
   .gantt-controls,.gantt-controls.admin-controls{align-items:flex-start;flex-direction:column}
   .nav{gap:var(--s1);padding:var(--s2)}
   .nav button{min-width:0;padding:var(--s2) 4px;font-size:clamp(12px,3.7vw,16px)}
@@ -454,8 +500,16 @@ export default function App({ profile, admin, signOut }) {
   const [planInput, setPlanInput] = useState(EMPTY_PLAN_INPUT);
   const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
   const [savedTaskForm, setSavedTaskForm] = useState(null);
+  const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
+  const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
+  const [eventPlanError, setEventPlanError] = useState("");
+  const [expandedEventTaskId, setExpandedEventTaskId] = useState(null);
+  const [eventPlans, setEventPlans] = useState([]);
+  const [eventPlansLoading, setEventPlansLoading] = useState(false);
+  const [eventPlansError, setEventPlansError] = useState("");
+  const [openingEventPlanId, setOpeningEventPlanId] = useState(null);
+  const [savingEventPlan, setSavingEventPlan] = useState(false);
   const [generatingPlan, setGeneratingPlan] = useState(false);
-  const [submittingTask, setSubmittingTask] = useState(false);
   const [planError, setPlanError] = useState("");
   const [storedReqs, setReqs] = useState([]);
   const [reviewingRequestId, setReviewingRequestId] = useState(null);
@@ -477,6 +531,13 @@ export default function App({ profile, admin, signOut }) {
     finally { setMeetingsLoading(false); }
   }, []);
   useEffect(() => { reloadMeetings().catch(() => {}); }, [reloadMeetings]);
+  const reloadEventPlans = useCallback(async () => {
+    setEventPlansLoading(true);
+    setEventPlansError("");
+    try { setEventPlans(await getEventPlans()); }
+    catch (e) { setEventPlansError(e.message); }
+    finally { setEventPlansLoading(false); }
+  }, []);
   const attendanceSaved = (id, attendees) => setMeetings(current => current.map(m =>
     m.id === id ? { ...m, attendees, attendance_recorded_at: new Date().toISOString() } : m));
   const [open, setOpen] = useState({});
@@ -558,13 +619,6 @@ export default function App({ profile, admin, signOut }) {
     return () => { ++refreshVersion.current; clearInterval(timer); window.removeEventListener("focus", reload); };
   }, [refresh]);
   useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
-  useEffect(() => {
-    if (!admin) return;
-    let active = true;
-    getTaskDraft().then(form => { if (active) setPersistedDraft(form); })
-      .catch(e => { if (active) setDraftError(e.message); });
-    return () => { active = false; };
-  }, [admin]);
   const sendRequest = async () => {
     if (mutationLock.current || requestDataError || !modal?.reassign) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
@@ -632,33 +686,31 @@ export default function App({ profile, admin, signOut }) {
   };
   const p = stack[stack.length - 1];
   useEffect(() => {
+    if (admin && p.n === "planEvent") reloadEventPlans();
+  }, [admin, p.n, reloadEventPlans]);
+  useEffect(() => {
     if (['attendance', 'past', 'mm', 'memberStatus'].includes(p.n)) reloadMeetings().catch(() => {});
   }, [p.n, reloadMeetings]);
   const go = (n, x = {}) => setStack((s) => [...s, { n, ...x }]);
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
-  const openTaskCreator = (form, generated = false) => {
-    const initialForm = { ...form };
-    setTaskForm(initialForm);
-    setSavedTaskForm(initialForm);
-    go("createTask", { initialForm, generated });
+  const openEventPlanEditor = (form, eventPlanId = null, generated = false) => {
+    setEventPlanForm(form);
+    setExpandedEventTaskId(null);
+    setEventPlanError("");
+    go("eventPlan", { eventPlanId, generated });
   };
-  const enterTaskManually = () => openTaskCreator({
-    ...EMPTY_TASK_FORM,
-    title: planInput.name.trim(),
-    description: planInput.description,
-    startDate: planInput.startDate,
-    dueDate: planInput.dueDate,
-    time: planInput.time,
+  const enterEventPlanManually = () => openEventPlanEditor({
+    ...EMPTY_EVENT_PLAN,
+    ...eventInput,
+    name: eventInput.name.trim(),
+    planText: "",
   });
-  const generateTask = async () => {
-    const name = planInput.name.trim(), description = planInput.description.trim();
-    if (!name || !description || !planInput.dueDate) {
-      setPlanError("Enter a task name, description, and due date before generating.");
-      return;
-    }
-    if (planInput.startDate && planInput.startDate > planInput.dueDate) {
-      setPlanError("The start date must be on or before the due date.");
+  const generateEventPlan = async () => {
+    if (generatingPlan) return;
+    const name = eventInput.name.trim(), description = eventInput.description.trim();
+    if (!name || !description || !eventInput.date) {
+      setPlanError("Enter an event name, description, and date before generating.");
       return;
     }
     setGeneratingPlan(true);
@@ -666,58 +718,79 @@ export default function App({ profile, admin, signOut }) {
     try {
       const idea = [
         description,
-        planInput.startDate ? `Requested start date: ${planInput.startDate}` : "",
-        planInput.time ? `Requested time: ${planInput.time}` : "",
+        `Event date: ${eventInput.date}`,
+        eventInput.time ? `Requested time: ${eventInput.time}` : "",
       ].filter(Boolean).join("\n\n");
       const draft = await generateTaskPlan({
         event_name: name,
         idea,
         event_type: "WiCS",
-        event_date: planInput.dueDate,
+        event_date: eventInput.date,
         event_format: "other",
       });
       if (!Array.isArray(draft.tasks) || !draft.tasks.length) {
-        throw new Error("The planner returned no task suggestions.");
+        throw new Error("The planner returned no event plan suggestions.");
       }
-      const titleById = Object.fromEntries(draft.tasks.map((t) => [t.id, t.title]));
-      const generatedSummary = [
-        draft.mode === 'mock' ? 'Demo planning template: review before submitting.' : '',
-        draft.tasks.map((t, i) => {
-          const due = t.due_date ? ` · due ${t.due_date}` : "";
-          const role = t.suggested_role ? ` · suggested role: ${t.suggested_role}` : "";
-          const dependencies = (t.dependency_ids ?? []).map((id) => titleById[id] ?? id);
-          return [
-            `${i + 1}. ${t.title}${due}${role}`,
-            t.rationale,
-            dependencies.length ? `Depends on: ${dependencies.join(", ")}` : "",
-          ].filter(Boolean).join("\n");
-        }).join("\n\n"),
-        draft.questions?.length ? `Questions to review:\n${draft.questions.map((q) => `• ${q}`).join("\n")}` : "",
-        draft.warnings?.length ? `Planning notes:\n${draft.warnings.map((w) => `• ${w}`).join("\n")}` : "",
-      ].filter(Boolean).join("\n\n");
-      openTaskCreator({
-        ...EMPTY_TASK_FORM,
-        title: name,
-        description: planInput.description,
-        startDate: planInput.startDate,
-        dueDate: planInput.dueDate,
-        time: planInput.time,
-        summary: generatedSummary,
-      }, true);
+      openEventPlanEditor({
+        ...EMPTY_EVENT_PLAN,
+        ...eventInput,
+        name,
+        tasks: draft.tasks,
+        questions: draft.questions ?? [],
+        warnings: draft.warnings ?? [],
+        planMode: draft.mode ?? "",
+      }, null, true);
     } catch (e) {
-      setPlanError(`Could not generate the task plan: ${e.message}`);
+      setPlanError(`Could not generate the event plan: ${e.message}`);
     } finally {
       setGeneratingPlan(false);
     }
   };
-  const saveTaskDraft = async () => {
-    if (draftSaving) return;
-    setDraftSaving(true); setDraftError("");
+  const openSavedEventPlan = async (item) => {
+    setOpeningEventPlanId(item.id);
+    setEventPlansError("");
     try {
-      const saved = await persistTaskDraft(taskForm);
-      setSavedTaskForm(saved); setPersistedDraft(saved); say("Draft saved to your account.");
-    } catch (e) { setDraftError(e.message); }
-    finally { setDraftSaving(false); }
+      const saved = await getEventPlan(item.id);
+      openEventPlanEditor({
+        name: saved.event_name,
+        description: saved.description || "",
+        date: saved.event_date,
+        time: saved.event_time?.slice(0, 5) || "",
+        planText: saved.plan_text || "",
+        tasks: saved.tasks ?? [],
+        questions: saved.questions ?? [],
+        warnings: saved.warnings ?? [],
+        planMode: saved.plan_mode ?? "",
+      }, saved.id);
+    } catch (e) { setEventPlansError(e.message); }
+    finally { setOpeningEventPlanId(null); }
+  };
+  const saveEventPlan = async () => {
+    if (savingEventPlan) return;
+    const payload = {
+      event_name: eventPlanForm.name.trim(),
+      description: eventPlanForm.description.trim(),
+      event_date: eventPlanForm.date,
+      event_time: eventPlanForm.time || null,
+      plan_text: eventPlanForm.planText.trim(),
+      tasks: eventPlanForm.tasks ?? [],
+      questions: eventPlanForm.questions ?? [],
+      warnings: eventPlanForm.warnings ?? [],
+      plan_mode: eventPlanForm.planMode || null,
+    };
+    if (!payload.event_name || !payload.event_date || (!payload.plan_text && !payload.tasks.length)) {
+      setEventPlanError("Enter an event name, date, and event plan before saving.");
+      return;
+    }
+    setSavingEventPlan(true);
+    setEventPlanError("");
+    try {
+      if (p.eventPlanId) await updateEventPlan(p.eventPlanId, payload);
+      else await createEventPlan(payload);
+      say(p.eventPlanId ? "Event plan updated." : "Event plan saved.");
+      back();
+    } catch (e) { setEventPlanError(e.message); }
+    finally { setSavingEventPlan(false); }
   };
   const saveNotes = async (t) => {
     if (noteSaving) return;
@@ -728,45 +801,6 @@ export default function App({ profile, admin, signOut }) {
       try { await refresh(); } catch { say("Notes saved. Please refresh the board to reload them."); }
     } catch (e) { say(e.message); }
     finally { setNoteSaving(null); }
-  };
-  const submitTask = async () => {
-    const title = taskForm.title.trim();
-    const monthSource = taskForm.dueDate || taskForm.startDate;
-    if (!title) { say("Enter a task name before submitting."); return; }
-    if (!monthSource) { say("Enter a start date or due date."); return; }
-    if (taskForm.startDate && taskForm.dueDate && taskForm.startDate > taskForm.dueDate) {
-      say("The start date must be on or before the due date.");
-      return;
-    }
-    if (!live) { say("Reconnect and refresh before creating a task."); return; }
-    const description = [
-      taskForm.description.trim(),
-      taskForm.summary.trim() ? `Task summary:\n${taskForm.summary.trim()}` : "",
-    ].filter(Boolean).join("\n\n");
-    if (description.length > 10000) { say("Task details must be 10,000 characters or fewer."); return; }
-    setSubmittingTask(true);
-    try {
-      const created = await createTaskRecord({
-        title,
-        month_code: monthSource.slice(0, 7),
-        description,
-        due_date: taskForm.dueDate || null,
-        start_date: taskForm.startDate || null,
-        due_time: taskForm.time || null,
-        owner_code: taskForm.ownerCode || null,
-        assignee_text: person(taskForm.ownerCode)?.name || "",
-        priority: taskForm.priority,
-        status: "todo",
-      });
-      const taskRecord = created;
-      setTasks((current) => [taskRecord, ...current]);
-      say(`Created “${title}”.`);
-      setStack([{ n: "dash" }, { n: "task", id: taskRecord.id }]);
-    } catch (e) {
-      say(`Task was not created: ${e.message}`);
-    } finally {
-      setSubmittingTask(false);
-    }
   };
   // Status buttons in the redesign: save through the same path as the task page.
   const setTaskStatus = (id, status) => { const t = task(id); if (t) return changeStatus(t, status); };
@@ -979,87 +1013,137 @@ export default function App({ profile, admin, signOut }) {
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
-    case "planTask":
-      page = (<><Top title="Plan with Winnie" tag />
-        <div className="plan-task-form">
-          <label className="wide">Task Name
-            <input className="field" maxLength={200} value={planInput.name}
-              onChange={(e) => { setPlanInput({ ...planInput, name: e.target.value }); setPlanError(""); }} />
+    case "planEvent":
+      page = (<><Top title="Plan Event with Winnie" tag />
+        <div className="plan-task-form" aria-busy={generatingPlan}>
+          <label className="wide">Event Name
+            <input className="field" maxLength={200} value={eventInput.name}
+              onChange={(e) => { setEventInput({ ...eventInput, name: e.target.value }); setPlanError(""); }} />
           </label>
-          <label className="wide">Task Description
-            <textarea className="field" maxLength={6000} rows={4} value={planInput.description}
-              onChange={(e) => { setPlanInput({ ...planInput, description: e.target.value }); setPlanError(""); }} />
+          <label className="wide">Event Description
+            <textarea className="field" maxLength={6000} rows={4} value={eventInput.description}
+              onChange={(e) => { setEventInput({ ...eventInput, description: e.target.value }); setPlanError(""); }} />
           </label>
           <div className="wide plan-task-dates">
-            <label>Start Date
-              <input className="field" type="date" value={planInput.startDate}
-                onChange={(e) => { setPlanInput({ ...planInput, startDate: e.target.value }); setPlanError(""); }} />
-            </label>
-            <label>Due Date
-              <input className="field" type="date" value={planInput.dueDate}
-                onChange={(e) => { setPlanInput({ ...planInput, dueDate: e.target.value }); setPlanError(""); }} />
+            <label>Date
+              <input className="field" type="date" value={eventInput.date}
+                onChange={(e) => { setEventInput({ ...eventInput, date: e.target.value }); setPlanError(""); }} />
             </label>
             <label>Time
-              <input className="field" type="time" value={planInput.time}
-                onChange={(e) => { setPlanInput({ ...planInput, time: e.target.value }); setPlanError(""); }} />
+              <input className="field" type="time" value={eventInput.time}
+                onChange={(e) => { setEventInput({ ...eventInput, time: e.target.value }); setPlanError(""); }} />
             </label>
           </div>
         </div>
         {planError && <p className="plan-error" role="alert">{planError}</p>}
+        {generatingPlan && <PlanLoading />}
         <div className="plan-task-actions">
-          <button className="btn" type="button" disabled={generatingPlan} onClick={generateTask}>
-            {generatingPlan ? "Generating…" : "Generate"}
+          <button className="btn" type="button" disabled={generatingPlan} onClick={generateEventPlan}>
+            {generatingPlan ? "Generating…" : "Generate Event Plan"}
           </button>
-          <button className="btn alt" type="button" disabled={generatingPlan} onClick={enterTaskManually}>Enter Manually</button>
-        </div></>);
+          <button className="btn alt" type="button" disabled={generatingPlan} onClick={enterEventPlanManually}>Enter Manually</button>
+        </div>
+        <section className="panel" style={{ maxWidth: 920, margin: "var(--s5) auto 0" }}>
+          <h2>Saved Event Plans</h2>
+          <p style={{ color: "var(--muted)" }}>Saved event plans stay in this browser and are not shared across devices.</p>
+          {eventPlansError && <p role="alert">{eventPlansError} <button type="button" className="btn alt" onClick={reloadEventPlans}>Retry</button></p>}
+          {eventPlansLoading ? <p role="status">Loading saved event plans…</p> : eventPlans.length
+            ? eventPlans.map((item) => <div className="due" key={item.id}>
+              <span style={{ flex: 1 }}><b>{item.event_name}</b><small style={{ display: "block" }}>
+                {item.event_date}{item.event_time ? ` · ${item.event_time.slice(0, 5)}` : ""}
+              </small></span>
+              <button className="btn alt" type="button" disabled={openingEventPlanId === item.id}
+                onClick={() => openSavedEventPlan(item)}>
+                {openingEventPlanId === item.id ? "Opening…" : "Open"}
+              </button>
+            </div>)
+            : !eventPlansError && <p>No saved event plans yet.</p>}
+        </section></>);
       break;
-    case "createTask": {
-      const initialForm = p.initialForm ?? EMPTY_TASK_FORM;
-      page = (<><Top title="Create a Task" tag />
-        <div className="create-task-grid">
-          <div className="panel"><div className="create-task-fields">
-            <label>Name
-              <input className="field" maxLength={200} value={taskForm.title}
-                onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })} />
-            </label>
-            <label>Description
-              <textarea className="field" maxLength={10000} value={taskForm.description}
-                onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })} />
-            </label>
-            <label>Start Date
-              <input className="field" type="date" value={taskForm.startDate}
-                onChange={(e) => setTaskForm({ ...taskForm, startDate: e.target.value })} />
-            </label>
-            <label>End Date
-              <input className="field" type="date" value={taskForm.dueDate}
-                onChange={(e) => setTaskForm({ ...taskForm, dueDate: e.target.value })} />
+    case "eventPlan": {
+      const planTasks = Array.isArray(eventPlanForm.tasks) ? eventPlanForm.tasks : [];
+      const titleById = Object.fromEntries(planTasks.map((task) => [task.id, task.title]));
+      page = (<><Top title={p.eventPlanId ? "Edit Event Plan" : p.generated ? "Review Event Plan" : "Enter Event Plan"} tag />
+        <div className="plan-task-form">
+          <label className="wide">Event Name
+            <input className="field" maxLength={200} value={eventPlanForm.name}
+              onChange={(e) => setEventPlanForm({ ...eventPlanForm, name: e.target.value })} />
+          </label>
+          <label className="wide">Event Description
+            <textarea className="field" maxLength={6000} rows={4} value={eventPlanForm.description}
+              onChange={(e) => setEventPlanForm({ ...eventPlanForm, description: e.target.value })} />
+          </label>
+          <div className="wide plan-task-dates">
+            <label>Date
+              <input className="field" type="date" value={eventPlanForm.date}
+                onChange={(e) => setEventPlanForm({ ...eventPlanForm, date: e.target.value })} />
             </label>
             <label>Time
-              <input className="field" type="time" value={taskForm.time}
-                onChange={(e) => setTaskForm({ ...taskForm, time: e.target.value })} />
+              <input className="field" type="time" value={eventPlanForm.time}
+                onChange={(e) => setEventPlanForm({ ...eventPlanForm, time: e.target.value })} />
             </label>
-            <label>Assigned to<select className="field" value={taskForm.ownerCode || ""} onChange={e => setTaskForm({ ...taskForm, ownerCode: e.target.value })}><option value="">Unassigned</option>{PEOPLE.map(q => <option key={q.id} value={q.id}>{q.name} · {q.role}</option>)}</select></label>
-            <label>Priority
-              <select className="field" value={taskForm.priority}
-                onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}>
-                <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
-              </select>
-            </label>
-          </div></div>
-          <div className="panel">
-            <label>Task Summary
-              <textarea className="field task-summary" maxLength={10000} value={taskForm.summary}
-                placeholder="Winnie’s generated plan appears here. You can edit it before submitting."
-                onChange={(e) => setTaskForm({ ...taskForm, summary: e.target.value })} />
-            </label>
-            {p.generated && <p style={{ marginBottom: 0, color: "var(--muted)" }}>Generated suggestions are a draft. Review and edit before submitting.</p>}
           </div>
+          {planTasks.length ? <section className="panel wide">
+            <h2>Task Summary ({planTasks.length})</h2>
+            <p>Select a task to expand its details. Scroll the list to review the full plan.</p>
+            {eventPlanForm.planMode === "mock" && <p role="note">Demo planning template: review these suggestions before saving.</p>}
+            <div className="event-plan-task-list">
+              {planTasks.map((task, index) => {
+                const expanded = expandedEventTaskId === task.id;
+                const dependencies = (task.dependency_ids ?? []).map((id) => titleById[id] ?? id);
+                const kind = (task.kind || "general").replace(/_/g, " ");
+                const suggestedRole = task.suggested_role?.trim();
+                const roleMembers = suggestedRole
+                  ? PEOPLE.filter((member) => normalizeRole(member.role) === normalizeRole(suggestedRole))
+                  : [];
+                const suggestedRoleLabel = roleMembers.length
+                  ? `${roleMembers[0].role}: ${roleMembers.map((member) => member.name).join(", ")}`
+                  : suggestedRole || "Role not specified";
+                return <article className="event-plan-task-card" key={task.id}>
+                  <button className="event-plan-task-toggle" type="button" aria-expanded={expanded}
+                    aria-controls={`event-plan-task-details-${index}`}
+                    onClick={() => setExpandedEventTaskId(expanded ? null : task.id)}>
+                    <span>
+                      <span className="event-plan-task-title">{index + 1}. {task.title}</span>
+                      <span className="event-plan-task-meta">
+                        <span>{task.due_date ? `Due ${task.due_date}` : "No date proposed"}</span>
+                        <span className="event-plan-task-assignment">{suggestedRoleLabel}</span>
+                      </span>
+                    </span>
+                    <span>{expanded ? "Collapse" : "Expand"}</span>
+                  </button>
+                  {expanded && <div className="event-plan-task-details" id={`event-plan-task-details-${index}`}>
+                    <dl className="event-plan-task-detail"><dt>Task ID</dt><dd>{task.id}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Task type</dt><dd>{kind}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Suggested role</dt><dd>{suggestedRole ? suggestedRoleLabel : "Not specified"}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Due date</dt><dd>{task.due_date || "No date proposed"}</dd></dl>
+                    <dl className="event-plan-task-detail wide"><dt>Rationale</dt><dd>{task.rationale || "No rationale provided."}</dd></dl>
+                    <dl className="event-plan-task-detail wide"><dt>Dependencies</dt><dd>{dependencies.length ? dependencies.join(", ") : "None"}</dd></dl>
+                    <dl className="event-plan-task-detail wide"><dt>Evidence</dt><dd>{task.evidence_ids?.length ? task.evidence_ids.join(", ") : "No source evidence linked."}</dd></dl>
+                  </div>}
+                </article>;
+              })}
+            </div>
+            {(eventPlanForm.questions?.length > 0 || eventPlanForm.warnings?.length > 0) &&
+              <div className="event-plan-review-notes">
+                {eventPlanForm.questions?.length > 0 && <div><b>Questions to review</b><ul>
+                  {eventPlanForm.questions.map((question, index) => <li key={`question-${index}`}>{question}</li>)}
+                </ul></div>}
+                {eventPlanForm.warnings?.length > 0 && <div><b>Planning notes</b><ul>
+                  {eventPlanForm.warnings.map((warning, index) => <li key={`warning-${index}`}>{warning}</li>)}
+                </ul></div>}
+              </div>}
+          </section> : <label className="wide">Event Plan
+            <textarea className="field task-summary" maxLength={20000} rows={12} value={eventPlanForm.planText}
+              placeholder="Add the event outline, preparation steps, and details."
+              onChange={(e) => setEventPlanForm({ ...eventPlanForm, planText: e.target.value })} />
+          </label>}
         </div>
-        <div className="create-task-actions">
-          <button className="btn alt" type="button" onClick={() => setTaskForm({ ...(savedTaskForm ?? initialForm) })}>Revert Changes</button>
-          <button className="btn out" type="button" disabled={draftSaving || submittingTask} onClick={saveTaskDraft}>{draftSaving ? "Saving…" : "Save Draft"}</button>
-          <button className="btn" type="button" disabled={submittingTask} onClick={submitTask}>
-            {submittingTask ? "Submitting…" : "Submit"}
+        {eventPlanError && <p className="plan-error" role="alert">{eventPlanError}</p>}
+        <div className="plan-task-actions">
+          <button className="btn alt" type="button" disabled={savingEventPlan} onClick={back}>Cancel</button>
+          <button className="btn" type="button" disabled={savingEventPlan} onClick={saveEventPlan}>
+            {savingEventPlan ? "Saving…" : p.eventPlanId ? "Update Event Plan" : "Save Event Plan"}
           </button>
         </div></>);
       break;
@@ -1071,7 +1155,7 @@ export default function App({ profile, admin, signOut }) {
         <button onClick={() => go("review")}>Task Reassignment Requests</button>
         <button onClick={() => go("attendance")}>Manage Meeting Attendance</button>
         <button onClick={() => go("sheetSync")}>Google Sheets Sync</button>
-        <button onClick={() => { setPlanInput({ ...EMPTY_PLAN_INPUT }); setPlanError(""); go("planTask"); }}>Create Task</button>
+        <button onClick={() => { setEventInput({ ...EMPTY_EVENT_INPUT }); setPlanError(""); go("planEvent"); }}>Plan Event</button>
       </div>
         <div style={{ textAlign: "center" }}><button className="btn alt" onClick={() => setStack([{ n: "dash" }])}>Back to dashboard</button></div></>);
       break;
@@ -1300,7 +1384,7 @@ export default function App({ profile, admin, signOut }) {
 
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
-    <div className="app"><style>{CSS}</style><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
+    <div className={`app${p.n === "dash" ? "" : " inner-page"}`}><style>{CSS}{CUTE_CSS}</style><CursorFx /><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
         <button className="link" onClick={() => go("review")}>Requests ({requestDataError ? '?' : reqs.filter(r => r.status === "pending").length})</button>
         <button className="link" onClick={() => signOut().catch(e => say(e.message))}>Sign out</button>
       </header>

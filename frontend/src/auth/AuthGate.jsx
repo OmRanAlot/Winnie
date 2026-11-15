@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { authConfigured } from '../lib/supabase.js';
 import Login from './Login.tsx';
+import FairyLights from '../FairyLights.jsx';
 import { useAuth } from './AuthProvider.jsx';
 import { authScreen, validatePassword } from './authFlow.js';
 import './auth.css';
@@ -56,7 +57,7 @@ export default function AuthGate({ children }) {
     <button onClick={auth.retry}>Try again</button>
     <button className="auth-link" onClick={() => auth.signOut().catch(e => setActionError(e.message))}>Sign out</button>
     {actionError && <p role="alert">{actionError}</p>}</>;
-  return <main className="auth-shell"><section className="auth-card">
+  return <main className="auth-shell">{screen === 'password' && <FairyLights />}<section className="auth-card">
     <img src="/wics-logo.png" alt="WiCS" width="80" height="80" />{content}
   </section></main>;
 }

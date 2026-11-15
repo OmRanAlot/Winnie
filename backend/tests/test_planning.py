@@ -137,6 +137,55 @@ def test_api_requires_configured_key(monkeypatch):
         assert client.post("/api/planning/drafts", json=request().model_dump(mode="json")).status_code == 401
 
 
+def test_ai_endpoint_without_private_history(tmp_path, monkeypatch):
+    monkeypatch.setenv("WINNIE_PLANNING_KNOWLEDGE_PATH", str(tmp_path / "missing.json"))
+    monkeypatch.setenv("WINNIE_PLANNING_MODE", "deepagents")
+    monkeypatch.setenv("WINNIE_PLANNING_MODEL", "fake")
+
+    async def idea_plan(received, examples, model):
+        assert received == request()
+        assert examples == []
+        return DraftContents(tasks=[task("confirm-scope")])
+
+    monkeypatch.setattr("app.services.planning.deep_plan", idea_plan)
+    app.dependency_overrides[authorize_tasks] = lambda: None
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/planning/drafts", json=request().model_dump(mode="json"))
+        assert response.status_code == 200
+        draft = response.json()["data"]
+        assert draft["mode"] == "deepagents"
+        assert draft["historical_examples"] == []
+        assert any("based only on your event idea" in warning for warning in draft["warnings"])
+        assert response.json()["meta"] == {"persisted": False, "activated": False}
+    finally:
+        app.dependency_overrides.pop(authorize_tasks, None)
+
+
+@pytest.mark.asyncio
+async def test_missing_history_still_rejects_fabricated_evidence(tmp_path, monkeypatch):
+    async def fabricated(*args):
+        return DraftContents(tasks=[task("a", evidence_ids=["invented"])])
+
+    monkeypatch.setattr("app.services.planning.deep_plan", fabricated)
+    with pytest.raises(PlanningUnavailable):
+        await create_draft(request(), knowledge_path=tmp_path / "missing.json",
+                           mode="deepagents", model="fake")
+
+
+@pytest.mark.asyncio
+async def test_ai_planning_rejects_corrupt_history(tmp_path, monkeypatch):
+    path = tmp_path / "corrupt.json"
+    path.write_text("not json", encoding="utf-8")
+
+    async def unexpected(*args):
+        pytest.fail("Corrupt history must fail before calling the model")
+
+    monkeypatch.setattr("app.services.planning.deep_plan", unexpected)
+    with pytest.raises(PlanningUnavailable):
+        await create_draft(request(), knowledge_path=path, mode="deepagents", model="fake")
+
+
 @pytest.mark.asyncio
 async def test_real_deepagents_graph_with_fake_model(knowledge):
     """Exercise the installed harness/structured response without a key or network call."""
@@ -157,3 +206,32 @@ async def test_real_deepagents_graph_with_fake_model(knowledge):
     examples, _ = load_examples(knowledge, request())
     result = await deep_plan(request(), examples, model)
     assert result.tasks[0].evidence_ids == ["october-row-4"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_plan_uses_one_structured_call(monkeypatch):
+    from app.agents.planner import deep_plan
+
+    calls = []
+
+    class NativeModel:
+        def with_structured_output(self, schema, method):
+            assert schema is DraftContents
+            assert method == "function_calling"
+            return self
+
+        async def ainvoke(self, messages):
+            calls.append(messages)
+            return {"tasks": [task("a")]}
+
+    monkeypatch.setattr("app.agents.planner.planning_model", lambda model: NativeModel())
+
+    async def no_agent(**kwargs):
+        pytest.fail("Gemini single-shot planning must not enter an agent loop")
+
+    monkeypatch.setattr("app.agents.planner.run_structured_agent", no_agent)
+    draft = await deep_plan(request(), [], "google_genai:example")
+    assert draft.tasks[0].id == "a"
+    assert len(calls) == 1
+    payload = json.loads(calls[0][1][1])
+    assert payload == {"request": request().model_dump(mode="json"), "historical_examples": []}

@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase.js';
 import { Shell } from './Shell';
+import FairyLights from '../FairyLights.jsx';
 
 type Page = 'landing' | 'login' | 'reset';
 
@@ -56,7 +57,7 @@ export default function Login({ sessionNotice = '' }: { sessionNotice?: string }
     </>;
 
     if (page === 'landing') {
-        return <Shell><div className="center">
+        return <Shell><FairyLights /><div className="center">
             <img className="logo" src="/wics-logo.png" alt="WiCS logo"
                 onError={event => { event.currentTarget.style.display = 'none'; }} />
             <h2>Ask Winnie!</h2>
@@ -67,7 +68,7 @@ export default function Login({ sessionNotice = '' }: { sessionNotice?: string }
     }
 
     if (page === 'reset') {
-        return <Shell><form className="center" onSubmit={reset}>
+        return <Shell><FairyLights /><form className="center" onSubmit={reset}>
             <h2>Reset Password:</h2>
             <fieldset disabled={pending} style={{ border: 0, padding: 0, margin: 0 }}>
                 <div className="form">{emailField}</div>
@@ -78,7 +79,7 @@ export default function Login({ sessionNotice = '' }: { sessionNotice?: string }
         </form></Shell>;
     }
 
-    return <Shell><form className="center" onSubmit={signIn}>
+    return <Shell><FairyLights /><form className="center" onSubmit={signIn}>
         <h2>Login:</h2>
         <fieldset disabled={pending} style={{ border: 0, padding: 0, margin: 0 }}>
             <div className="form">
