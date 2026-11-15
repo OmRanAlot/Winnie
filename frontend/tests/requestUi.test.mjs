@@ -39,7 +39,7 @@ await build({
         export const getDependencies = () => Promise.resolve([]);
         export const getTaskDraft = () => Promise.resolve(null);
         export const saveTaskDraft = form => { globalThis.__dashboard.draft = form; return Promise.resolve(form); };
-        export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return Promise.resolve({tasks:[{id:'planned',title:'Planned action',rationale:'Synthetic rationale'}]}); };
+        export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return globalThis.__dashboard.planResponse ?? Promise.resolve({tasks:[{id:'planned',title:'Planned action',rationale:'Synthetic rationale'}]}); };
         export const createTaskRecord = body => { globalThis.__dashboard.created = body; const t={...body,id:'created',status:'Upcoming',notes:'',assignee:body.owner_code}; globalThis.__dashboard.tasks.push(t); return Promise.resolve(t); };
         export const saveTaskNotes = (id, notes) => { globalThis.__dashboard.tasks = globalThis.__dashboard.tasks.map(t => t.id===id ? {...t,notes} : t); return Promise.resolve(); };
         export const editMember = () => Promise.resolve();
@@ -194,7 +194,16 @@ test('generated event plans receive one date and time and save as plans, not tas
     await change(renderer.root.findAllByType('textarea').find(node => node.props.maxLength === 6000), 'Invite alumni for a career discussion.');
     await change(renderer.root.findAllByType('input').find(node => node.props.type === 'date'), '2026-12-03');
     await change(renderer.root.findAllByType('input').find(node => node.props.type === 'time'), '17:00');
-    await act(async () => button(renderer, 'Generate Event Plan').props.onClick());
+    let finishPlan, generation;
+    globalThis.__dashboard.planResponse = new Promise(resolve => { finishPlan = resolve; });
+    await act(async () => { generation = button(renderer, 'Generate Event Plan').props.onClick(); });
+    assert.ok(renderer.root.findAllByProps({ role: 'status' }).some(n => text(n).includes('Winnie is shaping')));
+    assert.equal(button(renderer, 'Enter Manually').props.disabled, true);
+    await act(async () => {
+      finishPlan({ tasks: [{ id: 'planned', title: 'Planned action', rationale: 'Synthetic rationale' }] });
+      await generation;
+    });
+    assert.equal(renderer.root.findAllByProps({ className: 'plan-loading' }).length, 0);
     assert.equal(globalThis.__dashboard.plan.event_date, '2026-12-03');
     assert.ok(globalThis.__dashboard.plan.idea.includes('Requested time: 17:00'));
     assert.equal(renderer.root.findAllByType('input').filter(node => node.props.type === 'date').length, 1);

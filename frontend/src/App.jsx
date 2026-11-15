@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, saveTaskNotes } from "./lib/api.js";
 import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan } from "./lib/eventPlans.js";
 import Recorder from "./Recorder.jsx";
+import PlanLoading from "./PlanLoading.jsx";
 import Attendance from "./Attendance.jsx";
 import SheetSync from "./SheetSync.jsx";
 import HelpReview from "./HelpReview.jsx";
@@ -219,6 +220,17 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .create-task-fields{display:grid;grid-template-columns:1fr;gap:var(--s3)}
 .task-summary{min-height:260px;resize:vertical}
 .plan-error{max-width:920px;margin:var(--s4) auto 0;padding:var(--s3) var(--s4);background:#f4e3d7;border:1px solid var(--rust);border-radius:var(--r);color:var(--maroon);font-weight:600}
+.plan-loading{max-width:920px;margin:var(--s4) auto;display:flex;align-items:center;gap:20px;padding:22px;border:1px solid #dbc5ae;border-radius:18px;background:linear-gradient(120deg,#fffaf0,#f4e8d9);box-shadow:0 6px 24px #3a14100a;color:var(--maroon)}
+.plan-loading-paper{position:relative;flex-shrink:0;width:56px;padding:12px 8px;border:1px solid #d5bba0;border-radius:8px;background:#fffdf7;transform:rotate(-5deg);animation:plan-float 2.8s ease-in-out infinite}
+.plan-loading-paper>span{position:absolute;right:-9px;top:-14px;font-size:27px;color:var(--rust)}
+.plan-loading-paper i{display:flex;align-items:center;gap:5px;margin:8px 0;animation:plan-line 1.8s ease-in-out infinite;animation-delay:calc(var(--row) * .25s)}
+.plan-loading-paper b{width:8px;height:8px;border:1.5px solid var(--rust);border-radius:2px}
+.plan-loading-paper em{height:4px;flex:1;background:#bba18a;border-radius:4px}
+.plan-loading-copy{flex:1;min-width:0}.plan-loading-copy strong{font-size:18px}.plan-loading-copy p{margin:7px 0;color:var(--muted);font-size:14px}.plan-loading-copy small{font-size:12px;color:var(--muted)}
+.plan-loading-time{font-size:12px;font-variant-numeric:tabular-nums;align-self:flex-start;white-space:nowrap}
+@keyframes plan-float{50%{transform:translateY(-5px) rotate(3deg)}}
+@keyframes plan-line{50%{opacity:.3;transform:translateX(2px)}}
+@media(max-width:520px){.plan-loading{gap:12px;padding:16px}.plan-loading-paper{width:40px}.plan-loading-copy strong{font-size:16px}}
 .dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 510px);pointer-events:none}
 .app button:not(:disabled),.app .avatar,.app .chart-member rect{transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease,filter .16s ease}
 @media(hover:hover){
@@ -455,6 +467,7 @@ export default function App({ profile, admin, signOut }) {
   const refreshVersion = useRef(0);
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
+  const [eventPlanError, setEventPlanError] = useState("");
   const [eventPlans, setEventPlans] = useState([]);
   const [eventPlansLoading, setEventPlansLoading] = useState(false);
   const [eventPlansError, setEventPlansError] = useState("");
@@ -596,6 +609,7 @@ export default function App({ profile, admin, signOut }) {
     planText: "",
   });
   const generateEventPlan = async () => {
+    if (generatingPlan) return;
     const name = eventInput.name.trim(), description = eventInput.description.trim();
     if (!name || !description || !eventInput.date) {
       setPlanError("Enter an event name, description, and date before generating.");
@@ -908,7 +922,7 @@ export default function App({ profile, admin, signOut }) {
     }
     case "planEvent":
       page = (<><Top title="Plan Event with Winnie" tag />
-        <div className="plan-task-form">
+        <div className="plan-task-form" aria-busy={generatingPlan}>
           <label className="wide">Event Name
             <input className="field" maxLength={200} value={eventInput.name}
               onChange={(e) => { setEventInput({ ...eventInput, name: e.target.value }); setPlanError(""); }} />
@@ -929,6 +943,7 @@ export default function App({ profile, admin, signOut }) {
           </div>
         </div>
         {planError && <p className="plan-error" role="alert">{planError}</p>}
+        {generatingPlan && <PlanLoading />}
         <div className="plan-task-actions">
           <button className="btn" type="button" disabled={generatingPlan} onClick={generateEventPlan}>
             {generatingPlan ? "Generating…" : "Generate Event Plan"}

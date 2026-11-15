@@ -190,12 +190,20 @@ export async function getAssignments() {
 }
 
 export async function generateTaskPlan(input) {
-  const body = await request("/planning/drafts", {
-    method: "POST",
-    body: JSON.stringify(input),
-    signal: AbortSignal.timeout(200000),
-  });
-  return body.data;
+  const signal = AbortSignal.timeout(90000);
+  try {
+    const body = await request("/planning/drafts", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    });
+    return body.data;
+  } catch (error) {
+    if (signal.aborted) {
+      throw new Error("Planning took too long. Please try again or choose Enter Manually.");
+    }
+    throw error;
+  }
 }
 
 export async function createTaskRecord(task) {
