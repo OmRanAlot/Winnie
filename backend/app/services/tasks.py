@@ -66,7 +66,10 @@ def store_meeting_tasks(
     A meeting left without tasks by an earlier failed insert is filled now.
     """
     meeting_id, created = repository.find_or_create_meeting(held_at, title, transcript, recording_id)
-    if not created and (existing := repository.tasks_for_meeting(meeting_id)):
+    existing = [] if created else repository.tasks_for_meeting(meeting_id)
+    # Only skip re-insertion when we got the same or more tasks last time; a prior
+    # partial extraction (fewer tasks than now) is replaced by the new full result.
+    if existing and len(existing) >= len(tasks):
         return StoredTasks([to_view(task) for task in existing], reused=True)
     stored = repository.insert_extracted_tasks(meeting_id, tasks)
     return StoredTasks([to_view(task) for task in stored], reused=False)
@@ -91,6 +94,10 @@ def add_dependencies(edges: list[tuple[str, str]]) -> list[TaskDependency]:
 
 
 class TaskNotFound(Exception):
+    pass
+
+
+class TaskChanged(Exception):
     pass
 
 
@@ -141,6 +148,13 @@ class TaskStore:
             raise TaskNotFound
         return result.data[0]
 
+    def get_many(self, task_ids):
+        """One bounded read to re-authorize remembered task references."""
+        ids = list({str(value) for value in task_ids})
+        if len(ids) > 100:
+            raise ValueError("Too many remembered tasks")
+        return self._execute(lambda table: table.select("*").in_("id", ids)).data if ids else []
+
     def update(self, task_id: UUID, changes: TaskUpdate):
         result = self._execute(
             lambda table: table.update(changes.model_dump(mode="json", exclude_unset=True)).eq(
@@ -149,6 +163,18 @@ class TaskStore:
         )
         if not result.data:
             raise TaskNotFound
+        return result.data[0]
+
+    def update_if_current(self, task_id: UUID, changes: TaskUpdate, updated_at: str):
+        """Fence the write against edits/reassignment after the authorization read."""
+        if not updated_at:
+            raise StorageUnavailable("The task has no revision timestamp.")
+        result = self._execute(
+            lambda table: table.update(changes.model_dump(mode="json", exclude_unset=True))
+            .eq("id", str(task_id)).eq("updated_at", updated_at)
+        )
+        if not result.data:
+            raise TaskChanged
         return result.data[0]
 
     def delete(self, task_id: UUID):

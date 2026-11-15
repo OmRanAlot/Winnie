@@ -64,6 +64,7 @@ replace the eboard roster or its reference files.
 | Board notes | Task `notes` field, saved independently of its description |
 | Manual task creation | Title, description, owner, priority, month, start/due date and time; backend supplies active semester |
 | Plan with Winnie | `POST /api/planning/drafts`; suggestions are reviewed before creating a task |
+| Shared event plans and approval | `/api/event-plans`; revision-checked approval atomically creates tasks, dependencies and assignment notices |
 | Save/Resume Draft | `GET/PUT /api/dashboard/draft`, owned by the signed-in administrator |
 | Member roster and suggested assignees | `/api/members`, `/api/members/assignments`, `/api/members/candidates/{id}` |
 | Board information | Read-only approved roster; profile-edit requests are rejected by the backend |
@@ -82,10 +83,21 @@ do not change roles, skills, graduation information, contact consent or administ
 
 Google Sheets synchronization has a separate migration and setup guide in
 [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md).
+Shared event plans require `20261115180000_event_plan_approval.sql`; see
+[EVENT_PLAN_APPROVAL.md](EVENT_PLAN_APPROVAL.md) for deployment and the administrator flow.
 Messaging bridges, reminder workers and imports remain server-side integrations; they
 are not browser endpoints requiring provider secrets.
 
 ## Recipient consent for reassignment
+
+Task edits enforce the same policy on both the records PATCH and compatibility status
+endpoint: members may save only status and notes on verified assignments in the active
+semester (including fully resolved co-assignments). Administrators may edit other task
+metadata and status. General edits reject `owner_code` and `assignee_text` for every
+caller; use the reassignment RPC workflow to transfer ownership. Saves check the task's
+`updated_at` revision atomically and return HTTP 409 if it changed during authorization.
+No new database migration is required for this policy; deploy the updated backend and
+frontend. Imports and approved database handoffs retain their separate server-side paths.
 
 Photon and browser requests share this queue after applying
 `20261115160000_unify_photon_reassignments.sql` after the recipient-consent migration.

@@ -229,15 +229,9 @@ def insert_extracted_tasks(
         return []
     held_at = datetime.fromisoformat(meetings[0]["held_at"])
     rows = [_task_row(task, meeting_id, held_at, index) for index, task in enumerate(tasks)]
-    try:
-        inserted = db.table("tasks").insert(rows).execute().data
-    except APIError as error:
-        if error.code != UNIQUE_VIOLATION:
-            raise
-        existing = tasks_for_meeting(meeting_id, client=db)
-        if not existing:
-            raise
-        return existing
+    # Upsert so that re-uploading the same audio (same meeting_id, deterministic task IDs)
+    # replaces the old partial extraction with the full new one instead of returning stale data.
+    inserted = db.table("tasks").upsert(rows).execute().data
     return _hydrate(inserted, db)
 
 
@@ -285,6 +279,11 @@ def _hydrate(rows: Sequence[Row], db: Client) -> list[Task]:
             depends_on=tuple(sorted(depends_on.get(row["id"], []))),
         ))
     return result
+
+
+def task_from_record(row: Row, client: Client | None = None) -> Task:
+    """Project an already-saved canonical row into the compatibility timeline contract."""
+    return _hydrate([row], _db(client))[0]
 
 
 def _timeline_order(task: Task) -> tuple[bool, float, float, str]:

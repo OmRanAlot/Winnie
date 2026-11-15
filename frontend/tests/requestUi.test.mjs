@@ -20,10 +20,11 @@ await build({
     build.onResolve({ filter: /^\.\/(Recorder|SheetSync|FairyLights(?: \(1\))?)\.jsx$/ }, args => ({ path: args.path, namespace: 'fake' }));
     build.onLoad({ filter: /.*/, namespace: 'fake' }, args => ({ contents:
       args.path.includes('eventPlans.js') ? `
+        export const reviewEventPlan = (id,revision,decision) => { globalThis.__dashboard.reviewedPlan={id,revision,decision}; if(globalThis.__dashboard.planReviewError) return Promise.reject(new Error('Plan changed. Reopen it.')); globalThis.__dashboard.eventPlans=globalThis.__dashboard.eventPlans.map(p=>p.id===id?{...p,status:decision}:p); return Promise.resolve({status:decision}); };
         export const getEventPlans = () => Promise.resolve(globalThis.__dashboard.eventPlans);
         export const getEventPlan = id => Promise.resolve(globalThis.__dashboard.eventPlans.find(plan => plan.id === id));
-        export const createEventPlan = plan => { const saved={...plan,id:'event1',created_at:'2026-11-14T12:00:00Z'}; globalThis.__dashboard.eventPlans.unshift(saved); return Promise.resolve(saved); };
-        export const updateEventPlan = (id, plan) => { const saved={...globalThis.__dashboard.eventPlans.find(item => item.id === id),...plan}; globalThis.__dashboard.eventPlans=globalThis.__dashboard.eventPlans.map(item => item.id===id ? saved : item); return Promise.resolve(saved); };
+        export const createEventPlan = plan => { const saved={...plan,id:'event1',revision:1,status:'draft',created_at:'2026-11-14T12:00:00Z'}; globalThis.__dashboard.eventPlans.unshift(saved); return Promise.resolve(saved); };
+        export const updateEventPlan = (id, plan) => { const prior=globalThis.__dashboard.eventPlans.find(item => item.id === id); const saved={...prior,...plan,revision:(prior.revision || 1)+1,status:'draft'}; globalThis.__dashboard.eventPlans=globalThis.__dashboard.eventPlans.map(item => item.id===id ? saved : item); return Promise.resolve(saved); };
       ` : args.path.includes('api.js') ? `
         export const getTasks = () => Promise.resolve(globalThis.__dashboard.tasks);
         export const getMembers = () => Promise.resolve(globalThis.__dashboard.people);
@@ -74,7 +75,9 @@ await build({
 });
 const { default: App, Gantt } = await import(pathToFileURL(output));
 const text = node => typeof node === 'string' ? node : (node?.children ?? []).map(text).join('');
-const button = (renderer, label) => renderer.root.findAllByType('button').find(b => text(b) === label);
+const button = (renderer, label) => renderer.root.findAllByType('button').find((b) =>
+  b.children.every((child) => typeof child === 'string') && b.children.join('') === label
+);
 const profile = { id: 'profile1', member_code: 'MEMBER', name: 'Member', role: 'member' };
 function setup() {
   globalThis.window = {
@@ -257,7 +260,7 @@ test('generated event plans receive one date and time and save as plans, not tas
     await act(async () => renderer.root.findAllByProps({ className: 'event-plan-task-toggle' })[1].props.onClick());
     const expandedDetails = renderer.root.findAllByProps({ className: 'event-plan-task-details' })[0];
     assert.ok(text(expandedDetails).includes('Planned action'));
-    assert.ok(!text(expandedDetails).includes('Phase'));
+    assert.ok(text(expandedDetails).includes('Phase'));
     await act(async () => button(renderer, 'Save Event Plan').props.onClick());
     assert.equal(globalThis.__dashboard.eventPlans[0].event_name, 'Career Panel');
     assert.equal(globalThis.__dashboard.eventPlans[0].tasks.length, 2);
@@ -389,9 +392,13 @@ test('requester cannot answer for recipient; administrator cannot approve unansw
   try {
     await act(async () => {renderer=TestRenderer.create(React.createElement(App,{profile,admin:true,signOut(){}}));});
     await act(async () => button(renderer,'Requests (1)').props.onClick());
-    assert.equal(button(renderer,'Accept'),undefined); assert.equal(button(renderer,'Deny'),undefined);
-    assert.equal(button(renderer,'Approve').props.disabled,true);
-    assert.equal(button(renderer,'Reject request').props.disabled,false);
+    const controls = renderer.root.findAllByType('button').map((control) => ({
+      label: control.children.filter((child) => typeof child === 'string').join(''),
+      disabled: control.props.disabled,
+    }));
+    assert.equal(controls.some((control) => control.label === 'Accept'), false);
+    assert.equal(controls.find((control) => control.label === 'Approve').disabled, true);
+    assert.equal(controls.find((control) => control.label === 'Deny').disabled, false);
   } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
 });
 
@@ -518,3 +525,38 @@ test('metrics overview places member names below the chart x-axis', async () => 
     delete globalThis.window;
   }
 });
+
+for (const decision of ['approved','rejected']) {
+ test(`saved event plan ${decision} review uses its exact revision and locks dirty edits`, async()=>{
+  setup(); let renderer;
+  globalThis.__dashboard.eventPlans=[{id:'shared',revision:7,status:'draft',event_name:'Shared workshop',
+   event_date:'2027-04-20',plan_text:'Outline',tasks:[{id:'room',title:'Book room',owner_code:'MEMBER',due_date:'2027-04-10',rationale:'Needed',dependency_ids:[]}]}];
+  try {
+   await act(async()=>{renderer=TestRenderer.create(React.createElement(App,{profile,admin:true,signOut(){}}));});
+   await act(async()=>button(renderer,'ADMIN SETTINGS').props.onClick());
+   await act(async()=>button(renderer,'Plan Event').props.onClick());
+   await act(async()=>button(renderer,'Open').props.onClick());
+   const label=decision==='approved'?'Approve and create tasks':'Reject plan';
+   assert.equal(button(renderer,label).props.disabled,false);
+   const name=renderer.root.findAllByType('input').find(n=>n.props.maxLength===200);
+   await act(async()=>name.props.onChange({target:{value:'Edited shared workshop'}}));
+   assert.equal(button(renderer,label).props.disabled,true);
+   await act(async()=>button(renderer,'Update Event Plan').props.onClick());
+   await act(async()=>button(renderer,'Open').props.onClick());
+   assert.equal(button(renderer,label).props.disabled,false);
+   globalThis.__dashboard.planReviewError=true;
+   await act(async()=>button(renderer,label).props.onClick());
+   assert.ok(renderer.root.findAllByProps({role:'alert'}).some(n=>text(n).includes('Plan changed')));
+   globalThis.__dashboard.planReviewError=false;
+   await act(async()=>button(renderer,label).props.onClick());
+   assert.deepEqual(globalThis.__dashboard.reviewedPlan,{id:'shared',revision:8,decision});
+   await act(async()=>button(renderer,'Open').props.onClick());
+   if(decision==='approved') {
+    assert.equal(button(renderer,'Approve and create tasks'),undefined);
+    assert.equal(button(renderer,'Update Event Plan').props.disabled,true);
+    await act(async()=>renderer.root.findAllByProps({className:'event-plan-task-toggle'})[0].props.onClick());
+    assert.ok(renderer.root.findAllByType('select').some(n=>n.props.value==='MEMBER' && n.props.disabled));
+   }
+  } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
+ });
+}
