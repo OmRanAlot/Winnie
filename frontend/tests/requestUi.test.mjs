@@ -25,6 +25,7 @@ await build({
         export const getAssignments = () => Promise.resolve({byTask: globalThis.__dashboard.assignments || {task1: [globalThis.__dashboard.tasks[0].ownerCode]}});
         export const weekStart = () => new Date('2026-11-09T00:00:00');
         export const getCandidates = () => Promise.resolve([]);
+        export const getEventLabels = () => Promise.resolve({});
         export const updateTaskStatus = (id,status) => {
           if (globalThis.__dashboard.updateStatus) return globalThis.__dashboard.updateStatus(id,status);
           const saved={...globalThis.__dashboard.tasks.find(t=>t.id===id),status};
@@ -100,6 +101,40 @@ test('admin decisions reload persisted queue and task assignment; failures remai
     assert.equal(globalThis.__dashboard.tasks[0].originalAssigneeCode, 'MEMBER');
   } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
 });
+
+for (const decision of ['approved', 'rejected', 'failure']) {
+  test(`admin hides a request during a delayed ${decision} decision and survives refreshes`, async () => {
+    setup(); let renderer, finishReview, reviewPromise;
+    const dashboard = globalThis.__dashboard;
+    const goodReview = dashboard.review.bind(dashboard);
+    dashboard.review = () => new Promise((resolve, reject) => {
+      finishReview = () => decision === 'failure'
+        ? reject(new Error('Decision failed'))
+        : goodReview('request1', decision).then(resolve);
+    });
+    try {
+      await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+      await act(async () => button(renderer, 'Requests (1)').props.onClick());
+      await act(async () => { reviewPromise = button(renderer, decision === 'rejected' ? 'Deny' : 'Approve').props.onClick(); });
+      assert.equal(button(renderer, 'Approve'), undefined, 'hide before the RPC resolves');
+      assert.ok(button(renderer, 'Requests (0)'));
+      assert.equal(renderer.root.findAllByProps({ className: 'req' }).length, 0);
+      await act(async () => button(renderer, 'Refresh').props.onClick());
+      assert.equal(button(renderer, 'Approve'), undefined, 'a pending server row must stay hidden during saving');
+      if (decision !== 'failure') dashboard.list = async () => { throw new Error('Refresh unavailable'); };
+      await act(async () => { finishReview(); await reviewPromise; });
+      if (decision === 'failure') {
+        assert.ok(button(renderer, 'Requests (1)'));
+        assert.ok(button(renderer, 'Approve'), 'restore the request when saving fails');
+        assert.ok(renderer.root.findAllByProps({ role: 'alert' }).some(n => text(n).includes('Decision failed')));
+      } else {
+        assert.ok(button(renderer, 'Requests (0)'));
+        assert.equal(button(renderer, 'Approve'), undefined, 'a saved decision stays out of pending even if refresh fails');
+        assert.ok(renderer.root.findAllByProps({ className: 'req' }).some(n => text(n).includes(decision)));
+      }
+    } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
+  });
+}
 
 test('member requests persist and show pending without exposing approval controls', async () => {
   setup(); let renderer;
@@ -300,4 +335,40 @@ test('Due Soon failures keep the original status and a persistent actionable err
     assert.ok(renderer.root.findAllByProps({role:'alert'}).some(n=>text(n).includes('Task storage unavailable')));
     assert.ok(button(renderer,'Dismiss'));
   } finally {if(renderer) await act(async()=>renderer.unmount()); delete globalThis.window;}
+});
+
+test('completed tasks do not show an admin nudge control', async () => {
+  setup();
+  globalThis.__dashboard.tasks[0].status = 'Completed';
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(renderer, 'Tasks').props.onClick());
+    assert.equal(renderer.root.findAllByType('button').find(
+      b => b.props['aria-label'] === 'Nudge assignee for Database task',
+    ), undefined);
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    delete globalThis.window;
+  }
+});
+
+test('metrics overview places member names below the chart x-axis', async () => {
+  setup();
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(renderer, 'ADMIN SETTINGS').props.onClick());
+    await act(async () => button(renderer, 'Metrics Overview').props.onClick());
+
+    const chart = renderer.root.findAllByType('svg').find(node => node.props.className === 'task-metrics-chart');
+    const axisY = Math.max(...chart.findAllByType('line').map(line => Number(line.props.y1)));
+    const labels = chart.findAllByType('text').filter(label => label.props.transform?.startsWith('rotate(-45'));
+    assert.ok(labels.length > 0);
+    assert.ok(labels.every(label => Number(label.props.y) >= axisY + 45));
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    delete globalThis.window;
+  }
+});
 });
