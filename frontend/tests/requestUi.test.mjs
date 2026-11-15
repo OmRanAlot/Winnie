@@ -215,7 +215,7 @@ test('generated event plans receive one date and time and save as plans, not tas
       finishPlan({
         mode: 'deepagents', questions: ['Confirm room capacity.'], warnings: ['Review suggested dates.'],
         tasks: [
-          { id: 'planned', title: 'Planned action', suggested_role: 'Secretary', kind: 'highlander_hub', due_date: '2026-11-25', phase: 'before', dependency_ids: [], evidence_ids: ['source-1'], rationale: 'Post event details.' },
+          { id: 'planned', title: 'Planned action', suggested_role: 'Industry Partnerships Chair', kind: 'highlander_hub', due_date: '2026-11-25', phase: 'before', dependency_ids: [], evidence_ids: ['source-1'], rationale: 'Post event details.' },
           { id: 'materials', title: 'Prepare materials', suggested_role: 'Treasurer', kind: 'materials_list', due_date: '2026-11-26', phase: 'before', dependency_ids: ['planned'], evidence_ids: [], rationale: 'Collect supplies before the event.' },
         ],
       });
