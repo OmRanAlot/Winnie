@@ -58,9 +58,9 @@ app.include_router(planning_router)
 app.include_router(members_router)
 
 logger.info(
-    "Winnie API starting: env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s "
+    "Winnie API starting: mode=%s env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s "
     "supabase_url=%s supabase_key=%s",
-    settings.environment, settings.log_level, settings.task_transcript_source,
+    settings.mode, settings.environment, settings.log_level, settings.task_transcript_source,
     "set" if settings.gemini_api_key else "MISSING",
     settings.gemini_model,
     "set" if settings.supabase_url else "MISSING",

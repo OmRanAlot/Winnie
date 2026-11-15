@@ -56,29 +56,33 @@ in `backend/app/services/<feature>.py`, a call to an outside system in
 
 ## Run locally
 
-Prerequisites: [uv](https://docs.astral.sh/uv/) (installs Python 3.13 for you) and Node.js 22.12+ with npm. Commands below use PowerShell, starting in the repository root.
+Prerequisites: [uv](https://docs.astral.sh/uv/) (installs Python 3.13 for you) and Node.js 22.12+ with npm. Commands below use PowerShell, starting in the repository root. On macOS/Linux, use `cp` instead of `Copy-Item` and `cd` instead of `Set-Location`.
+
+The app runs in **prod mode by default**, which is what Cloud Run uses. To run it on your laptop, start the backend with the `--local` flag. That sets `WINNIE_MODE=local` for that one process only: nothing is written to a file, so it cannot reach a deployment, and Cloud Run never sees the flag. Local mode also turns on auto-reload and listens on `127.0.0.1` only.
+
+Supabase, Gemini and every other outside service work exactly as they do in prod: the backend reads the same `.env` / `backend/.env` as always, so no Docker or local database is needed. That also means localhost talks to the same Supabase project as the deployed app; point your `.env` at a separate dev project if you want isolated data.
 
 Backend, terminal 1:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item .env.example .env        # first time only; fill in your keys
 Set-Location backend
 uv sync
-uv run fastapi dev app/main.py
+uv run python -m app.cli.serve --local     # add --port 9000 to change the port
 ```
 
 Frontend, terminal 2:
 
 ```powershell
-Copy-Item frontend/.env.example frontend/.env
+Copy-Item frontend/.env.example frontend/.env   # first time only; fill in your Supabase URL and publishable key
 Set-Location frontend
 npm install
-npm run dev
+npm run dev:local
 ```
 
-Open [the dashboard](http://localhost:5173) and [the API docs](http://localhost:8000/docs). The dashboard checks `/api/health` through Vite's local proxy.
+Open [the dashboard](http://localhost:5173) and [the API docs](http://localhost:8000/docs). The dashboard reaches the backend through Vite's `/api` proxy to port 8000. The backend's startup log must say `mode=local`; if it says `mode=prod`, it was started without `--local`. Running `uv run python -m app.cli.serve` with no flag behaves like production (all interfaces, no reload).
 
-On macOS/Linux, use `cp` instead of `Copy-Item` and `cd` instead of `Set-Location`.
+The messaging sidecar (`messaging/`) is optional. Its `MESSAGING_BRIDGE_SECRET` in `messaging/.env` must match `WINNIE_MESSAGING_BRIDGE_SECRET` in your backend env; then run `npm install; npm run dev` there.
 
 ## Task tracker setup
 

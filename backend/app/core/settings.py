@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     task_transcript_source: Literal["example", "recording"] = "example"
 
     app_name: str = "Winnie API"
+    # "prod" unless the server is started on a laptop with `python -m app.cli.serve --local`,
+    # which sets WINNIE_MODE=local for that one process. Nothing persistent selects local mode,
+    # so a deployment can never end up in it.
+    mode: Literal["local", "prod"] = "prod"
     environment: str = "development"
     log_level: str = "INFO"  # WINNIE_LOG_LEVEL=DEBUG for more detail
     cors_origins: list[str] = ["http://localhost:5173"]
@@ -100,3 +104,7 @@ class Settings(BaseSettings):
         if len(trackers) != len(set(trackers)):
             raise ValueError('Configure only one active tab per workbook/project tracker.')
         return self
+
+    @property
+    def is_local(self) -> bool:
+        return self.mode == "local"

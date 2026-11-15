@@ -139,3 +139,27 @@ test('manual task creation sends structured dates and owner; saved board notes s
     assert.equal(renderer.root.findByType('textarea').props.value, 'Saved board note');
   } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
 });
+
+test('nudge control is admin-only and never claims a reminder was sent', async () => {
+  setup(); let adminRenderer, memberRenderer;
+  try {
+    await act(async () => { adminRenderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(adminRenderer, 'Tasks').props.onClick());
+    const nudge = adminRenderer.root.findAllByType('button').find(b => b.props['aria-label'] === 'Nudge assignee for Database task');
+    assert.ok(nudge);
+    assert.equal(nudge.props.disabled, false);
+    await act(async () => nudge.props.onClick({ stopPropagation() {} }));
+    assert.ok(adminRenderer.root.findAllByProps({ role: 'status' }).some(n =>
+      text(n).includes('no reminder was sent'),
+    ));
+
+    await act(async () => { memberRenderer = TestRenderer.create(React.createElement(App, { profile, admin: false, signOut() {} })); });
+    await act(async () => button(memberRenderer, 'Tasks').props.onClick());
+    assert.equal(memberRenderer.root.findAllByType('button').find(b => b.props['aria-label'] === 'Nudge assignee for Database task'), undefined);
+  } finally {
+    if (adminRenderer) await act(async () => adminRenderer.unmount());
+    if (memberRenderer) await act(async () => memberRenderer.unmount());
+    delete globalThis.window;
+  }
+});
+});
