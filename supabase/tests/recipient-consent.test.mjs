@@ -172,3 +172,25 @@ test('upgrade preserves historical transfers and archives early consent before r
   assert.equal((await db.query("select count(*)::int n from reassignment_notifications where request_id=$1 and event='incoming' and status='pending'",[request.id])).rows[0].n,0);
  } finally {await db.close();}
 });
+
+test('conversational context derives current role/stage from phone identity and does not consume action receipts',async()=>{
+ const {db,request}=await setup();
+ try {
+  await identities(db); await db.exec('set role service_role');
+  async function context(code) {
+   return (await db.query("select messaging_request_context('imessage',$1) result",[code.toLowerCase()+'@example.com'])).rows[0].result;
+  }
+  assert.equal((await context('ADMIN')).requests[0].can_review,true);
+  assert.equal((await context('TARGET')).requests[0].can_respond,false);
+  assert.equal((await context('OWNER')).requests[0].can_review,false);
+  assert.equal((await context('OTHER')).requests.length,0);
+  assert.equal((await db.query('select count(*)::int n from reassignment_message_receipts')).rows[0].n,0);
+  await photon(db,'ADMIN','natural-approve','approved',{request_no:request.request_no});
+  assert.equal((await context('ADMIN')).requests[0].can_review,false);
+  assert.equal((await context('TARGET')).requests[0].can_respond,true);
+  await photon(db,'TARGET','natural-deny','denied',{request_no:request.request_no});
+  assert.equal((await context('ADMIN')).requests.length,0);
+  await db.exec('reset role; set role authenticated');
+  await assert.rejects(db.query("select messaging_request_context('imessage','admin@example.com')"),/permission denied/);
+ } finally {await db.close();}
+});

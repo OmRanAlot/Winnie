@@ -13,7 +13,11 @@ redeploy backend and frontend. Earlier recipient-first instructions are supersed
 3. Alternatively, text `reassign WIN-202611-1 to Taylor Example` for a specific active member.
    Numbers in direct transfer commands are not resolved against an undisplayed roster.
 4. The shared REQ enters admin review. Only administrators/reviewers are notified at this stage.
-   They use Requests or text `approve REQ-5` / `reject REQ-5`.
+   They use Requests or simply text `approve` / `reject` when one request is clear.
+   With multiple requests, Winnie asks which task and accepts a task name or list number.
+   Natural instructions such as “please reject the room booking transfer” use Gemini to
+   select a verified pending request, then the backend independently checks authorization.
+   Explicit `approve REQ-5` / `reject REQ-5` commands remain supported.
 5. Approval records the administrator and time but leaves the original ownership unchanged.
    It then queues a consent message for the recipient, who uses Requests or `accept REQ-5`
    / `deny REQ-5`. The recipient cannot accept before admin authorization.
@@ -23,6 +27,13 @@ redeploy backend and frontend. Earlier recipient-first instructions are supersed
    Administrator rejection or recipient denial preserves ownership.
 
 Text `requests` to inspect the current stage. A bare yes/no never approves a transfer.
+Natural request decisions require `20261115210000_conversational_request_context.sql`
+after the earlier reassignment migrations and an updated backend deployment. No frontend
+change is required for this addition. The public Photon readiness endpoint reports
+`request_action_protocol: 1` on the updated backend. Gemini-based named decisions require
+`WINNIE_MESSAGE_AI_ENABLED=true`; straightforward unambiguous commands also work without
+a model call. Current role and stage always come from verified live database context,
+not a person's claim to be an admin or old conversation history.
 The model proposes; deterministic RPCs verify identities, stages, active roster/consent,
 password setup, current ownership and completion state. It cannot transfer tasks directly.
 An obsolete/completed task cannot be accepted. The recipient may deny an obsolete request

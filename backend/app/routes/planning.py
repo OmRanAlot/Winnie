@@ -24,9 +24,11 @@ async def draft_plan(request: PlanningRequest):
     try:
         draft: PlanningDraft = await create_draft(
             request, knowledge_path=path, mode=settings.planning_mode,
-            model=settings.planning_model, timeout=min(settings.planning_timeout_seconds, 90),
+            model=settings.planning_model or f"google_genai:{settings.gemini_model}", timeout=min(settings.planning_timeout_seconds, 90),
         )
     except PlanningUnavailable as exc:
+        if exc.public_message:
+            raise HTTPException(503, exc.public_message) from None
         if isinstance(exc.__cause__, TimeoutError):
             raise HTTPException(503, "Planning took too long. Please try again or enter the plan manually.") from None
         raise HTTPException(503, "Planning unavailable. Check local context, model and credentials.")

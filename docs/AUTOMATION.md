@@ -9,6 +9,7 @@ always-running worker is required once deployment/setup is complete.
 1. Apply any missing earlier migrations, then apply these new migrations in order:
    - `20261115195000_admin_first_reassignment.sql`
    - `20261115200000_notification_automation.sql`
+   - `20261115220000_nudge_delivery_refresh.sql` (after other earlier migrations)
    Do not replay migrations already installed through the SQL Editor.
 2. Ensure the signed Photon webhook/queue setup is working. Keep the local listener stopped.
 3. From the repository root, on your partner's computer/account with authorized gcloud access:
@@ -39,6 +40,9 @@ container. Existing free allowance usage depends on the account's other projects
 - **Nudge**: admin-only backend action targeting verified current assignees. Deduped once per
   task/recipient per New York calendar day. No free-form recipient or message comes from the
   browser. The UI distinguishes queued, already requested, unavailable recipient and queue failure.
+  Only opted-in recipients are queued. If a deadline or assignment changes before delivery,
+  another click can refresh the obsolete, never-sent nudge. Sent or uncertain attempts remain
+  deduplicated for that recipient and day.
 - **Deadline scans**: every five minutes, reusing the existing 14/7/5-help/3-day and previous-
   evening schedule with local calendar arithmetic and persistent dedupe. Missed earlier stages
   are not blasted as catch-up messages. Disabled flags perform no scans.

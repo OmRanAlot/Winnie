@@ -37,6 +37,9 @@ class Tasks:
 
 
 class Store:
+    def pending(self, message):
+        return {'can_review':True,'requests':[{'request_no':8,'title':'Demo task','can_review':True,'can_respond':False}]}
+
     def __init__(self):
         self.calls = []
 
@@ -64,7 +67,7 @@ async def test_commands_forward_verified_transport_metadata_and_exact_actions():
     assert 'Ownership transferred' in reply
     assert store.calls == [('owner@example.com', 'event-1', 'accepted', {'request_no': 8})]
     assert 'admin approved' in await reassignment_reply(message('approve REQ-8'), Members(), Tasks(), store, settings())
-    assert 'REQ-8' in await reassignment_reply(message('requests'), Members(), Tasks(), store, settings())
+    assert 'Demo task' in await reassignment_reply(message('requests'), Members(), Tasks(), store, settings())
     await reassignment_reply(message('reassign WIN-202611-1 to Taylor Example'), Members(), Tasks(), store, settings())
     assert store.calls[-1][2] == 'submit'
     assert store.calls[-1][3]['proposed_code'] == 'TARGET'

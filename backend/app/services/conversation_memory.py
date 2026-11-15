@@ -63,6 +63,15 @@ class ConversationContext:
         if values.get('question_task_ids') and not self.question_task_ids:
             self.pending_intent, self.awaiting_answer = None, False
         self.tracked = set()
+        number = values.get('focus_request_no')
+        self.focus_request_no = number if type(number) is int and number > 0 else None
+        self.request_choices = [n for n in values.get('request_choices', []) if type(n) is int and n > 0][:30]
+        self.pending_request_action = values.get('pending_request_action') if values.get('pending_request_action') in ('approve','reject','accept','deny') else None
+
+    def request_focus(self, number=None, choices=None, action=None):
+        self.focus_request_no = number
+        self.request_choices = list(choices or [])[:30]
+        self.pending_request_action = action
 
     def _authorized(self, rows):
         if not rows:
@@ -181,6 +190,8 @@ class ConversationContext:
         questions = [key for key in self.question_task_ids if key in authorized]
         pending = self.pending_intent if not self.question_task_ids or questions else None
         self.graph.invoke({'turns': safe_turns, 'turn': turn, 'focus_task_id': focus,
+            'focus_request_no': self.focus_request_no, 'request_choices': self.request_choices,
+            'pending_request_action': self.pending_request_action,
             'pending_intent': pending, 'question_task_ids': questions,
             'pending_help_no': self.pending_help_no if focus else None,
             'awaiting_answer': self.awaiting_answer and (not self.question_task_ids or bool(questions))}, self.config)
