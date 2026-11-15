@@ -29,7 +29,6 @@ from app.routes.tasks import router as tasks_router
 from app.services.task_assignment import router as assign_task_router
 
 settings = Settings()
-settings.check_local_isolation()
 setup_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 app = FastAPI(title=settings.app_name, version="0.1.0")

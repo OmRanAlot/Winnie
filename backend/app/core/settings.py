@@ -8,12 +8,10 @@ Planned settings for the integrations are listed in app/__init__.py.
 
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "host.docker.internal"})
 REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/core/settings.py -> repo root
 
 
@@ -30,13 +28,11 @@ class Settings(BaseSettings):
     task_transcript_source: Literal["example", "recording"] = "example"
 
     app_name: str = "Winnie API"
-    # WINNIE_MODE: "local" for any local testing (set in .env.local, see .env.local.example),
-    # "prod" for deployments. Defaults to "prod" so a deploy that sets nothing is safe.
+    # "prod" unless the server is started on a laptop with `python -m app.cli.serve --local`,
+    # which sets WINNIE_MODE=local for that one process. Nothing persistent selects local mode,
+    # so a deployment can never end up in it.
     mode: Literal["local", "prod"] = "prod"
     environment: str = "development"
-    # In local mode the backend refuses a non-local Supabase URL so a stray hosted key in
-    # .env can't make localhost write to the deployed database. Set true to opt out.
-    allow_remote_in_local: bool = False
     log_level: str = "INFO"  # WINNIE_LOG_LEVEL=DEBUG for more detail
     cors_origins: list[str] = ["http://localhost:5173"]
 
@@ -97,15 +93,3 @@ class Settings(BaseSettings):
     @property
     def is_local(self) -> bool:
         return self.mode == "local"
-
-    def check_local_isolation(self) -> None:
-        """In local mode, raise if Supabase points anywhere but this machine."""
-        if not self.is_local or self.allow_remote_in_local or not self.supabase_url:
-            return
-        host = urlparse(self.supabase_url).hostname or ""
-        if host not in LOCAL_HOSTS:
-            raise RuntimeError(
-                f"WINNIE_MODE=local but SUPABASE_URL host is '{host}', not local. "
-                "Point it at `supabase start` (http://127.0.0.1:54321) in .env.local, or set "
-                "WINNIE_ALLOW_REMOTE_IN_LOCAL=true if you really want a remote database."
-            )
