@@ -831,7 +831,12 @@ export default function App({ profile, admin, signOut }) {
       setModal(null); setRequestReason("");
       say(saved?.notification_warning || "Request saved for administrator review first. Recipient consent follows approval.");
       try { await refresh(); } catch { say("Request saved. Refresh failed; please retry."); }
-    } catch (e) { setRequestError(e.message); }
+    } catch (e) {
+      const detail = String(e?.message ?? "");
+      setRequestError(detail.includes("task_reassignment_one_pending_per_member")
+        ? "You cannot assign more than one task."
+        : detail || "Could not submit the reassignment request. Please try again.");
+    }
     finally { mutationLock.current = false; setRequestBusy(false); }
   };
   const decideRequest = async (r, decision) => {
