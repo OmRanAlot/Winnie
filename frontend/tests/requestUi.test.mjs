@@ -16,10 +16,15 @@ await build({
   entryPoints: [path.join(root, 'src/App.jsx')], outfile: output,
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', external: ['react', 'react/jsx-runtime'],
   plugins: [{ name: 'fake-services', setup(build) {
-    build.onResolve({ filter: /^\.\/lib\/(api\.js|supabase(?:\.js)?|reassignments\.js)$/ }, args => ({ path: args.path, namespace: 'fake' }));
-    build.onResolve({ filter: /^\.\/(Recorder|SheetSync)\.jsx$/ }, args => ({ path: args.path, namespace: 'fake' }));
+    build.onResolve({ filter: /^\.\/lib\/(api\.js|eventPlans\.js|supabase(?:\.js)?|reassignments\.js)$/ }, args => ({ path: args.path, namespace: 'fake' }));
+    build.onResolve({ filter: /^\.\/(Recorder|SheetSync|FairyLights(?: \(1\))?)\.jsx$/ }, args => ({ path: args.path, namespace: 'fake' }));
     build.onLoad({ filter: /.*/, namespace: 'fake' }, args => ({ contents:
-      args.path.includes('api.js') ? `
+      args.path.includes('eventPlans.js') ? `
+        export const getEventPlans = () => Promise.resolve(globalThis.__dashboard.eventPlans);
+        export const getEventPlan = id => Promise.resolve(globalThis.__dashboard.eventPlans.find(plan => plan.id === id));
+        export const createEventPlan = plan => { const saved={...plan,id:'event1',created_at:'2026-11-14T12:00:00Z'}; globalThis.__dashboard.eventPlans.unshift(saved); return Promise.resolve(saved); };
+        export const updateEventPlan = (id, plan) => { const saved={...globalThis.__dashboard.eventPlans.find(item => item.id === id),...plan}; globalThis.__dashboard.eventPlans=globalThis.__dashboard.eventPlans.map(item => item.id===id ? saved : item); return Promise.resolve(saved); };
+      ` : args.path.includes('api.js') ? `
         export const getTasks = () => Promise.resolve(globalThis.__dashboard.tasks);
         export const getMembers = () => Promise.resolve(globalThis.__dashboard.people);
         export const getAssignments = () => Promise.resolve({byTask: {task1: [globalThis.__dashboard.tasks[0].ownerCode]}});
@@ -52,10 +57,14 @@ const text = node => typeof node === 'string' ? node : (node?.children ?? []).ma
 const button = (renderer, label) => renderer.root.findAllByType('button').find(b => text(b) === label);
 const profile = { id: 'profile1', member_code: 'MEMBER', name: 'Member', role: 'member' };
 function setup() {
-  globalThis.window = { addEventListener() {}, removeEventListener() {} };
+  globalThis.window = {
+    addEventListener() {}, removeEventListener() {},
+    matchMedia() { return { matches: true, addEventListener() {}, removeEventListener() {} }; },
+  };
   globalThis.__dashboard = {
     tasks: [{ id: 'task1', title: 'Database task', status: 'Upcoming', ownerCode: 'MEMBER', originalAssigneeCode: 'MEMBER', due: 'No date', start: '?', day: -1, len: 1, finished: '', notes: '', assigneeText: 'Member' }],
     people: [{ id: 'MEMBER', name: 'Member', role: 'member', skills: [] }, { id: 'OTHER', name: 'Other', role: 'member', skills: [] }],
+    eventPlans: [],
     rows: [{ id: 'request1', task_id: 'task1', requester_code: 'MEMBER', proposed_assignee_code: 'OTHER', status: 'pending', reason: 'Busy', created_at: '2026-11-14T12:00:00Z' }],
     list() { return Promise.resolve(this.rows); },
     review(_id, decision) {
@@ -108,35 +117,57 @@ test('member requests persist and show pending without exposing approval control
   } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
 });
 
-test('manual task creation sends structured dates and owner; saved board notes survive remount', async () => {
+test('manual event plans save and reopen without creating tasks', async () => {
   setup(); let renderer;
   const change = async (node, value) => act(async () => node.props.onChange({ target: { value } }));
   try {
     await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
     await act(async () => button(renderer, 'ADMIN SETTINGS').props.onClick());
-    await act(async () => button(renderer, 'Create Task').props.onClick());
+    await act(async () => button(renderer, 'Plan Event').props.onClick());
+    assert.equal(renderer.root.findAllByType('input').filter(node => node.props.type === 'date').length, 1);
+    assert.ok(!text(renderer.toJSON()).includes('Start Date'));
+    assert.ok(!text(renderer.toJSON()).includes('Due Date'));
+    await change(renderer.root.findAllByType('input').find(node => node.props.maxLength === 200), 'Winnie Workshop');
+    await change(renderer.root.findAllByType('textarea').find(node => node.props.maxLength === 6000), 'A hands-on event for new members.');
+    await change(renderer.root.findAllByType('input').find(node => node.props.type === 'date'), '2026-11-20');
+    await change(renderer.root.findAllByType('input').find(node => node.props.type === 'time'), '18:30');
     await act(async () => button(renderer, 'Enter Manually').props.onClick());
-    await change(renderer.root.findAllByType('input').find(n => n.props.maxLength === 200), 'Persisted task');
-    const dates = () => renderer.root.findAllByType('input').filter(n => n.props.type === 'date');
-    await change(dates()[0], '2026-11-16');
-    await change(dates()[1], '2026-11-20');
-    await change(renderer.root.findAllByType('input').find(n => n.props.type === 'time'), '18:30');
-    await change(renderer.root.findAllByType('select').find(n => n.findAllByType('option').some(o => text(o) === 'Unassigned')), 'OTHER');
-    await act(async () => button(renderer, 'Save Draft').props.onClick());
-    assert.equal(globalThis.__dashboard.draft.ownerCode, 'OTHER');
-    await act(async () => button(renderer, 'Submit').props.onClick());
-    assert.deepEqual(Object.fromEntries(['title','start_date','due_date','due_time','owner_code','month_code'].map(k => [k,globalThis.__dashboard.created[k]])), {
-      title:'Persisted task',start_date:'2026-11-16',due_date:'2026-11-20',due_time:'18:30',owner_code:'OTHER',month_code:'2026-11',
-    });
-    const note = renderer.root.findByType('textarea');
-    assert.equal(note.props.value, '', 'description must not become board notes');
-    await change(note, 'Saved board note');
-    await act(async () => button(renderer, 'Save notes').props.onClick());
-    assert.equal(globalThis.__dashboard.tasks.find(t => t.id === 'created').notes, 'Saved board note');
-    await act(async () => renderer.unmount());
+    assert.equal(renderer.root.findAllByType('input').filter(node => node.props.type === 'date').length, 1);
+    await change(renderer.root.findAllByType('textarea').find(node => node.props.maxLength === 20000), 'Confirm room booking and prepare supplies.');
+    await act(async () => button(renderer, 'Save Event Plan').props.onClick());
+    assert.equal(globalThis.__dashboard.eventPlans[0].event_name, 'Winnie Workshop');
+    assert.equal(globalThis.__dashboard.eventPlans[0].event_date, '2026-11-20');
+    assert.equal(globalThis.__dashboard.eventPlans[0].event_time, '18:30');
+    assert.equal(globalThis.__dashboard.eventPlans[0].plan_text, 'Confirm room booking and prepare supplies.');
+    assert.equal(globalThis.__dashboard.created, undefined, 'saving an event plan must not create a task');
+    await act(async () => button(renderer, 'Open').props.onClick());
+    assert.equal(renderer.root.findAllByType('input').find(node => node.props.type === 'date').props.value, '2026-11-20');
+    assert.equal(renderer.root.findAllByType('textarea').find(node => node.props.maxLength === 20000).props.value, 'Confirm room booking and prepare supplies.');
+    await change(renderer.root.findAllByType('textarea').find(node => node.props.maxLength === 20000), 'Room is booked; supplies are ready.');
+    await act(async () => button(renderer, 'Update Event Plan').props.onClick());
+    assert.equal(globalThis.__dashboard.eventPlans[0].plan_text, 'Room is booked; supplies are ready.');
+  } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
+});
+
+test('generated event plans receive one date and time and save as plans, not tasks', async () => {
+  setup(); let renderer;
+  const change = async (node, value) => act(async () => node.props.onChange({ target: { value } }));
+  try {
     await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
-    await act(async () => renderer.root.findAllByType('button').find(b => b.props.title === 'Persisted task').props.onClick());
-    assert.equal(renderer.root.findByType('textarea').props.value, 'Saved board note');
+    await act(async () => button(renderer, 'ADMIN SETTINGS').props.onClick());
+    await act(async () => button(renderer, 'Plan Event').props.onClick());
+    await change(renderer.root.findAllByType('input').find(node => node.props.maxLength === 200), 'Career Panel');
+    await change(renderer.root.findAllByType('textarea').find(node => node.props.maxLength === 6000), 'Invite alumni for a career discussion.');
+    await change(renderer.root.findAllByType('input').find(node => node.props.type === 'date'), '2026-12-03');
+    await change(renderer.root.findAllByType('input').find(node => node.props.type === 'time'), '17:00');
+    await act(async () => button(renderer, 'Generate Event Plan').props.onClick());
+    assert.equal(globalThis.__dashboard.plan.event_date, '2026-12-03');
+    assert.ok(globalThis.__dashboard.plan.idea.includes('Requested time: 17:00'));
+    assert.equal(renderer.root.findAllByType('input').filter(node => node.props.type === 'date').length, 1);
+    assert.ok(renderer.root.findAllByType('textarea').find(node => node.props.maxLength === 20000).props.value.includes('Planned action'));
+    await act(async () => button(renderer, 'Save Event Plan').props.onClick());
+    assert.equal(globalThis.__dashboard.eventPlans[0].event_name, 'Career Panel');
+    assert.equal(globalThis.__dashboard.created, undefined);
   } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
 });
 

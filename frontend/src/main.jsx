@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import SessionGate from "./auth/SessionGate.jsx";
+import FairyLights from "./FairyLights.jsx";
 
 function ButtonClickBurst() {
   useEffect(() => {
@@ -112,6 +113,7 @@ function ButtonClickBurst() {
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
+    <FairyLights />
     <ButtonClickBurst />
     <SessionGate />
   </React.StrictMode>,

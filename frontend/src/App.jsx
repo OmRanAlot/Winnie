@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
+import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, saveTaskNotes } from "./lib/api.js";
+import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan } from "./lib/eventPlans.js";
 import Recorder from "./Recorder.jsx";
 import Attendance from "./Attendance.jsx";
 import SheetSync from "./SheetSync.jsx";
@@ -12,14 +13,15 @@ import { reassignmentStore } from "./lib/reassignments.js";
 import { orderProfiles } from "./lib/profileOrder.js";
 import { PIXEL_ARROW_CURSOR, PIXEL_HAND_CURSOR, CUTE_CSS } from "./lib/pixelCursor.js";
 import CursorFx from "./lib/CursorFx.jsx";
+import FairyLights from "./FairyLights.jsx";
 const requestsStore = reassignmentStore(supabase);
 
 // All board records come from the backend. No sample data fallback.
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
 const REASSIGNED_COLOR = "#f3ebe2";
-const EMPTY_PLAN_INPUT = { name: "", description: "", startDate: "", dueDate: "", time: "" };
-const EMPTY_TASK_FORM = { title: "", description: "", startDate: "", dueDate: "", time: "", priority: "normal", summary: "", ownerCode: "" };
+const EMPTY_EVENT_INPUT = { name: "", description: "", date: "", time: "" };
+const EMPTY_EVENT_PLAN = { ...EMPTY_EVENT_INPUT, planText: "" };
 // Shared display helpers resolve only the currently loaded board records.
 let currentPeople = [];
 let currentTasks = [];
@@ -210,7 +212,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .plan-task-form{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4);max-width:920px;margin:0 auto;width:100%}
 .plan-task-form .wide{grid-column:1/-1}
 .plan-task-form label,.create-task-grid label{display:flex;flex-direction:column;gap:var(--s2);font-weight:600}
-.plan-task-dates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+.plan-task-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4)}
 .plan-task-actions,.create-task-actions{display:flex;justify-content:center;align-items:center;gap:var(--s3);flex-wrap:wrap;margin:var(--s5) auto 0}
 .create-task-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:var(--s5)}
 .create-task-grid .panel{min-width:0}
@@ -451,16 +453,17 @@ export default function App({ profile, admin, signOut }) {
   const [dataError, setDataError] = useState("");
   const [loading, setLoading] = useState(true);
   const refreshVersion = useRef(0);
-  const [planInput, setPlanInput] = useState(EMPTY_PLAN_INPUT);
-  const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
-  const [savedTaskForm, setSavedTaskForm] = useState(null);
+  const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
+  const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
+  const [eventPlans, setEventPlans] = useState([]);
+  const [eventPlansLoading, setEventPlansLoading] = useState(false);
+  const [eventPlansError, setEventPlansError] = useState("");
+  const [openingEventPlanId, setOpeningEventPlanId] = useState(null);
+  const [savingEventPlan, setSavingEventPlan] = useState(false);
   const [generatingPlan, setGeneratingPlan] = useState(false);
-  const [submittingTask, setSubmittingTask] = useState(false);
   const [planError, setPlanError] = useState("");
+  const [eventPlanError, setEventPlanError] = useState("");
   const [reqs, setReqs] = useState([]);
-  const [persistedDraft, setPersistedDraft] = useState(null);
-  const [draftError, setDraftError] = useState("");
-  const [draftSaving, setDraftSaving] = useState(false);
   const [noteSaving, setNoteSaving] = useState(null);
   const [MEETINGS, setMeetings] = useState([]);
   const [meetingError, setMeetingError] = useState('');
@@ -472,6 +475,13 @@ export default function App({ profile, admin, signOut }) {
     finally { setMeetingsLoading(false); }
   }, []);
   useEffect(() => { reloadMeetings().catch(() => {}); }, [reloadMeetings]);
+  const reloadEventPlans = useCallback(async () => {
+    setEventPlansLoading(true);
+    setEventPlansError("");
+    try { setEventPlans(await getEventPlans()); }
+    catch (e) { setEventPlansError(e.message); }
+    finally { setEventPlansLoading(false); }
+  }, []);
   const attendanceSaved = (id, attendees) => setMeetings(current => current.map(m =>
     m.id === id ? { ...m, attendees, attendance_recorded_at: new Date().toISOString() } : m));
   const [open, setOpen] = useState({});
@@ -525,13 +535,6 @@ export default function App({ profile, admin, signOut }) {
     return () => { ++refreshVersion.current; clearInterval(timer); window.removeEventListener("focus", reload); };
   }, [refresh]);
   useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
-  useEffect(() => {
-    if (!admin) return;
-    let active = true;
-    getTaskDraft().then(form => { if (active) setPersistedDraft(form); })
-      .catch(e => { if (active) setDraftError(e.message); });
-    return () => { active = false; };
-  }, [admin]);
   const sendRequest = async () => {
     if (mutationLock.current || !modal?.reassign) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
@@ -566,33 +569,28 @@ export default function App({ profile, admin, signOut }) {
   };
   const p = stack[stack.length - 1];
   useEffect(() => {
+    if (admin && p.n === "planEvent") reloadEventPlans();
+  }, [admin, p.n, reloadEventPlans]);
+  useEffect(() => {
     if (['attendance', 'past', 'mm', 'memberStatus'].includes(p.n)) reloadMeetings().catch(() => {});
   }, [p.n, reloadMeetings]);
   const go = (n, x = {}) => setStack((s) => [...s, { n, ...x }]);
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
-  const openTaskCreator = (form, generated = false) => {
-    const initialForm = { ...form };
-    setTaskForm(initialForm);
-    setSavedTaskForm(initialForm);
-    go("createTask", { initialForm, generated });
+  const openEventPlanEditor = (form, eventPlanId = null, generated = false) => {
+    setEventPlanForm(form);
+    setEventPlanError("");
+    go("eventPlan", { eventPlanId, generated });
   };
-  const enterTaskManually = () => openTaskCreator({
-    ...EMPTY_TASK_FORM,
-    title: planInput.name.trim(),
-    description: planInput.description,
-    startDate: planInput.startDate,
-    dueDate: planInput.dueDate,
-    time: planInput.time,
+  const enterEventPlanManually = () => openEventPlanEditor({
+    ...eventInput,
+    name: eventInput.name.trim(),
+    planText: "",
   });
-  const generateTask = async () => {
-    const name = planInput.name.trim(), description = planInput.description.trim();
-    if (!name || !description || !planInput.dueDate) {
-      setPlanError("Enter a task name, description, and due date before generating.");
-      return;
-    }
-    if (planInput.startDate && planInput.startDate > planInput.dueDate) {
-      setPlanError("The start date must be on or before the due date.");
+  const generateEventPlan = async () => {
+    const name = eventInput.name.trim(), description = eventInput.description.trim();
+    if (!name || !description || !eventInput.date) {
+      setPlanError("Enter an event name, description, and date before generating.");
       return;
     }
     setGeneratingPlan(true);
@@ -600,22 +598,22 @@ export default function App({ profile, admin, signOut }) {
     try {
       const idea = [
         description,
-        planInput.startDate ? `Requested start date: ${planInput.startDate}` : "",
-        planInput.time ? `Requested time: ${planInput.time}` : "",
+        `Event date: ${eventInput.date}`,
+        eventInput.time ? `Requested time: ${eventInput.time}` : "",
       ].filter(Boolean).join("\n\n");
       const draft = await generateTaskPlan({
         event_name: name,
         idea,
         event_type: "WiCS",
-        event_date: planInput.dueDate,
+        event_date: eventInput.date,
         event_format: "other",
       });
       if (!Array.isArray(draft.tasks) || !draft.tasks.length) {
-        throw new Error("The planner returned no task suggestions.");
+        throw new Error("The planner returned no event plan suggestions.");
       }
       const titleById = Object.fromEntries(draft.tasks.map((t) => [t.id, t.title]));
       const generatedSummary = [
-        draft.mode === 'mock' ? 'Demo planning template: review before submitting.' : '',
+        draft.mode === 'mock' ? 'Demo planning template: review and edit before saving.' : '',
         draft.tasks.map((t, i) => {
           const due = t.due_date ? ` · due ${t.due_date}` : "";
           const role = t.suggested_role ? ` · suggested role: ${t.suggested_role}` : "";
@@ -629,29 +627,57 @@ export default function App({ profile, admin, signOut }) {
         draft.questions?.length ? `Questions to review:\n${draft.questions.map((q) => `• ${q}`).join("\n")}` : "",
         draft.warnings?.length ? `Planning notes:\n${draft.warnings.map((w) => `• ${w}`).join("\n")}` : "",
       ].filter(Boolean).join("\n\n");
-      openTaskCreator({
-        ...EMPTY_TASK_FORM,
-        title: name,
-        description: planInput.description,
-        startDate: planInput.startDate,
-        dueDate: planInput.dueDate,
-        time: planInput.time,
-        summary: generatedSummary,
-      }, true);
+      openEventPlanEditor({
+        ...eventInput,
+        name,
+        description: eventInput.description,
+        date: eventInput.date,
+        time: eventInput.time,
+        planText: generatedSummary,
+      }, null, true);
     } catch (e) {
-      setPlanError(`Could not generate the task plan: ${e.message}`);
+      setPlanError(`Could not generate the event plan: ${e.message}`);
     } finally {
       setGeneratingPlan(false);
     }
   };
-  const saveTaskDraft = async () => {
-    if (draftSaving) return;
-    setDraftSaving(true); setDraftError("");
+  const openSavedEventPlan = async (item) => {
+    setOpeningEventPlanId(item.id);
+    setEventPlansError("");
     try {
-      const saved = await persistTaskDraft(taskForm);
-      setSavedTaskForm(saved); setPersistedDraft(saved); say("Draft saved to your account.");
-    } catch (e) { setDraftError(e.message); }
-    finally { setDraftSaving(false); }
+      const saved = await getEventPlan(item.id);
+      openEventPlanEditor({
+        name: saved.event_name,
+        description: saved.description || "",
+        date: saved.event_date,
+        time: saved.event_time?.slice(0, 5) || "",
+        planText: saved.plan_text,
+      }, saved.id);
+    } catch (e) { setEventPlansError(e.message); }
+    finally { setOpeningEventPlanId(null); }
+  };
+  const saveEventPlan = async () => {
+    if (savingEventPlan) return;
+    const payload = {
+      event_name: eventPlanForm.name.trim(),
+      description: eventPlanForm.description.trim(),
+      event_date: eventPlanForm.date,
+      event_time: eventPlanForm.time || null,
+      plan_text: eventPlanForm.planText.trim(),
+    };
+    if (!payload.event_name || !payload.event_date || !payload.plan_text) {
+      setEventPlanError("Enter an event name, date, and event plan before saving.");
+      return;
+    }
+    setSavingEventPlan(true);
+    setEventPlanError("");
+    try {
+      if (p.eventPlanId) await updateEventPlan(p.eventPlanId, payload);
+      else await createEventPlan(payload);
+      say(p.eventPlanId ? "Event plan updated." : "Event plan saved.");
+      back();
+    } catch (e) { setEventPlanError(e.message); }
+    finally { setSavingEventPlan(false); }
   };
   const saveNotes = async (t) => {
     if (noteSaving) return;
@@ -662,45 +688,6 @@ export default function App({ profile, admin, signOut }) {
       try { await refresh(); } catch { say("Notes saved. Please refresh the board to reload them."); }
     } catch (e) { say(e.message); }
     finally { setNoteSaving(null); }
-  };
-  const submitTask = async () => {
-    const title = taskForm.title.trim();
-    const monthSource = taskForm.dueDate || taskForm.startDate;
-    if (!title) { say("Enter a task name before submitting."); return; }
-    if (!monthSource) { say("Enter a start date or due date."); return; }
-    if (taskForm.startDate && taskForm.dueDate && taskForm.startDate > taskForm.dueDate) {
-      say("The start date must be on or before the due date.");
-      return;
-    }
-    if (!live) { say("Reconnect and refresh before creating a task."); return; }
-    const description = [
-      taskForm.description.trim(),
-      taskForm.summary.trim() ? `Task summary:\n${taskForm.summary.trim()}` : "",
-    ].filter(Boolean).join("\n\n");
-    if (description.length > 10000) { say("Task details must be 10,000 characters or fewer."); return; }
-    setSubmittingTask(true);
-    try {
-      const created = await createTaskRecord({
-        title,
-        month_code: monthSource.slice(0, 7),
-        description,
-        due_date: taskForm.dueDate || null,
-        start_date: taskForm.startDate || null,
-        due_time: taskForm.time || null,
-        owner_code: taskForm.ownerCode || null,
-        assignee_text: person(taskForm.ownerCode)?.name || "",
-        priority: taskForm.priority,
-        status: "todo",
-      });
-      const taskRecord = created;
-      setTasks((current) => [taskRecord, ...current]);
-      say(`Created “${title}”.`);
-      setStack([{ n: "dash" }, { n: "task", id: taskRecord.id }]);
-    } catch (e) {
-      say(`Task was not created: ${e.message}`);
-    } finally {
-      setSubmittingTask(false);
-    }
   };
   // Status buttons in the redesign: save through the same path as the task page.
   const setTaskStatus = (id, status) => { const t = task(id); if (t) changeStatus(t, status); };
@@ -911,91 +898,87 @@ export default function App({ profile, admin, signOut }) {
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
-    case "planTask":
-      page = (<><Top title="Plan with Winnie" tag />
+    case "planEvent":
+      page = (<><Top title="Plan Event with Winnie" tag />
         <div className="plan-task-form">
-          <label className="wide">Task Name
-            <input className="field" maxLength={200} value={planInput.name}
-              onChange={(e) => { setPlanInput({ ...planInput, name: e.target.value }); setPlanError(""); }} />
+          <label className="wide">Event Name
+            <input className="field" maxLength={200} value={eventInput.name}
+              onChange={(e) => { setEventInput({ ...eventInput, name: e.target.value }); setPlanError(""); }} />
           </label>
-          <label className="wide">Task Description
-            <textarea className="field" maxLength={6000} rows={4} value={planInput.description}
-              onChange={(e) => { setPlanInput({ ...planInput, description: e.target.value }); setPlanError(""); }} />
+          <label className="wide">Event Description
+            <textarea className="field" maxLength={6000} rows={4} value={eventInput.description}
+              onChange={(e) => { setEventInput({ ...eventInput, description: e.target.value }); setPlanError(""); }} />
           </label>
           <div className="wide plan-task-dates">
-            <label>Start Date
-              <input className="field" type="date" value={planInput.startDate}
-                onChange={(e) => { setPlanInput({ ...planInput, startDate: e.target.value }); setPlanError(""); }} />
-            </label>
-            <label>Due Date
-              <input className="field" type="date" value={planInput.dueDate}
-                onChange={(e) => { setPlanInput({ ...planInput, dueDate: e.target.value }); setPlanError(""); }} />
+            <label>Date
+              <input className="field" type="date" value={eventInput.date}
+                onChange={(e) => { setEventInput({ ...eventInput, date: e.target.value }); setPlanError(""); }} />
             </label>
             <label>Time
-              <input className="field" type="time" value={planInput.time}
-                onChange={(e) => { setPlanInput({ ...planInput, time: e.target.value }); setPlanError(""); }} />
+              <input className="field" type="time" value={eventInput.time}
+                onChange={(e) => { setEventInput({ ...eventInput, time: e.target.value }); setPlanError(""); }} />
             </label>
           </div>
         </div>
         {planError && <p className="plan-error" role="alert">{planError}</p>}
         <div className="plan-task-actions">
-          <button className="btn" type="button" disabled={generatingPlan} onClick={generateTask}>
-            {generatingPlan ? "Generating…" : "Generate"}
+          <button className="btn" type="button" disabled={generatingPlan} onClick={generateEventPlan}>
+            {generatingPlan ? "Generating…" : "Generate Event Plan"}
           </button>
-          <button className="btn alt" type="button" disabled={generatingPlan} onClick={enterTaskManually}>Enter Manually</button>
-        </div></>);
+          <button className="btn alt" type="button" disabled={generatingPlan} onClick={enterEventPlanManually}>Enter Manually</button>
+        </div>
+        <section className="panel" style={{ maxWidth: 920, margin: "var(--s5) auto 0" }}>
+          <h2>Saved Event Plans</h2>
+          <p style={{ color: "var(--muted)" }}>Saved event plans stay in this browser and are not shared across devices.</p>
+          {eventPlansError && <p role="alert">{eventPlansError} <button type="button" className="btn alt" onClick={reloadEventPlans}>Retry</button></p>}
+          {eventPlansLoading ? <p role="status">Loading saved event plans…</p> : eventPlans.length
+            ? eventPlans.map((item) => <div className="due" key={item.id}>
+              <span style={{ flex: 1 }}><b>{item.event_name}</b><small style={{ display: "block" }}>
+                {item.event_date}{item.event_time ? ` · ${item.event_time.slice(0, 5)}` : ""}
+              </small></span>
+              <button className="btn alt" type="button" disabled={openingEventPlanId === item.id}
+                onClick={() => openSavedEventPlan(item)}>
+                {openingEventPlanId === item.id ? "Opening…" : "Open"}
+              </button>
+            </div>)
+            : !eventPlansError && <p>No saved event plans yet.</p>}
+        </section></>);
       break;
-    case "createTask": {
-      const initialForm = p.initialForm ?? EMPTY_TASK_FORM;
-      page = (<><Top title="Create a Task" tag />
-        <div className="create-task-grid">
-          <div className="panel"><div className="create-task-fields">
-            <label>Name
-              <input className="field" maxLength={200} value={taskForm.title}
-                onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })} />
-            </label>
-            <label>Description
-              <textarea className="field" maxLength={10000} value={taskForm.description}
-                onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })} />
-            </label>
-            <label>Start Date
-              <input className="field" type="date" value={taskForm.startDate}
-                onChange={(e) => setTaskForm({ ...taskForm, startDate: e.target.value })} />
-            </label>
-            <label>End Date
-              <input className="field" type="date" value={taskForm.dueDate}
-                onChange={(e) => setTaskForm({ ...taskForm, dueDate: e.target.value })} />
+    case "eventPlan":
+      page = (<><Top title={p.eventPlanId ? "Edit Event Plan" : p.generated ? "Review Event Plan" : "Enter Event Plan"} tag />
+        <div className="plan-task-form">
+          <label className="wide">Event Name
+            <input className="field" maxLength={200} value={eventPlanForm.name}
+              onChange={(e) => setEventPlanForm({ ...eventPlanForm, name: e.target.value })} />
+          </label>
+          <label className="wide">Event Description
+            <textarea className="field" maxLength={6000} rows={4} value={eventPlanForm.description}
+              onChange={(e) => setEventPlanForm({ ...eventPlanForm, description: e.target.value })} />
+          </label>
+          <div className="wide plan-task-dates">
+            <label>Date
+              <input className="field" type="date" value={eventPlanForm.date}
+                onChange={(e) => setEventPlanForm({ ...eventPlanForm, date: e.target.value })} />
             </label>
             <label>Time
-              <input className="field" type="time" value={taskForm.time}
-                onChange={(e) => setTaskForm({ ...taskForm, time: e.target.value })} />
+              <input className="field" type="time" value={eventPlanForm.time}
+                onChange={(e) => setEventPlanForm({ ...eventPlanForm, time: e.target.value })} />
             </label>
-            <label>Assigned to<select className="field" value={taskForm.ownerCode || ""} onChange={e => setTaskForm({ ...taskForm, ownerCode: e.target.value })}><option value="">Unassigned</option>{PEOPLE.map(q => <option key={q.id} value={q.id}>{q.name} · {q.role}</option>)}</select></label>
-            <label>Priority
-              <select className="field" value={taskForm.priority}
-                onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}>
-                <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
-              </select>
-            </label>
-          </div></div>
-          <div className="panel">
-            <label>Task Summary
-              <textarea className="field task-summary" maxLength={10000} value={taskForm.summary}
-                placeholder="Winnie’s generated plan appears here. You can edit it before submitting."
-                onChange={(e) => setTaskForm({ ...taskForm, summary: e.target.value })} />
-            </label>
-            {p.generated && <p style={{ marginBottom: 0, color: "var(--muted)" }}>Generated suggestions are a draft. Review and edit before submitting.</p>}
           </div>
+          <label className="wide">Event Plan
+            <textarea className="field task-summary" maxLength={20000} rows={12} value={eventPlanForm.planText}
+              placeholder="Add the event outline, preparation steps, and details."
+              onChange={(e) => setEventPlanForm({ ...eventPlanForm, planText: e.target.value })} />
+          </label>
         </div>
-        <div className="create-task-actions">
-          <button className="btn alt" type="button" onClick={() => setTaskForm({ ...(savedTaskForm ?? initialForm) })}>Revert Changes</button>
-          <button className="btn out" type="button" disabled={draftSaving || submittingTask} onClick={saveTaskDraft}>{draftSaving ? "Saving…" : "Save Draft"}</button>
-          <button className="btn" type="button" disabled={submittingTask} onClick={submitTask}>
-            {submittingTask ? "Submitting…" : "Submit"}
+        {eventPlanError && <p className="plan-error" role="alert">{eventPlanError}</p>}
+        <div className="plan-task-actions">
+          <button className="btn alt" type="button" disabled={savingEventPlan} onClick={back}>Cancel</button>
+          <button className="btn" type="button" disabled={savingEventPlan} onClick={saveEventPlan}>
+            {savingEventPlan ? "Saving…" : p.eventPlanId ? "Update Event Plan" : "Save Event Plan"}
           </button>
         </div></>);
       break;
-    }
     case "admin":
       page = (<><Top title="Admin Settings" tag noBack /><div className="admin-menu">
         <button onClick={() => go("editlist")}>Board Information</button>
@@ -1003,7 +986,7 @@ export default function App({ profile, admin, signOut }) {
         <button onClick={() => go("review")}>Task Reassignment Requests</button>
         <button onClick={() => go("attendance")}>Manage Meeting Attendance</button>
         <button onClick={() => go("sheetSync")}>Google Sheets Sync</button>
-        <button onClick={() => { setPlanInput({ ...EMPTY_PLAN_INPUT }); setPlanError(""); go("planTask"); }}>Create Task</button>
+        <button onClick={() => { setEventInput({ ...EMPTY_EVENT_INPUT }); setPlanError(""); go("planEvent"); }}>Plan Event</button>
       </div>
         <div style={{ textAlign: "center" }}><button className="btn alt" onClick={() => setStack([{ n: "dash" }])}>Back to dashboard</button></div></>);
       break;
@@ -1223,15 +1206,13 @@ export default function App({ profile, admin, signOut }) {
 
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
-    <div className="app"><style>{CSS}{CUTE_CSS}</style><CursorFx /><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
+    <div className={`app${p.n === "dash" ? " home-lights" : " inner-page"}`}><style>{CSS}{CUTE_CSS}</style><CursorFx />{p.n === "dash" && <FairyLights />}<header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
         <button className="link" onClick={() => go("review")}>Requests ({reqs.filter(r => r.status === "pending").length})</button>
         <button className="link" onClick={() => signOut().catch(e => say(e.message))}>Sign out</button>
       </header>
       {dataError && <div role="alert">Could not refresh Supabase data: {dataError} <button onClick={() => refresh().catch(() => {})}>Retry</button></div>}
       {loading && <p role="status">Loading tasks and requests?</p>}
       {meetingError && ['past', 'meeting', 'mm', 'memberStatus'].includes(p.n) && <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry meetings</button></p>}
-      {admin && draftError && <p role="alert">Draft storage: {draftError}</p>}
-      {admin && persistedDraft && p.n === "planTask" && <button className="btn alt" onClick={() => openTaskCreator(persistedDraft)}>Resume saved draft</button>}
       <main className="page-content" key={p.n}>{page}</main>{p.n === "dash" && <Nav />}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
