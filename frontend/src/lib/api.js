@@ -222,6 +222,16 @@ export async function assignRecordingTasks(id) {
   return body.data.assignments; // [{title, description, seat, assignee, deadline, rationale, needs_review}]
 }
 
+// {[task_id]: "AI-generated label"} for tasks passed as [{id, title, description}]
+export async function getEventLabels(tasks) {
+  const body = await request("/tasks/records/event-labels", {
+    method: "POST",
+    body: JSON.stringify({ tasks }),
+    signal: AbortSignal.timeout(30000),
+  });
+  return body.data; // {[id]: label}
+}
+
 export async function updateTaskStatus(id, uiStatus) {
   const status = STATUS_FROM_UI[uiStatus];
   if (!status) throw new Error(`Unknown status ${uiStatus}`);

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, saveTaskNotes } from "./lib/api.js";
-import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan } from "./lib/eventPlans.js";
+import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
 import Recorder from "./Recorder.jsx";
 import Attendance from "./Attendance.jsx";
 import SheetSync from "./SheetSync.jsx";
@@ -141,6 +140,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .sec{font-size:22px;margin:var(--s5) 0 var(--s2);font-weight:650}
 .sum{display:grid;grid-template-columns:1fr 240px;gap:var(--s2) var(--s4);align-items:center;max-width:960px;margin:0 auto;width:100%}
 .sum .pill{display:flex;justify-content:space-between;align-items:center;width:100%;cursor:pointer}
+.event-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--rust);background:rgba(0,0,0,.07);border-radius:3px;padding:1px 6px;margin-bottom:3px;line-height:1.5}
 .chev{background:none;border:0;cursor:pointer;color:var(--ink);display:grid;transition:transform .15s}
 .chev.open{transform:rotate(180deg)}
 .det{grid-column:1/-1;background:#f9f4ee;border:1px solid var(--line);border-radius:var(--r);padding:var(--s3) var(--s4);margin:0 0 var(--s2);font-size:15px}
@@ -538,6 +538,7 @@ export default function App({ profile, admin, signOut }) {
   };
   const [TASKS, setTasks] = useState([]);
   const [PEOPLE, setPeople] = useState([]);
+  const [eventOverrides, setEventOverrides] = useState({});
   const tasks = TASKS; // the redesign's screens read `tasks`; same live list
   const [source, setSource] = useState("Loading tasks…");
   const live = source.startsWith("Live");
@@ -553,14 +554,24 @@ export default function App({ profile, admin, signOut }) {
       const byTask = assignments.byTask;
       const links = {};
       dependencies.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
-      setTasks(ts.map((t) => {
+      const enriched = ts.map((t) => {
         const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
         return { ...t, assignees: codes, assignee: codes[0] ?? null, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null };
-      }));
+      });
+      setTasks(enriched);
       setPeople(people);
       setReqs(requests);
       setDataError("");
       setSource(`Live: ${ts.length} tasks, ${people.length} members`);
+      // Enrich tasks whose event is "Miscellaneous" or blank with a Gemini-suggested label.
+      const needsLabel = enriched.filter((t) => !t.event || t.event.toLowerCase() === "miscellaneous");
+      if (needsLabel.length > 0) {
+        getEventLabels(needsLabel.map((t) => ({ id: t.id, title: t.title, description: t.description || "" })))
+          .then((overrides) => {
+            if (version === refreshVersion.current) setEventOverrides((prev) => ({ ...prev, ...overrides }));
+          })
+          .catch(() => {}); // non-fatal
+      }
     } catch (e) {
       if (version === refreshVersion.current) {
         setDataError(e.message);
@@ -914,7 +925,7 @@ export default function App({ profile, admin, signOut }) {
       const G = (title, st, avs) => (<>
         <h2 className="sec" style={{ gridColumn: 1 }}>{title}</h2>{avs ? <h2 className="sec" style={{ fontSize: 24 }}>Assign Task:</h2> : <span />}
         {visibleTasks.filter((t) => t.status === st).sort(compareByDueDate).map((t) => (<Fragment key={t.id}>
-          <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
+          <div className="pill" onClick={() => go("task", { id: t.id })}><span style={{ flex: 1, minWidth: 0 }}>{(() => { const ev = eventOverrides[t.id] || t.event; return ev ? <><small className="event-tag">{ev}</small><br /></> : null; })()}{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
           <div className="row" style={{ gap: 8 }}>
             {isAdminView && t.status !== "Completed" && <button type="button" className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }}
@@ -935,7 +946,7 @@ export default function App({ profile, admin, signOut }) {
               return <Avatar key={s.code} p={q} cls="sm" title={`${s.name} · ${s.fit === "strong" ? "Strong fit" : "Possible fit"}\n${s.matched_skills.join(", ")}\n${s.due_this_week} due this week · ${s.open} open\n${s.reason}`}
                 style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => { setRequestError(""); setRequestReason(""); setModal({ reassign: [t, q, s] }); }} />; });
           })() : <small>Reconnect to request reassignment.</small>)}</div>
-          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
+          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }

@@ -194,3 +194,67 @@ class TaskStore:
             "task_code", task_code
         ).eq("semester_code", semester_code))
         return result.data[0] if len(result.data) == 1 else None
+
+
+# --- Event label enrichment (Gemini) ----------------------------------------
+
+
+async def suggest_event_labels(
+    tasks: list[dict],
+    api_key: str,
+    model: str,
+) -> dict[str, str]:
+    """Return {task_id: label} for tasks that lack a specific event (e.g. 'Miscellaneous')."""
+    import json
+
+    from google.genai import types
+
+    from app.services.task_assignment import gemini_client
+
+    if not tasks:
+        return {}
+
+    items = "\n".join(
+        f'{t["id"]}: {t["title"]}'
+        + (f' — {t["description"][:120]}' if t.get("description") else "")
+        for t in tasks[:40]
+    )
+
+    response = await gemini_client(api_key).aio.models.generate_content(
+        model=model,
+        contents=items,
+        config=types.GenerateContentConfig(
+            system_instruction=(
+                "You label tasks for a university women-in-computing club's exec board.\n"
+                "For each task give a short 2–4 word label (title case) saying what kind of "
+                "work it is. Examples: Social Media, Event Logistics, Budget & Finance, "
+                "Internal Planning, Outreach, Sponsorship, Marketing, Tech Workshop, "
+                "Member Relations, Administrative, Awards & Recognition.\n"
+                "Never return 'Miscellaneous'. "
+                'Return JSON array: [{"id":"<id>","label":"<label>"}, ...]'
+            ),
+            response_mime_type="application/json",
+            response_json_schema={
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "label": {"type": "string"},
+                    },
+                    "required": ["id", "label"],
+                },
+            },
+        ),
+    )
+
+    try:
+        rows = json.loads(response.text or "[]")
+    except (ValueError, TypeError):
+        rows = []
+
+    return {
+        item["id"]: item["label"]
+        for item in rows
+        if isinstance(item, dict) and item.get("id") and item.get("label")
+    }
