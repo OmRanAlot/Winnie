@@ -161,6 +161,12 @@ export async function getCurrentUser(signal) {
 }
 
 export async function getDependencies() { return (await request('/dashboard/dependencies')).data; }
+export async function saveTaskDependencies(edges) {
+  return (await request('/tasks/records/dependencies', {
+    method: 'POST',
+    body: JSON.stringify({ edges: edges.map(({ task_id, depends_on_id }) => ({ task_id, depends_on_id })) }),
+  })).data;
+}
 export async function saveTaskNotes(id, notes) {
   return (await request(`/tasks/records/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ notes }) })).data;
 }

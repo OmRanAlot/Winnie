@@ -6,6 +6,7 @@ Timeline compatibility view, UUID ids, approved Supabase membership required:
 
 Task records (CRUD for backend clients), uuid ids, verified Bearer token or scoped server key:
     POST/GET /api/tasks/records, GET/PATCH/DELETE /api/tasks/records/{task_id}
+    POST /api/tasks/records/dependencies (admin-only, cycle-checked batch insert)
 
 Thin: validates input, calls services/tasks.py, wraps results in the {success, data, error, meta}
 envelope.
@@ -28,6 +29,7 @@ from app.schemas.tasks import (
     SemesterCode,
     StakeholderCode,
     TaskCreate,
+    TaskDependencyBatch,
     TaskStatus,
     TaskUpdate,
 )
@@ -140,6 +142,24 @@ def get_task(task_id: UUID, store: Store):
 @records.patch("/{task_id}")
 def update_task(task_id: UUID, changes: TaskUpdate, store: Store):
     return run_operation(lambda: store.update(task_id, changes))
+
+
+@records.post("/dependencies", dependencies=[Depends(require_admin)])
+def add_task_dependencies(body: TaskDependencyBatch):
+    pairs = [(str(edge.task_id), str(edge.depends_on_id)) for edge in body.edges]
+    try:
+        added = task_service.add_dependencies(pairs)
+    except repository.NotFound as error:
+        return failure(str(error), 404)
+    except ValueError as error:
+        return failure(str(error), 422)
+    except task_service.STORAGE_ERRORS:
+        logger.exception("Could not save inferred task dependencies")
+        return failure(STORE_UNAVAILABLE, 503)
+    return envelope({
+        "edges": [edge.model_dump(mode="json") for edge in added],
+        "added": len(added),
+    })
 
 
 @records.delete("/{task_id}", dependencies=[Depends(require_admin)])

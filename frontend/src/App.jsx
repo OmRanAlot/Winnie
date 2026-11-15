@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { getAssignments, getCandidates, getEventLabels, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
+import { getAssignments, getCandidates, getEventLabels, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, saveTaskDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
 import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan } from "./lib/eventPlans.js";
 import Recorder from "./Recorder.jsx";
 import PlanLoading from "./PlanLoading.jsx";
@@ -13,6 +13,7 @@ import { supabase } from "./lib/supabase.js";
 import { dispatchPhotonNotifications } from "./lib/api.js";
 import { reassignmentStore } from "./lib/reassignments.js";
 import { orderProfiles } from "./lib/profileOrder.js";
+import { inferTaskDependencies } from "./lib/taskDependencies.js";
 import { PIXEL_ARROW_CURSOR, PIXEL_HAND_CURSOR, CUTE_CSS } from "./lib/pixelCursor.js";
 import CursorFx from "./lib/CursorFx.jsx";
 const requestsStore = reassignmentStore(supabase, { notify: dispatchPhotonNotifications });
@@ -108,6 +109,17 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .home h3{font-size:22px;margin:0 0 var(--s3);font-weight:650}
 .gantt-controls{display:flex;align-items:center;justify-content:flex-end;gap:var(--s3);flex-wrap:wrap}
 .gantt-controls.admin-controls{justify-content:space-between}
+.gantt-key{display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap;margin:var(--s2) 0;color:var(--muted);font-size:13px}
+.gantt-key span{display:inline-flex;align-items:center;gap:var(--s1)}
+.gantt-key b{color:#6b3e2e;font-size:16px;line-height:1}
+.gantt-key .gantt-key-star{color:var(--sun);font-size:15px;text-shadow:0 0 1px var(--ink)}
+.gantt-inference{margin:var(--s3) 0;padding:var(--s3);border:1px solid var(--line);border-radius:var(--r);background:#fffaf5}
+.gantt-inference p{margin:0 0 var(--s2)}
+.gantt-inference ol{margin:var(--s2) 0;padding-left:var(--s5)}
+.gantt-inference li{margin:var(--s2) 0}
+.gantt-inference small{display:block;color:var(--muted)}
+.gantt-inference-actions{display:flex;gap:var(--s2);flex-wrap:wrap}
+.gantt-inference-status{margin:var(--s2) 0;color:var(--muted);font-size:13px}
 .nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:0 calc(var(--s6) * -1);padding:var(--s4) var(--s6);position:sticky;bottom:0;z-index:5}
 .nav button{border:1px solid var(--line);background:var(--paper);border-radius:var(--r);padding:var(--s3);font-size:20px;font-weight:600;color:var(--ink);cursor:pointer}
 .nav button:hover{background:var(--ink);color:var(--paper)}
@@ -132,6 +144,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .days{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-weight:700}
 .lane{position:relative;height:100%;background:repeating-linear-gradient(90deg,transparent 0 calc(100%/7 - 1px),var(--line) calc(100%/7 - 1px) calc(100%/7))}
 .bar{position:absolute;top:10px;height:20px;border-radius:3px}
+.bar-star{position:absolute;right:3px;top:50%;transform:translateY(-50%);color:var(--sun);-webkit-text-stroke:.7px var(--ink);font-size:13px;line-height:1;text-shadow:0 1px 2px var(--ink);pointer-events:none}
 .bar.related-bar{outline:2px solid var(--rust);outline-offset:1px}
 .bar.linked-highlight{outline:3px solid var(--maroon);outline-offset:1px;filter:saturate(1.25) brightness(1.08)}
 .bar.unrelated-dim{opacity:.4}
@@ -364,9 +377,13 @@ const Icon = ({ n, s = 22 }) => <svg width={s} height={s} viewBox="0 0 24 24" fi
 const Avatar = ({ p, cls = "", ...r }) => <button className={`avatar ${cls}`} title={p.name} aria-label={p.name} {...r}>{ini(p.name)}</button>;
 
 /* ---------- Gantt ---------- */
-function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onShowAllChange, onOpen, who: owner }) {
+export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAdminView = false, showAll, onShowAllChange, onOpen, onDependenciesSaved = async () => {}, who: owner }) {
   const [deps, setDeps] = useState(false);
   const [hoveredTaskId, setHoveredTaskId] = useState(null);
+  const [dependencySuggestions, setDependencySuggestions] = useState(null);
+  const [dependencySaving, setDependencySaving] = useState(false);
+  const [dependencyMessage, setDependencyMessage] = useState("");
+  const [dependencyActionError, setDependencyActionError] = useState("");
   const [week, setWeek] = useState(0); // 0 = this week, -1 = last week, 1 = next week
   const H = 40, W = 700, cw = W / 7;
   // Live tasks carry a real due date: place each one on the selected week's Mon..Sun columns.
@@ -410,13 +427,38 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
     return connected;
   };
   const linkedIds = deps ? getConnectedTaskIds([...taskIds]) : new Set();
-  const hoverScope = isAdminView && showAll ? weeklyAllTasks : baseTasks;
+  const hoverScope = weeklyAllTasks;
   const highlightedIds = hoveredTaskId === null
     ? new Set() : getConnectedTaskIds([hoveredTaskId], hoverScope);
   const showLinkedTasks = deps || hoveredTaskId !== null;
   const chartTaskIds = new Set([...taskIds, ...linkedIds, ...highlightedIds]);
   const chartTasks = weeklyAllTasks.filter((t) => chartTaskIds.has(t.id)).sort(compareByDueDate);
   const idx = Object.fromEntries(chartTasks.map((t, i) => [t.id, i]));
+  const titleById = new Map(allTasks.map((task) => [task.id, task.title]));
+  const reviewInferredDependencies = () => {
+    setDependencyMessage("");
+    setDependencyActionError("");
+    setDependencySuggestions(inferTaskDependencies(allTasks, people));
+  };
+  const saveInferredDependencies = async () => {
+    setDependencySaving(true);
+    setDependencyActionError("");
+    setDependencyMessage("");
+    try {
+      const result = await saveTaskDependencies(dependencySuggestions);
+      setDependencySuggestions(null);
+      setDependencyMessage(`${result.added} dependency link${result.added === 1 ? "" : "s"} saved.`);
+      try {
+        await onDependenciesSaved();
+      } catch (error) {
+        setDependencyActionError(`Links were saved, but the Gantt could not refresh: ${error.message}`);
+      }
+    } catch (error) {
+      setDependencyActionError(error.message);
+    } finally {
+      setDependencySaving(false);
+    }
+  };
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 6 }}>
@@ -434,6 +476,37 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
         <button type="button" className="tog" aria-pressed={deps} onClick={() => setDeps((visible) => !visible)}>
           Show linked tasks <span className={`sw ${deps ? "on" : ""}`} aria-hidden="true"><i /></span>
         </button>
+        {isAdminView && <button type="button" className="btn alt" onClick={reviewInferredDependencies}>
+          Review inferred dependencies
+        </button>}
+      </div>
+      {dependencySuggestions !== null && (
+        <div className="gantt-inference" aria-label="Inferred task dependencies">
+          {dependencySuggestions.length ? <>
+            <p>Review these high-confidence links before saving:</p>
+            <ol>{dependencySuggestions.map((edge) => (
+              <li key={`${edge.task_id}-${edge.depends_on_id}`}>
+                <b>{titleById.get(edge.task_id)}</b> depends on <b>{titleById.get(edge.depends_on_id)}</b>
+                <small>{edge.reason}</small>
+              </li>
+            ))}</ol>
+            <div className="gantt-inference-actions">
+              <button type="button" className="btn" disabled={dependencySaving} onClick={saveInferredDependencies}>
+                {dependencySaving ? "Saving…" : `Save ${dependencySuggestions.length} inferred link${dependencySuggestions.length === 1 ? "" : "s"}`}
+              </button>
+              <button type="button" className="btn alt" disabled={dependencySaving} onClick={() => setDependencySuggestions(null)}>Cancel</button>
+            </div>
+          </> : <p>No new high-confidence dependency links were found.
+            <button type="button" className="link" onClick={() => setDependencySuggestions(null)}>Dismiss</button>
+          </p>}
+        </div>
+      )}
+      {dependencyActionError && <p className="gantt-inference-status" role="alert">{dependencyActionError}</p>}
+      {dependencyMessage && <p className="gantt-inference-status" role="status">{dependencyMessage}</p>}
+      <div className="gantt-key" aria-label="Gantt chart key">
+        <span><b aria-hidden="true">↓</b> Depends on</span>
+        <span><b aria-hidden="true">↑</b> Dependency for</span>
+        <span><b className="gantt-key-star" aria-hidden="true">★</b> High priority</span>
       </div>
       <p style={{fontSize:13,color:'var(--muted)',margin:'4px 0 12px'}}>
         {baseTasks.length} scheduled in the selected week · {scopeTasks.length} tasks in this view.
@@ -447,7 +520,7 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
             const isRelated = !taskIds.has(t.id);
             const isHighlighted = hoveredTaskId !== null && highlightedIds.has(t.id);
             const isDimmed = hoveredTaskId !== null && !isHighlighted;
-            const ownerName = person(t.assignee)?.name;
+            const ownerName = people.find((member) => member.id === t.assignee)?.name;
             const showOwner = isRelated || (isAdminView && showAll && !ownTaskIds.has(t.id));
             const priority = t.priority ?? "normal";
             const priorityLabel = priority.charAt(0).toUpperCase() + priority.slice(1);
@@ -458,7 +531,9 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
               <span className={`priority-${priority}`} title={`${priorityLabel} priority`}>{priorityLabel}</span>
               <span>{t.start.slice(0, 5)}</span><span>{t.due.slice(0, 5)}</span><span>{t.finished ? t.finished.slice(0, 5) : "—"}</span>
               <div className="lane"><div className={`bar${isRelated ? " related-bar" : ""}${isHighlighted ? " linked-highlight" : ""}${isDimmed ? " unrelated-dim" : ""}`}
-                style={{ left: `${(t.day / 7) * 100}%`, width: `${(t.len / 7) * 100}%`, background: COLORS[t.status] }} /></div>
+                style={{ left: `${(t.day / 7) * 100}%`, width: `${(t.len / 7) * 100}%`, background: COLORS[t.status] }}>
+                {priority.toLowerCase() === "high" && <span className="bar-star" aria-label="High priority">★</span>}
+              </div></div>
             </div>
             );
           })}
@@ -466,7 +541,7 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
             No tasks due {owner ? `for ${owner} ` : ""}this week. Use ◀ ▶ to see other weeks.</p>}
           {showLinkedTasks && (
             <svg className="dependency-lines" viewBox={`0 0 ${W} ${chartTasks.length * H}`} preserveAspectRatio="none" role="img"
-              aria-label="Task dependency arrows point from each task to its prerequisite" style={{ height: chartTasks.length * H }}>
+              aria-label="Task dependency arrows point from dependent tasks to their prerequisites" style={{ height: chartTasks.length * H }}>
               <defs>
                 <marker id="gantt-dependency-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
                   markerUnits="strokeWidth" orient="auto">
@@ -480,12 +555,17 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
                   const x1 = (dependent.day + 0.1) * cw, y1 = idx[dependent.id] * H + H / 2;
                   const x2 = (dependency.day + dependency.len) * cw, y2 = idx[dependency.id] * H + H / 2;
                   const bendX = (x1 + x2) / 2;
-                  return <path key={`${dependent.id}-${dependency.id}`}
-                    d={`M${x1} ${y1} H${bendX} V${y2} H${x2}`}
-                    fill="none" stroke="#6b3e2e" strokeWidth="1.8" vectorEffect="non-scaling-stroke"
-                    markerEnd="url(#gantt-dependency-arrowhead)">
-                    <title>{dependent.title} depends on {dependency.title}</title>
-                  </path>;
+                  const verticalDirection = y2 < y1 ? -1 : 1;
+                  const arrowStart = y2 - verticalDirection * 8;
+                  return <g key={`${dependent.id}-${dependency.id}`}>
+                    <path d={`M${x1} ${y1} H${bendX} V${y2} H${x2}`}
+                      fill="none" stroke="#6b3e2e" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+                    <path d={`M${x2} ${arrowStart} V${y2}`}
+                      fill="none" stroke="#6b3e2e" strokeWidth="1.8" vectorEffect="non-scaling-stroke"
+                      markerEnd="url(#gantt-dependency-arrowhead)">
+                      <title>{dependent.title} depends on {dependency.title}; {dependency.title} is a dependency for {dependent.title}</title>
+                    </path>
+                  </g>;
               })}
             </svg>
           )}
@@ -900,7 +980,7 @@ export default function App({ profile, admin, signOut }) {
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
             : <button className="bell" aria-label="Notifications" onClick={() => go("review")}><Icon n="bell" s={26} /><b>{reqs.filter(r => r.status === "pending").length}</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
-        <div className="home"><div><h3>{isAdminView && adminShowAllGantt ? 'All E-board Gantt Chart:' : 'Your Gantt Chart:'}</h3><button className="link" onClick={() => go("tasks")}>View all {isAdminView ? TASKS.length : mine.length} tasks</button><Gantt tasks={mine} allTasks={TASKS} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
+        <div className="home"><div><h3>{isAdminView && adminShowAllGantt ? 'All E-board Gantt Chart:' : 'Your Gantt Chart:'}</h3><button className="link" onClick={() => go("tasks")}>View all {isAdminView ? TASKS.length : mine.length} tasks</button><Gantt tasks={mine} allTasks={TASKS} people={PEOPLE} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} onDependenciesSaved={refresh} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
             {isAdminView && <Avatar p={who(t)} cls="sm" onClick={() => t.assignee && go("profile", { id: t.assignee })} />}
             <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
