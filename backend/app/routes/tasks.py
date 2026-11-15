@@ -16,6 +16,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from app.core.auth import require_admin, require_member
 from app.core.settings import Settings
@@ -148,6 +149,33 @@ def delete_task(task_id: UUID, store: Store):
         return {"id": str(task_id)}
 
     return run_operation(operation)
+
+
+class _EventLabelTask(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+
+
+class _EventLabelsRequest(BaseModel):
+    tasks: list[_EventLabelTask]
+
+
+@records.post("/event-labels")
+async def suggest_event_labels(body: _EventLabelsRequest):
+    settings = Settings()
+    if not settings.gemini_api_key:
+        return failure("Gemini is not configured. Set GEMINI_API_KEY.", 503)
+    try:
+        labels = await task_service.suggest_event_labels(
+            [t.model_dump() for t in body.tasks],
+            settings.gemini_api_key.get_secret_value(),
+            settings.gemini_model,
+        )
+        return envelope(labels)
+    except Exception:
+        logger.exception("Event label suggestion failed")
+        return failure("Could not suggest event labels.", 502)
 
 
 router.include_router(records)
