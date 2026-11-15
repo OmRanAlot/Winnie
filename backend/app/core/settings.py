@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     message_ai_model: str = ""  # Empty uses the existing GEMINI_MODEL setting.
     message_ai_timeout_seconds: float = Field(default=10, gt=0, le=20)
     message_ai_max_tasks: int = Field(default=60, ge=1, le=100)
+    message_memory_enabled: bool = True
+    message_memory_max_turns: int = Field(default=6, ge=1, le=8)
+    message_memory_ttl_seconds: int = Field(default=7200, ge=60, le=86400)
     reminders_enabled: bool = False
     reminder_transport: Literal["mock", "photon"] = "mock"
     reminder_timezone: str = "America/New_York"

@@ -19,7 +19,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.core.auth import require_admin, require_member
+from app.core.auth import Principal, require_admin, require_member
 from app.core.settings import Settings
 from app.db import repository
 from app.integrations.supabase import StorageUnavailable
@@ -34,12 +34,27 @@ from app.schemas.tasks import (
     TaskUpdate,
 )
 from app.services import tasks as task_service
-from app.services.tasks import TaskNotFound, TaskStore
+from app.services.members import MemberStore
+from app.services.task_permissions import update_authorized
+from app.services.tasks import TaskChanged, TaskNotFound, TaskStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 STORE_UNAVAILABLE = "The task store is unavailable. Check the Supabase settings and try again."
+
+
+def get_task_store():
+    return TaskStore()
+
+
+def get_task_members():
+    return MemberStore()
+
+
+Store = Annotated[TaskStore, Depends(get_task_store)]
+Members = Annotated[MemberStore, Depends(get_task_members)]
+Actor = Annotated[Principal, Depends(require_member)]
 
 
 # --- Timeline -------------------------------------------------------------
@@ -63,12 +78,16 @@ def list_tasks(status: str | None = None, assignee: str | None = None, seat: str
 
 
 @router.patch("/{task_id}/status")
-def update_status(task_id: UUID, body: TaskStatusUpdate):
+def update_status(task_id: UUID, body: TaskStatusUpdate, store: Store, members: Members, actor: Actor):
     try:
-        view = task_service.set_status(str(task_id), body.status)
-    except repository.NotFound:
+        status = "todo" if body.status == "open" else body.status
+        saved = update_authorized(task_id, TaskUpdate(status=status), actor, store, members)
+        view = task_service.to_view(repository.task_from_record(saved))
+    except (repository.NotFound, TaskNotFound):
         return failure("Task not found.", 404)
-    except task_service.STORAGE_ERRORS:
+    except TaskChanged:
+        return failure("Task changed. Refresh and try again.", 409)
+    except (*task_service.STORAGE_ERRORS, StorageUnavailable):
         logger.exception("Could not update task %s", task_id)
         return failure(STORE_UNAVAILABLE, 503)
     return {"success": True, "data": view.model_dump(mode="json"), "error": None, "meta": {}}
@@ -83,13 +102,6 @@ authorize_tasks = require_member
 records = APIRouter(prefix="/records", dependencies=[Depends(authorize_tasks)])
 
 
-def get_task_store():
-    return TaskStore()
-
-
-Store = Annotated[TaskStore, Depends(get_task_store)]
-
-
 def envelope(data, meta=None):
     return {"success": True, "data": data, "error": None, "meta": meta or {}}
 
@@ -99,6 +111,8 @@ def run_operation(operation, meta=None):
         return envelope(operation(), meta)
     except TaskNotFound:
         return failure("Task not found.", 404)
+    except TaskChanged:
+        return failure("Task changed. Refresh and try again.", 409)
     except StorageUnavailable:
         return failure("Task storage is unavailable. Check Supabase configuration.", 503)
 
@@ -140,8 +154,8 @@ def get_task(task_id: UUID, store: Store):
 
 
 @records.patch("/{task_id}")
-def update_task(task_id: UUID, changes: TaskUpdate, store: Store):
-    return run_operation(lambda: store.update(task_id, changes))
+def update_task(task_id: UUID, changes: TaskUpdate, store: Store, members: Members, actor: Actor):
+    return run_operation(lambda: update_authorized(task_id, changes, actor, store, members))
 
 
 @records.post("/dependencies", dependencies=[Depends(require_admin)])

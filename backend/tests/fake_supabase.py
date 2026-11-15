@@ -98,6 +98,10 @@ class Query:
         self.op, self.payload = "insert", payload if isinstance(payload, list) else [payload]
         return self
 
+    def upsert(self, payload: dict | list[dict]) -> Query:
+        self.op, self.payload = "upsert", payload if isinstance(payload, list) else [payload]
+        return self
+
     def update(self, payload: dict) -> Query:
         self.op, self.payload = "update", payload
         return self
@@ -135,6 +139,27 @@ class Query:
         rows = self.client.tables[self.table]
         if self.op == "insert":
             return SimpleNamespace(data=self.client.insert(self.table, self.payload))
+        if self.op == "upsert":
+            result: list[dict[str, Any]] = []
+            for row in self.payload:
+                keys = self.client.unique_keys(self.table, row)
+                existing = None
+                if self.table == "tasks" and row.get("id") is not None:
+                    existing = next((r for r in rows if r.get("id") == row.get("id")), None)
+                elif keys:
+                    existing = next((r for r in rows if any(k in self.client.unique_keys(self.table, r) for k in keys)), None)
+                if existing is not None:
+                    merged = {**copy.deepcopy(existing), **copy.deepcopy(row)}
+                    if self.table in DEFAULTS:
+                        merged = {**copy.deepcopy(DEFAULTS[self.table]), **merged}
+                    if self.table == "tasks":
+                        merged["updated_at"] = datetime.now(UTC).isoformat()
+                    index = rows.index(existing)
+                    rows[index] = merged
+                    result.append(copy.deepcopy(merged))
+                else:
+                    result.extend(self.client.insert(self.table, [row]))
+            return SimpleNamespace(data=copy.deepcopy(result))
         matched = [row for row in rows if self.matches(row)]
         if self.op == "update":
             for row in matched:

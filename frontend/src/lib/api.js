@@ -28,7 +28,7 @@ const STATUS_TO_UI = { todo: "Upcoming", in_progress: "In-Progress", blocked: "I
 const STATUS_FROM_UI = { Upcoming: "todo", "In-Progress": "in_progress", Completed: "done" };
 const apiBase = (import.meta.env?.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   const method = (options.method ?? "GET").toUpperCase();
   const endpoint = `${apiBase}${path.split("?")[0]}`;
   let response;

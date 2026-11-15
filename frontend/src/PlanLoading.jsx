@@ -5,6 +5,7 @@ export default function PlanLoading() {
   useEffect(() => {
     const started = Date.now();
     const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    timer.unref?.();
     return () => clearInterval(timer);
   }, []);
 

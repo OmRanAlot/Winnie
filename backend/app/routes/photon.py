@@ -101,7 +101,12 @@ async def webhook(request: Request, inbox: Inbox, queue: Queue):
 async def dispatch_notifications(sender):
     store = HelpRequestStore()
     for _ in range(3):
-        notice = await run_in_threadpool(store.rpc, 'claim_reassignment_notification')
+        notice = (await run_in_threadpool(store.rpc, 'claim_reassignment_notification')
+                  if Settings().help_workflow_enabled else None)
+        finish = 'finish_reassignment_notification'
+        if not notice:
+            notice = await run_in_threadpool(store.rpc, 'claim_event_plan_notification')
+            finish = 'finish_event_plan_notification'
         if not notice:
             return False
         try:
@@ -109,7 +114,7 @@ async def dispatch_notifications(sender):
             outcome = 'sent'
         except PhotonUnavailable:
             provider, outcome = None, 'uncertain'
-        await run_in_threadpool(store.rpc, 'finish_reassignment_notification', p_id=notice['id'],
+        await run_in_threadpool(store.rpc, finish, p_id=notice['id'],
             p_token=notice['claim_token'], p_outcome=outcome, p_provider_id=provider)
     return True
 
@@ -152,10 +157,9 @@ async def work(body: Work, inbox: Inbox, sender: Sender, queue: Queue,
                     except PhotonUnavailable:
                         provider, state = None, 'uncertain'
                     await run_in_threadpool(inbox.rpc, 'photon_inbox_advance', p_id=item, p_token=token, p_state=state, p_provider=provider)
-        if s.help_workflow_enabled:
-            remaining = await dispatch_notifications(sender)
-            if remaining:
-                await run_in_threadpool(queue.enqueue, None, str(uuid4()))
+        remaining = await dispatch_notifications(sender)
+        if remaining:
+            await run_in_threadpool(queue.enqueue, None, str(uuid4()))
         return {'processed': True}
     except (StorageUnavailable, PhotonUnavailable) as exc:
         raise HTTPException(503, 'Photon processing is temporarily unavailable.') from exc

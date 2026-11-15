@@ -94,6 +94,10 @@ class TaskNotFound(Exception):
     pass
 
 
+class TaskChanged(Exception):
+    pass
+
+
 class TaskStore:
     def __init__(self, client_factory: Callable = create_task_client):
         self.client_factory = client_factory
@@ -141,6 +145,13 @@ class TaskStore:
             raise TaskNotFound
         return result.data[0]
 
+    def get_many(self, task_ids):
+        """One bounded read to re-authorize remembered task references."""
+        ids = list({str(value) for value in task_ids})
+        if len(ids) > 100:
+            raise ValueError("Too many remembered tasks")
+        return self._execute(lambda table: table.select("*").in_("id", ids)).data if ids else []
+
     def update(self, task_id: UUID, changes: TaskUpdate):
         result = self._execute(
             lambda table: table.update(changes.model_dump(mode="json", exclude_unset=True)).eq(
@@ -149,6 +160,18 @@ class TaskStore:
         )
         if not result.data:
             raise TaskNotFound
+        return result.data[0]
+
+    def update_if_current(self, task_id: UUID, changes: TaskUpdate, updated_at: str):
+        """Fence the write against edits/reassignment after the authorization read."""
+        if not updated_at:
+            raise StorageUnavailable("The task has no revision timestamp.")
+        result = self._execute(
+            lambda table: table.update(changes.model_dump(mode="json", exclude_unset=True))
+            .eq("id", str(task_id)).eq("updated_at", updated_at)
+        )
+        if not result.data:
+            raise TaskChanged
         return result.data[0]
 
     def delete(self, task_id: UUID):

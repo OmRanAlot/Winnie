@@ -594,9 +594,6 @@ export default function App({ profile, admin, signOut }) {
   const [loading, setLoading] = useState(true);
   const refreshVersion = useRef(0);
   const refreshInFlight = useRef(0);
-  const [planInput, setPlanInput] = useState(EMPTY_PLAN_INPUT);
-  const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
-  const [savedTaskForm, setSavedTaskForm] = useState(null);
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
   const [eventPlanError, setEventPlanError] = useState("");
@@ -610,6 +607,7 @@ export default function App({ profile, admin, signOut }) {
   const [planError, setPlanError] = useState("");
   const [storedReqs, setReqs] = useState([]);
   const [reviewingRequestId, setReviewingRequestId] = useState(null);
+  const reviewingRequestRef = useRef(null);
   const reqs = storedReqs.filter(r => r.id !== reviewingRequestId);
   const [persistedDraft, setPersistedDraft] = useState(null);
   const [draftError, setDraftError] = useState("");
@@ -679,7 +677,7 @@ export default function App({ profile, admin, signOut }) {
       const [requests, dependencies] = await secondary;
       if (version !== refreshVersion.current) return;
       if (requests.status === 'fulfilled') {
-        setReqs(requests.value); setRequestDataError("");
+        setReqs(requests.value.filter(request => request.id !== reviewingRequestRef.current)); setRequestDataError("");
       } else { setRequestDataError(requests.reason?.message || 'Request history could not be loaded.'); }
       if (dependencies.status === 'fulfilled') {
         const links = {};
@@ -710,9 +708,10 @@ export default function App({ profile, admin, signOut }) {
   useEffect(() => {
     const reload = () => { if (!refreshInFlight.current) refresh().catch(() => {}); };
     reload();
-    const timer = setInterval(reload, 15000);
+    const timer = typeof document === "undefined" ? null : setInterval(reload, 15000);
+    timer?.unref?.();
     window.addEventListener("focus", reload);
-    return () => { ++refreshVersion.current; clearInterval(timer); window.removeEventListener("focus", reload); };
+    return () => { ++refreshVersion.current; if (timer) clearInterval(timer); window.removeEventListener("focus", reload); };
   }, [refresh]);
   useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
   const sendRequest = async () => {
@@ -730,15 +729,21 @@ export default function App({ profile, admin, signOut }) {
     if (mutationLock.current || requestDataError || !admin) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
     setReviewingRequestId(r.id);
+    reviewingRequestRef.current = r.id;
+    setReqs(current => current.filter(request => request.id !== r.id));
     try {
       const saved = await requestsStore.review(r.id, decision);
       // Discard refreshes started before the decision was saved.
       ++refreshVersion.current;
-      setReqs(current => current.map(request => request.id === r.id ? { ...request, status: decision } : request));
+      reviewingRequestRef.current = null;
+      setReqs(current => [...current, { ...r, status: decision }]);
       setCands({});
       say(saved?.notification_warning || (decision === "approved" ? "Approved — task assignment saved" : "Request denied"));
       try { await refresh(); } catch { say("Decision saved. Refresh failed; please retry."); }
+      setRequestDataError("");
     } catch (e) {
+      reviewingRequestRef.current = null;
+      setReqs(current => [...current.filter(request => request.id !== r.id), r]);
       setRequestError(e.message);
       refresh().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); setReviewingRequestId(null); }
@@ -755,7 +760,9 @@ export default function App({ profile, admin, signOut }) {
       refresh().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); }
   };
+  const canEditTask = (t) => admin || (!!profile.member_code && owns(t, profile.member_code));
   const changeStatus = async (t, status) => {
+    if (!canEditTask(t)) return;
     if (statusLocks.current.has(t.id)) return;
     if (!live) { setStatusFeedback({error:true,text:'Reconnect and refresh before saving changes.'}); return; }
     statusLocks.current.add(t.id);
@@ -857,6 +864,10 @@ export default function App({ profile, admin, signOut }) {
         questions: saved.questions ?? [],
         warnings: saved.warnings ?? [],
         planMode: saved.plan_mode ?? "",
+        revision: saved.revision,
+        savedStatus: saved.status,
+        reviewNote: saved.review_note,
+        dirty: false,
       }, saved.id);
     } catch (e) { setEventPlansError(e.message); }
     finally { setOpeningEventPlanId(null); }
@@ -881,14 +892,31 @@ export default function App({ profile, admin, signOut }) {
     setSavingEventPlan(true);
     setEventPlanError("");
     try {
-      if (p.eventPlanId) await updateEventPlan(p.eventPlanId, payload);
+      if (p.eventPlanId) await updateEventPlan(p.eventPlanId, payload, eventPlanForm.revision);
       else await createEventPlan(payload);
       say(p.eventPlanId ? "Event plan updated." : "Event plan saved.");
       back();
     } catch (e) { setEventPlanError(e.message); }
     finally { setSavingEventPlan(false); }
   };
+  const decideEventPlan = async (decision) => {
+    if (savingEventPlan || !p.eventPlanId || eventPlanForm.dirty || eventPlanForm.savedStatus !== 'draft') return;
+    if (decision === 'approved' && (!eventPlanForm.tasks.length || eventPlanForm.tasks.some(t => !t.owner_code || !t.due_date))) return;
+    setSavingEventPlan(true); setEventPlanError('');
+    try {
+      const saved = await reviewEventPlan(p.eventPlanId, eventPlanForm.revision, decision);
+      say(saved.notification_warning || (decision === 'approved' ? 'Event plan approved. Tasks created.' : 'Event plan rejected. No tasks created.'));
+      await Promise.allSettled([refresh(), reloadEventPlans()]);
+      back();
+    } catch (e) { setEventPlanError(e.message); }
+    finally { setSavingEventPlan(false); }
+  };
+  const editEventPlan = (changes) => setEventPlanForm(current => ({ ...current, ...changes, dirty: true }));
+  const editPlanTask = (id, changes) => editEventPlan({
+    tasks: eventPlanForm.tasks.map(t => t.id === id ? { ...t, ...changes } : t),
+  });
   const saveNotes = async (t) => {
+    if (!canEditTask(t)) return;
     if (noteSaving) return;
     setNoteSaving(t.id);
     try {
@@ -985,10 +1013,10 @@ export default function App({ profile, admin, signOut }) {
             {isAdminView && <Avatar p={who(t)} cls="sm" onClick={() => t.assignee && go("profile", { id: t.assignee })} />}
             <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
             {t.status === "Upcoming"
-              ? <button className="btn alt status-action" disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>{statusSaving[t.id] ? 'Saving…' : 'Start'}</button>
+              ? <button className="btn alt status-action" disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>{statusSaving[t.id] ? 'Saving…' : 'Start'}</button>
               : <button type="button" role="switch" className={`status-switch ${t.status === "Completed" ? "on" : ""}`}
                 aria-checked={t.status === "Completed"}
-                disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]}
+                disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]}
                 title={t.status === 'Completed' ? 'Mark this task in progress' : 'Mark this task completed'}
                 aria-label={`Mark ${t.title} ${t.status === "Completed" ? "in progress" : "completed"}`}
                 onClick={() => setTaskStatus(t.id, t.status === "Completed" ? "In-Progress" : "Completed")}>
@@ -1074,9 +1102,9 @@ export default function App({ profile, admin, signOut }) {
             </select>
           </label>}
           <div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
-          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
-        <div className="panel"><h3>Description</h3><p style={{whiteSpace:"pre-wrap"}}>{t.description || "No description recorded."}</p><h3>Board notes</h3><textarea className="field" style={{ minHeight: 200 }} maxLength={10000} placeholder="Add a task note visible to the board…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
-          <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" disabled={noteSaving === t.id} onClick={() => saveNotes(t)}>Save notes</button></div></div></div></>);
+          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
+        <div className="panel"><h3>Description</h3><p style={{whiteSpace:"pre-wrap"}}>{t.description || "No description recorded."}</p><h3>Board notes</h3><textarea className="field" style={{ minHeight: 200 }} maxLength={10000} readOnly={!canEditTask(t)} placeholder="Add a task note visible to the board…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
+          <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" disabled={!live || !canEditTask(t) || noteSaving === t.id} onClick={() => saveNotes(t)}>Save notes</button></div></div></div></>);
       break;
     }
     case "tasks": {
@@ -1141,12 +1169,12 @@ export default function App({ profile, admin, signOut }) {
         </div>
         <section className="panel" style={{ maxWidth: 920, margin: "var(--s5) auto 0" }}>
           <h2>Saved Event Plans</h2>
-          <p style={{ color: "var(--muted)" }}>Saved event plans stay in this browser and are not shared across devices.</p>
+          <p style={{ color: "var(--muted)" }}>Plans are shared with administrators. Saving keeps a draft; approval creates assigned tasks.</p>
           {eventPlansError && <p role="alert">{eventPlansError} <button type="button" className="btn alt" onClick={reloadEventPlans}>Retry</button></p>}
           {eventPlansLoading ? <p role="status">Loading saved event plans…</p> : eventPlans.length
             ? eventPlans.map((item) => <div className="due" key={item.id}>
               <span style={{ flex: 1 }}><b>{item.event_name}</b><small style={{ display: "block" }}>
-                {item.event_date}{item.event_time ? ` · ${item.event_time.slice(0, 5)}` : ""}
+                {item.event_date}{item.event_time ? ` · ${item.event_time.slice(0, 5)}` : ""} · {item.status || 'draft'} · revision {item.revision || 1}
               </small></span>
               <button className="btn alt" type="button" disabled={openingEventPlanId === item.id}
                 onClick={() => openSavedEventPlan(item)}>
@@ -1158,25 +1186,26 @@ export default function App({ profile, admin, signOut }) {
       break;
     case "eventPlan": {
       const planTasks = Array.isArray(eventPlanForm.tasks) ? eventPlanForm.tasks : [];
+      const planLocked = eventPlanForm.savedStatus === 'approved';
       const titleById = Object.fromEntries(planTasks.map((task) => [task.id, task.title]));
       page = (<><Top title={p.eventPlanId ? "Edit Event Plan" : p.generated ? "Review Event Plan" : "Enter Event Plan"} tag />
-        <div className="plan-task-form">
+        <fieldset className="plan-task-form" disabled={savingEventPlan} style={{border:0}}>
           <label className="wide">Event Name
-            <input className="field" maxLength={200} value={eventPlanForm.name}
-              onChange={(e) => setEventPlanForm({ ...eventPlanForm, name: e.target.value })} />
+            <input className="field" maxLength={200} value={eventPlanForm.name} readOnly={planLocked}
+              onChange={(e) => editEventPlan({ name: e.target.value })} />
           </label>
           <label className="wide">Event Description
-            <textarea className="field" maxLength={6000} rows={4} value={eventPlanForm.description}
-              onChange={(e) => setEventPlanForm({ ...eventPlanForm, description: e.target.value })} />
+            <textarea className="field" maxLength={6000} rows={4} value={eventPlanForm.description} readOnly={planLocked}
+              onChange={(e) => editEventPlan({ description: e.target.value })} />
           </label>
           <div className="wide plan-task-dates">
             <label>Date
-              <input className="field" type="date" value={eventPlanForm.date}
-                onChange={(e) => setEventPlanForm({ ...eventPlanForm, date: e.target.value })} />
+              <input className="field" type="date" value={eventPlanForm.date} readOnly={planLocked}
+                onChange={(e) => editEventPlan({ date: e.target.value })} />
             </label>
             <label>Time
-              <input className="field" type="time" value={eventPlanForm.time}
-                onChange={(e) => setEventPlanForm({ ...eventPlanForm, time: e.target.value })} />
+              <input className="field" type="time" value={eventPlanForm.time} readOnly={planLocked}
+                onChange={(e) => editEventPlan({ time: e.target.value })} />
             </label>
           </div>
           {planTasks.length ? <section className="panel wide">
@@ -1209,6 +1238,22 @@ export default function App({ profile, admin, signOut }) {
                     <span>{expanded ? "Collapse" : "Expand"}</span>
                   </button>
                   {expanded && <div className="event-plan-task-details" id={`event-plan-task-details-${index}`}>
+                    <label>Task title<input className="field" value={task.title} maxLength={200} readOnly={planLocked}
+                      onChange={e => editPlanTask(task.id, {title:e.target.value})} /></label>
+                    <label>Owner<select className="field" value={task.owner_code || ''} disabled={planLocked}
+                      onChange={e => editPlanTask(task.id, {owner_code:e.target.value || null})}>
+                      <option value="">Choose an owner</option>{PEOPLE.map(member => <option key={member.id} value={member.id}>{member.name} · {member.role}</option>)}
+                    </select></label>
+                    <label>Task deadline<input className="field" type="date" value={task.due_date || ''} readOnly={planLocked}
+                      onChange={e => editPlanTask(task.id, {due_date:e.target.value || null})} /></label>
+                    <label>Phase<select className="field" value={task.phase || 'before'} disabled={planLocked}
+                      onChange={e => editPlanTask(task.id, {phase:e.target.value})}>
+                      {['before','during','after'].map(value => <option key={value}>{value}</option>)}
+                    </select></label>
+                    <label>Depends on<select className="field" multiple value={task.dependency_ids || []} disabled={planLocked}
+                      onChange={e => editPlanTask(task.id, {dependency_ids:Array.from(e.target.selectedOptions, option => option.value)})}>
+                      {planTasks.filter(other => other.id !== task.id).map(other => <option key={other.id} value={other.id}>{other.title}</option>)}
+                    </select></label>
                     <dl className="event-plan-task-detail"><dt>Task ID</dt><dd>{task.id}</dd></dl>
                     <dl className="event-plan-task-detail"><dt>Task type</dt><dd>{kind}</dd></dl>
                     <dl className="event-plan-task-detail"><dt>Suggested role</dt><dd>{suggestedRole ? suggestedRoleLabel : "Not specified"}</dd></dl>
@@ -1230,17 +1275,29 @@ export default function App({ profile, admin, signOut }) {
                 </ul></div>}
               </div>}
           </section> : <label className="wide">Event Plan
-            <textarea className="field task-summary" maxLength={20000} rows={12} value={eventPlanForm.planText}
+            <textarea className="field task-summary" maxLength={20000} rows={12} value={eventPlanForm.planText} readOnly={planLocked}
               placeholder="Add the event outline, preparation steps, and details."
-              onChange={(e) => setEventPlanForm({ ...eventPlanForm, planText: e.target.value })} />
+              onChange={(e) => editEventPlan({ planText: e.target.value })} />
           </label>}
-        </div>
+          <button className="btn alt" type="button" disabled={planLocked} onClick={() => editEventPlan({tasks:[...planTasks, {
+            id:crypto.randomUUID(),title:'New task',rationale:'Added during administrator review.',
+            owner_code:null,due_date:eventPlanForm.date || null,phase:'before',dependency_ids:[],evidence_ids:[],
+          }]})}>Add task to plan</button>
+        </fieldset>
+        {p.eventPlanId && <p role="status">Status: {eventPlanForm.savedStatus || 'draft'} · revision {eventPlanForm.revision}.
+          {eventPlanForm.savedStatus === 'approved' ? ' Approved plans are locked; their tasks are on the board.' : ' Save changes and reopen the plan before reviewing its saved revision.'}</p>}
         {eventPlanError && <p className="plan-error" role="alert">{eventPlanError}</p>}
         <div className="plan-task-actions">
           <button className="btn alt" type="button" disabled={savingEventPlan} onClick={back}>Cancel</button>
-          <button className="btn" type="button" disabled={savingEventPlan} onClick={saveEventPlan}>
+          <button className="btn" type="button" disabled={savingEventPlan || eventPlanForm.savedStatus === 'approved'} onClick={saveEventPlan}>
             {savingEventPlan ? "Saving…" : p.eventPlanId ? "Update Event Plan" : "Save Event Plan"}
           </button>
+          {p.eventPlanId && eventPlanForm.savedStatus === 'draft' && <>
+            <button className="btn" disabled={savingEventPlan || eventPlanForm.dirty || !planTasks.length || planTasks.some(t => !t.owner_code || !t.due_date)}
+              onClick={() => decideEventPlan('approved')}>Approve and create tasks</button>
+            <button className="btn alt" disabled={savingEventPlan || eventPlanForm.dirty}
+              onClick={() => decideEventPlan('rejected')}>Reject plan</button>
+          </>}
         </div></>);
       break;
     }
@@ -1452,7 +1509,7 @@ export default function App({ profile, admin, signOut }) {
           </div>}
           {admin && r.status === "pending" && <>
             <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError || r.recipient_decision !== "accepted"} onClick={() => decideRequest(r, "approved")}>Approve</button>
-            <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Reject request</button>
+            <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Deny</button>
           </>}
         </div>;
         page = <><Top title={approvedOnly ? "Approved Reassignments" : admin ? "Reassignment Requests" : "Your Reassignment Requests"} tag={admin} />
