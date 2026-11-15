@@ -16,8 +16,8 @@ await build({
   entryPoints: [path.join(root, 'src/App.jsx')], outfile: output,
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', external: ['react', 'react/jsx-runtime'],
   plugins: [{ name: 'fake-services', setup(build) {
-    build.onResolve({ filter: /^\.\/lib\/(api\.js|supabase|reassignments\.js)$/ }, args => ({ path: args.path, namespace: 'fake' }));
-    build.onResolve({ filter: /^\.\/Recorder\.jsx$/ }, args => ({ path: args.path, namespace: 'fake' }));
+    build.onResolve({ filter: /^\.\/lib\/(api\.js|supabase(?:\.js)?|reassignments\.js)$/ }, args => ({ path: args.path, namespace: 'fake' }));
+    build.onResolve({ filter: /^\.\/(Recorder|SheetSync)\.jsx$/ }, args => ({ path: args.path, namespace: 'fake' }));
     build.onLoad({ filter: /.*/, namespace: 'fake' }, args => ({ contents:
       args.path.includes('api.js') ? `
         export const getTasks = () => Promise.resolve(globalThis.__dashboard.tasks);
@@ -31,6 +31,16 @@ await build({
         export const getMeetings = () => Promise.resolve([]);
         export const createMeeting = () => Promise.resolve({id: 'synthetic-meeting'});
         export const saveAttendance = () => Promise.resolve();
+        export const getDependencies = () => Promise.resolve([]);
+        export const getTaskDraft = () => Promise.resolve(null);
+        export const saveTaskDraft = form => { globalThis.__dashboard.draft = form; return Promise.resolve(form); };
+        export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return Promise.resolve({tasks:[{id:'planned',title:'Planned action',rationale:'Synthetic rationale'}]}); };
+        export const createTaskRecord = body => { globalThis.__dashboard.created = body; const t={...body,id:'created',status:'Upcoming',notes:'',assignee:body.owner_code}; globalThis.__dashboard.tasks.push(t); return Promise.resolve(t); };
+        export const saveTaskNotes = (id, notes) => { globalThis.__dashboard.tasks = globalThis.__dashboard.tasks.map(t => t.id===id ? {...t,notes} : t); return Promise.resolve(); };
+        export const editMember = () => Promise.resolve();
+        export const getEvaluation = () => Promise.resolve({comments:''});
+        export const saveEvaluation = () => Promise.resolve();
+        export const ingestMeetingAudio = () => Promise.resolve();
       ` : args.path.includes('reassignments') ? 'export const reassignmentStore = () => ({list: () => globalThis.__dashboard.list(), review: (...a) => globalThis.__dashboard.review(...a), submit: (...a) => globalThis.__dashboard.submit(...a)});'
         : args.path.includes('supabase') ? 'export const supabase = {};'
         : 'export default function Recorder() { return null; }',
@@ -95,5 +105,37 @@ test('member requests persist and show pending without exposing approval control
     assert.equal(button(renderer, 'Approve'), undefined);
     assert.equal(button(renderer, 'Deny'), undefined);
     assert.ok(renderer.root.findAllByType('h2').some(n => text(n) === 'Pending (1)'));
+  } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
+});
+
+test('manual task creation sends structured dates and owner; saved board notes survive remount', async () => {
+  setup(); let renderer;
+  const change = async (node, value) => act(async () => node.props.onChange({ target: { value } }));
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(renderer, 'ADMIN SETTINGS').props.onClick());
+    await act(async () => button(renderer, 'Create Task').props.onClick());
+    await act(async () => button(renderer, 'Enter Manually').props.onClick());
+    await change(renderer.root.findAllByType('input').find(n => n.props.maxLength === 200), 'Persisted task');
+    const dates = () => renderer.root.findAllByType('input').filter(n => n.props.type === 'date');
+    await change(dates()[0], '2026-11-16');
+    await change(dates()[1], '2026-11-20');
+    await change(renderer.root.findAllByType('input').find(n => n.props.type === 'time'), '18:30');
+    await change(renderer.root.findAllByType('select').find(n => n.findAllByType('option').some(o => text(o) === 'Unassigned')), 'OTHER');
+    await act(async () => button(renderer, 'Save Draft').props.onClick());
+    assert.equal(globalThis.__dashboard.draft.ownerCode, 'OTHER');
+    await act(async () => button(renderer, 'Submit').props.onClick());
+    assert.deepEqual(Object.fromEntries(['title','start_date','due_date','due_time','owner_code','month_code'].map(k => [k,globalThis.__dashboard.created[k]])), {
+      title:'Persisted task',start_date:'2026-11-16',due_date:'2026-11-20',due_time:'18:30',owner_code:'OTHER',month_code:'2026-11',
+    });
+    const note = renderer.root.findByType('textarea');
+    assert.equal(note.props.value, '', 'description must not become board notes');
+    await change(note, 'Saved board note');
+    await act(async () => button(renderer, 'Save notes').props.onClick());
+    assert.equal(globalThis.__dashboard.tasks.find(t => t.id === 'created').notes, 'Saved board note');
+    await act(async () => renderer.unmount());
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => renderer.root.findAllByType('button').find(b => b.props.title === 'Persisted task').props.onClick());
+    assert.equal(renderer.root.findByType('textarea').props.value, 'Saved board note');
   } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
 });

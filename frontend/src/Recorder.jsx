@@ -18,7 +18,7 @@ function toBase64(blob) {
   });
 }
 
-export default function Recorder({ kind, onClose }) {
+export default function Recorder({ kind, onClose, onSaved = async () => {} }) {
   // idle -> recording -> saving -> assigning -> done | error
   const [phase, setPhase] = useState("idle");
   const [seconds, setSeconds] = useState(0);
@@ -94,6 +94,7 @@ export default function Recorder({ kind, onClose }) {
       if (!text.current.trim()) { setNotice("Saved, but no words were transcribed, so there are no tasks to extract."); setPhase("done"); setTasks([]); return; }
       setPhase("assigning");
       setTasks(await assignRecordingTasks(saved.id));
+      try { await onSaved(); } catch { setNotice('Tasks were saved, but the board could not refresh. Please refresh it.'); }
       setPhase("done");
     } catch (e) {
       setError(e.message);
@@ -115,7 +116,7 @@ export default function Recorder({ kind, onClose }) {
         {transcript || <i>Words appear here as you speak…</i>} <span style={{ opacity: 0.6 }}>{interim}</span></div>}
       {notice && <p style={{ fontSize: 14 }}>{notice}</p>}
       {error && <p role="alert" style={{ color: "#c0392b", fontSize: 15 }}>{error}</p>}
-      {tasks && tasks.length > 0 && <div style={{ marginTop: 10 }}><b>Proposed tasks (review before adding):</b>
+      {tasks && tasks.length > 0 && <div style={{ marginTop: 10 }}><b>Tasks saved from this recording (review flagged assignments):</b>
         <ul style={{ fontSize: 15, lineHeight: 1.5, paddingLeft: 20 }}>{tasks.map((t, i) => (
           <li key={i}><b>{t.title}</b> → {t.assignee || "Unassigned"} ({t.seat}){t.deadline ? `, ${t.deadline}` : ""}{t.needs_review ? " ⚠ needs review" : ""}</li>))}</ul></div>}
       {tasks && tasks.length === 0 && phase === "done" && !notice && <p>No tasks were found in this meeting.</p>}

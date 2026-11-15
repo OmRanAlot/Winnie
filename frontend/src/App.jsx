@@ -1,88 +1,28 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart } from "./lib/api.js";
+import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
 import Recorder from "./Recorder.jsx";
 import Attendance from "./Attendance.jsx";
+import SheetSync from "./SheetSync.jsx";
 import HelpReview from "./HelpReview.jsx";
-import { supabase } from "./lib/supabase";
+import ProfileEditor from "./ProfileEditor.jsx";
+import EvaluationPanel from "./EvaluationPanel.jsx";
+import UploadMeeting from "./UploadMeeting.jsx";
+import { supabase } from "./lib/supabase.js";
 import { reassignmentStore } from "./lib/reassignments.js";
 const requestsStore = reassignmentStore(supabase);
 
-/* ---------- Placeholder data (replace with backend responses) ---------- */
-// Sample people: shown when the backend is unreachable, and still used by the sample
-// Requests screens. Real members come from GET /api/members; meetings use GET /api/meetings.
-const SAMPLE_PEOPLE = [
-  { id: 1, name: "Lakshita Madhavan", role: "President", skills: ["Leadership", "Public speaking", "Budgeting"] },
-  { id: 2, name: "Stephanie Nicolaescu", role: "Vice President", skills: ["Planning", "Outreach", "Docs"] },
-  { id: 4, name: "Anne Therese Argonza", role: "Secretary", skills: ["Note-taking", "Scheduling", "Docs"] },
-  { id: 3, name: "Sharanya Raj", role: "Treasurer", skills: ["Budgeting", "Spreadsheets", "Sponsorship"] },
-  { id: 5, name: "Saidarsha Karunakaran", role: "Event Coordinator", skills: ["Logistics", "Planning", "Vendors"] },
-  { id: 6, name: "Garima Thapa", role: "Event Coordinator", skills: ["Design", "Logistics", "Outreach"] },
-  { id: 9, name: "Carlin Verano", role: "Industry Partnerships Chair", skills: ["Outreach", "Sponsorship", "Networking"], previousRoles: [] },
-  { id: 10, name: "Manisha Palaniappan", role: "Industry Partnerships Chair", skills: ["Sponsorship", "Writing", "Networking"], previousRoles: [] },
-  { id: 7, name: "Caithy Liao", role: "Public Relations Chair", skills: ["Design", "Social media", "Writing"] },
-  { id: 8, name: "Azka Faisal", role: "Public Relations Chair", skills: ["Photography", "Writing", "Outreach"] },
-  { id: 11, name: "Priya Patel", role: "Community Outreach Chair", skills: ["Outreach", "Community Engagement", "Event Planning"], previousRoles: [] },
-  { id: 12, name: "Meera James", role: "Technical Director", skills: ["Web Development", "Technical", "Design"], previousRoles: [] },
-  { id: 13, name: "Diya Pottangadi", role: "Membership Chair", skills: ["Membership", "Community Engagement", "Outreach", "Event Planning"], previousRoles: [] },
-];
-// Sample tasks, shown only when the backend can't be reached. Real tasks come from GET /api/tasks.
-// day = start column (0 = Mon), len = days wide, dep = id of task it depends on
-const SAMPLE_TASKS = [
-  { id: 1, title: "Draft GBM 1 agenda", assigned: "11/02/2026", start: "11/09/2026", due: "11/10/2026", finished: "11/10/2026", assignee: 2, status: "Completed", dep: null, day: 0, len: 1.2, notes: "" },
-  { id: 2, title: "Book GBM 1 room", assigned: "11/02/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 5, status: "In-Progress", priority: "high", dep: 1, day: 1, len: 1.2, notes: "Waiting on facilities reply." },
-  { id: 3, title: "Allocate budget for GBM 1", assigned: "11/03/2026", start: "11/11/2026", due: "11/13/2026", finished: "", assignee: 3, status: "Upcoming", priority: "high", dep: 2, day: 2, len: 2, notes: "" },
-  { id: 4, title: "Design GBM 1 flyer", assigned: "11/03/2026", start: "11/10/2026", due: "11/12/2026", finished: "", assignee: 7, status: "In-Progress", dep: null, day: 1, len: 2, notes: "" },
-  { id: 5, title: "Post flyer on socials", assigned: "11/04/2026", start: "11/12/2026", due: "11/14/2026", finished: "", assignee: 8, status: "Upcoming", dep: 4, day: 3, len: 1.6, notes: "" },
-  { id: 6, title: "Order snacks", assigned: "11/04/2026", start: "11/13/2026", due: "11/15/2026", finished: "", assignee: 5, initialAssignee: 6, status: "Upcoming", priority: "low", dep: 3, day: 4, len: 1.8, notes: "" },
-  { id: 7, title: "Draft RSVP form", assigned: "11/04/2026", start: "11/10/2026", due: "11/11/2026", finished: "", assignee: 4, status: "Upcoming", dep: 1, day: 1, len: 1, notes: "" },
-  { id: 8, title: "Share RSVP form", assigned: "11/05/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 8, status: "Upcoming", dep: 7, day: 2, len: 1.2, notes: "" },
-  { id: 9, title: "Prepare event layout", assigned: "11/05/2026", start: "11/12/2026", due: "11/14/2026", finished: "", assignee: 5, status: "Upcoming", dep: 2, day: 3, len: 1.5, notes: "" },
-  { id: 10, title: "Print GBM 1 flyers", assigned: "11/06/2026", start: "11/12/2026", due: "11/13/2026", finished: "", assignee: 7, status: "Upcoming", dep: 4, day: 3, len: 1.2, notes: "" },
-  { id: 11, title: "Confirm catering delivery", assigned: "11/06/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 6, status: "Upcoming", dep: 6, day: 5, len: 1.5, notes: "" },
-  { id: 12, title: "Confirm GBM 1 event plan", assigned: "11/06/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 1, status: "Upcoming", priority: "high", dep: 1, day: 2, len: 1, notes: "" },
-  { id: 13, title: "Review final event budget", assigned: "11/07/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 1, status: "Upcoming", priority: "high", dep: 3, day: 4, len: 1, notes: "" },
-  { id: 14, title: "Prepare opening remarks", assigned: "11/07/2026", start: "11/11/2026", due: "11/12/2026", finished: "", assignee: 2, status: "Upcoming", dep: 1, day: 2, len: 1, notes: "" },
-  { id: 15, title: "Send GBM 1 reminder", assigned: "11/08/2026", start: "11/13/2026", due: "11/14/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 4, len: 1, notes: "" },
-  { id: 16, title: "Review room layout", assigned: "11/08/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 9, day: 5, len: 1, notes: "" },
-  { id: 17, title: "Collect final RSVP count", assigned: "11/09/2026", start: "11/14/2026", due: "11/15/2026", finished: "", assignee: 2, status: "Upcoming", dep: 8, day: 5, len: 1, notes: "" },
-  // Keep the offline metrics chart representative across every member and task status.
-  ...SAMPLE_PEOPLE.flatMap((member, index) => {
-    const id = 18 + index * 4;
-    const otherMember = SAMPLE_PEOPLE[(index + 1) % SAMPLE_PEOPLE.length];
-    const base = {
-      assigned: "11/09/2026", start: "11/09/2026", assignee: member.id,
-      dep: null, day: index % 7, len: 1.2, notes: "",
-    };
-    const firstName = member.name.split(" ")[0];
-    return [
-      { ...base, id, title: `Complete ${firstName}'s weekly update`, due: "11/12/2026", finished: "11/12/2026", status: "Completed" },
-      { ...base, id: id + 1, title: `Prepare ${firstName}'s next-step plan`, due: "12/15/2026", finished: "", status: "Upcoming" },
-      { ...base, id: id + 2, title: `Submit ${firstName}'s status update`, due: "11/12/2026", finished: "", status: "Upcoming" },
-      { ...base, id: id + 3, title: `Coordinate ${firstName}'s follow-up`, initialAssignee: otherMember.id, due: "12/18/2026", finished: "", status: "Upcoming" },
-    ];
-  }),
-].map((t) => ({ ...t, initialAssignee: t.initialAssignee ?? t.assignee, priority: t.priority ?? "normal" }));
-
-const REQUESTS = [
-  { id: 1, task: 3, from: 3, to: 1, reason: "I have a schedule conflict and need someone else to handle the budget.", status: "pending", requestedAt: "11/13/2026" },
-  { id: 2, task: 5, from: 8, to: 7, reason: "I need support finishing the social media posts before the deadline.", status: "pending", requestedAt: "11/12/2026" },
-  { id: 3, task: 6, from: 6, to: 5, reason: "The event order is already being coordinated by another coordinator.", status: "approved", requestedAt: "11/10/2026" },
-];
-
+// All board records come from the backend. No sample data fallback.
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const COLORS = { Upcoming: "#e0b25a", "In-Progress": "#cc6a3d", Completed: "#7a2c22" };
 const REASSIGNED_COLOR = "#f3ebe2";
 const EMPTY_PLAN_INPUT = { name: "", description: "", startDate: "", dueDate: "", time: "" };
-const EMPTY_TASK_FORM = { title: "", description: "", startDate: "", dueDate: "", time: "", priority: "normal", summary: "" };
-const uiDate = (iso) => iso ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}` : "";
-// Kept in sync with App's state so the helpers below see live data; sample ids still resolve
-// for the screens that are not connected yet.
-let currentPeople = SAMPLE_PEOPLE;
-let currentTasks = SAMPLE_TASKS;
-const person = (id) => currentPeople.find((p) => p.id === id) ?? SAMPLE_PEOPLE.find((p) => p.id === id);
-const task = (id) => currentTasks.find((t) => t.id === id) ?? SAMPLE_TASKS.find((t) => t.id === id);
+const EMPTY_TASK_FORM = { title: "", description: "", startDate: "", dueDate: "", time: "", priority: "normal", summary: "", ownerCode: "" };
+// Shared display helpers resolve only the currently loaded board records.
+let currentPeople = [];
+let currentTasks = [];
+const person = (id) => currentPeople.find((p) => p.id === id);
+const task = (id) => currentTasks.find((t) => t.id === id);
 const owns = (t, id) => t.assignee === id || (t.assignees ?? []).includes(id);
-const seedOf = (id) => [...String(id)].reduce((a, c) => a + c.charCodeAt(0), 0);
 const dueDateKey = (t) => {
   if (t.dueIso) {
     const time = Date.parse(t.dueIso);
@@ -379,16 +319,18 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
   const [week, setWeek] = useState(0); // 0 = this week, -1 = last week, 1 = next week
   const H = 40, W = 700, cw = W / 7;
   // Live tasks carry a real due date: place each one on the selected week's Mon..Sun columns.
-  // Sample tasks (no dueIso) keep their hand-set day/len.
-  const dated = allTasks.some((t) => t.dueIso);
   const monday = weekStart();
   monday.setDate(monday.getDate() + 7 * week);
   const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
   const fmt = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const weekTasks = (list) => !dated ? [...list].sort(compareByDueDate) : list
+  const weekTasks = (list) => list
     .filter((t) => t.dueIso)
-    .map((t) => ({ ...t, day: Math.round((new Date(`${t.dueIso}T00:00:00`) - monday) / 86400000), len: 1 }))
-    .filter((t) => t.day >= 0 && t.day < 7)
+    .map((t) => {
+      const first = Math.round((new Date(`${t.startIso || t.dueIso}T00:00:00`) - monday) / 86400000);
+      const last = Math.round((new Date(`${t.dueIso}T00:00:00`) - monday) / 86400000);
+      return { ...t, day: Math.max(0,first), len: Math.min(6,last)-Math.max(0,first)+1, visible: last>=0 && first<7 };
+    })
+    .filter(t => t.visible)
     .sort(compareByDueDate);
   const baseTasks = weekTasks(isAdminView && showAll ? allTasks : all);
   const taskIds = new Set(baseTasks.map((t) => t.id));
@@ -402,8 +344,9 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
       const currentId = pending.pop();
       scopeTasks.forEach((candidate) => {
         const neighbors = [];
-        if (candidate.dep === currentId) neighbors.push(candidate.id);
-        if (candidate.id === currentId && candidate.dep != null) neighbors.push(candidate.dep);
+        const parents = candidate.dependsOn || (candidate.dep ? [candidate.dep] : []);
+        if (parents.includes(currentId)) neighbors.push(candidate.id);
+        if (candidate.id === currentId) neighbors.push(...parents);
         neighbors.forEach((id) => {
           if (scopeIds.has(id) && !connected.has(id)) {
             connected.add(id);
@@ -424,11 +367,11 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
   const idx = Object.fromEntries(chartTasks.map((t, i) => [t.id, i]));
   return (
     <div>
-      {dated && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 6 }}>
         <button className="btn alt" style={{ padding: "4px 14px" }} aria-label="Previous week" onClick={() => setWeek(week - 1)}>◀</button>
         <b>{fmt(monday)} – {fmt(sunday)}{week === 0 ? " (this week)" : ""}</b>
         <button className="btn alt" style={{ padding: "4px 14px" }} aria-label="Next week" onClick={() => setWeek(week + 1)}>▶</button>
-      </div>}
+      </div>
       <div className={`gantt-controls${isAdminView ? " admin-controls" : ""}`}>
         {isAdminView && (
           <button type="button" className="tog" aria-pressed={showAll} aria-label={`Gantt view: ${showAll ? "all E-board tasks" : "my tasks"}. Switch view.`}
@@ -467,9 +410,9 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
             No tasks due {owner ? `for ${owner} ` : ""}this week. Use ◀ ▶ to see other weeks.</p>}
           {showLinkedTasks && (
             <svg className="dependency-lines" viewBox={`0 0 ${W} ${chartTasks.length * H}`} preserveAspectRatio="none" style={{ height: chartTasks.length * H }}>
-              {chartTasks.filter((t) => t.dep && idx[t.dep] !== undefined).map((t) => {
-                const a = chartTasks.find((item) => item.id === t.dep), x1 = (a.day + a.len) * cw, y1 = idx[a.id] * H + H / 2, x2 = (t.day + 0.1) * cw, y2 = idx[t.id] * H + 9;
-                return <path key={t.id} d={`M${x1} ${y1} H${x1 + 8} V${y2 - 4} H${x2} V${y2}`} fill="none" stroke="#4a1109" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />;
+              {chartTasks.flatMap(t => (t.dependsOn || (t.dep ? [t.dep] : [])).filter(id => idx[id] !== undefined).map(id => ({t,id}))).map(({t,id}) => {
+                const a = chartTasks.find(item => item.id === id), x1 = (a.day + a.len) * cw, y1 = idx[a.id] * H + H / 2, x2 = (t.day + 0.1) * cw, y2 = idx[t.id] * H + 9;
+                return <path key={`${t.id}-${id}`} d={`M${x1} ${y1} H${x1 + 8} V${y2 - 4} H${x2} V${y2}`} fill="none" stroke="#4a1109" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />;
               })}
             </svg>
           )}
@@ -500,8 +443,11 @@ export default function App({ profile, admin, signOut }) {
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [submittingTask, setSubmittingTask] = useState(false);
   const [planError, setPlanError] = useState("");
-  const [reqs, setReqs] = useState(REQUESTS);
-  const [reassignmentReason, setReassignmentReason] = useState("");
+  const [reqs, setReqs] = useState([]);
+  const [persistedDraft, setPersistedDraft] = useState(null);
+  const [draftError, setDraftError] = useState("");
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [noteSaving, setNoteSaving] = useState(null);
   const [MEETINGS, setMeetings] = useState([]);
   const [meetingError, setMeetingError] = useState('');
   const [meetingsLoading, setMeetingsLoading] = useState(true);
@@ -514,7 +460,6 @@ export default function App({ profile, admin, signOut }) {
   useEffect(() => { reloadMeetings().catch(() => {}); }, [reloadMeetings]);
   const attendanceSaved = (id, attendees) => setMeetings(current => current.map(m =>
     m.id === id ? { ...m, attendees, attendance_recorded_at: new Date().toISOString() } : m));
-  const [profileDrafts, setProfileDrafts] = useState({});
   const [open, setOpen] = useState({});
   const [notes, setNotes] = useState({});
   const [recorder, setRecorder] = useState(null); // meeting kind being recorded, or null
@@ -535,14 +480,16 @@ export default function App({ profile, admin, signOut }) {
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current;
     try {
-      const [ts, people, assignments, requests] = await Promise.all([
-        getTasks(), getMembers(), getAssignments(), requestsStore.list(),
+      const [ts, people, assignments, requests, dependencies] = await Promise.all([
+        getTasks(), getMembers(), getAssignments(), requestsStore.list(), getDependencies(),
       ]);
       if (version !== refreshVersion.current) return;
       const byTask = assignments.byTask;
+      const links = {};
+      dependencies.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
       setTasks(ts.map((t) => {
         const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
-        return { ...t, assignees: codes, assignee: codes[0] ?? null };
+        return { ...t, assignees: codes, assignee: codes[0] ?? null, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null };
       }));
       setPeople(people);
       setReqs(requests);
@@ -557,21 +504,6 @@ export default function App({ profile, admin, signOut }) {
     } finally { if (version === refreshVersion.current) setLoading(false); }
   }, []);
   useEffect(() => {
-    Promise.all([getTasks(), getMembers(), getAssignments().catch(() => null)])
-      .then(([ts, people, assignments]) => {
-        const byTask = assignments?.byTask ?? {};
-        // First recognized member is the "assignee" the design shows; all of them can see the task.
-        setTasks(ts.map((t) => {
-          const assignees = t.currentAssignee ? [t.currentAssignee] : byTask[t.id] ?? [];
-          return { ...t, assignees, assignee: t.currentAssignee ?? assignees[0] ?? null };
-        }));
-        if (people.length) setPeople(people);
-        const linked = Object.values(byTask).filter((c) => c && c.length).length;
-        setSource(`Live: ${ts.length} tasks, ${people.length} members, ${linked} tasks linked to people`);
-      })
-      .catch((e) => setSource(`Sample data (${e.message})`));
-  }, []);
-  useEffect(() => {
     const reload = () => { refresh().catch(() => {}); };
     reload();
     const timer = setInterval(reload, 15000);
@@ -579,6 +511,13 @@ export default function App({ profile, admin, signOut }) {
     return () => { ++refreshVersion.current; clearInterval(timer); window.removeEventListener("focus", reload); };
   }, [refresh]);
   useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
+  useEffect(() => {
+    if (!admin) return;
+    let active = true;
+    getTaskDraft().then(form => { if (active) setPersistedDraft(form); })
+      .catch(e => { if (active) setDraftError(e.message); });
+    return () => { active = false; };
+  }, [admin]);
   const sendRequest = async () => {
     if (mutationLock.current || !modal?.reassign) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
@@ -618,46 +557,6 @@ export default function App({ profile, admin, signOut }) {
   const go = (n, x = {}) => setStack((s) => [...s, { n, ...x }]);
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
-  const sendReassignmentRequest = () => {
-    const [targetTask, targetMember] = modal.reassign;
-    const reason = reassignmentReason.trim();
-    if (!reason || /[\r\n]/.test(reason) || /[.!?]\s+\S/.test(reason)) {
-      say("Enter a one-sentence reason on a single line.");
-      return;
-    }
-    if (live) {
-      say("Reassignment requests are not connected to the backend yet; nothing was saved.");
-      return;
-    }
-    setReqs((current) => [{
-      id: Date.now(),
-      task: targetTask.id,
-      from: me.id,
-      to: targetMember.id,
-      reason,
-      status: "pending",
-      requestedAt: new Date().toLocaleDateString(),
-    }, ...current]);
-    setModal(null);
-    setReassignmentReason("");
-    say("Request added to sample data for this session only.");
-  };
-  const reviewReassignmentRequest = (requestId, decision) => {
-    if (live) {
-      say("Reassignment reviews are not connected to the backend yet; nothing was changed.");
-      return;
-    }
-    const reviewedRequest = reqs.find((request) => request.id === requestId);
-    if (decision === "approved" && reviewedRequest) {
-      setTasks((current) => current.map((item) => item.id === reviewedRequest.task
-        ? { ...item, assignee: reviewedRequest.to, currentAssignee: reviewedRequest.to, assignees: [reviewedRequest.to] }
-        : item));
-    }
-    setReqs((current) => current.map((request) =>
-      request.id === requestId ? { ...request, status: decision } : request,
-    ));
-    say(`Request ${decision} in sample data for this session only.`);
-  };
   const openTaskCreator = (form, generated = false) => {
     const initialForm = { ...form };
     setTaskForm(initialForm);
@@ -702,6 +601,7 @@ export default function App({ profile, admin, signOut }) {
       }
       const titleById = Object.fromEntries(draft.tasks.map((t) => [t.id, t.title]));
       const generatedSummary = [
+        draft.mode === 'mock' ? 'Demo planning template: review before submitting.' : '',
         draft.tasks.map((t, i) => {
           const due = t.due_date ? ` · due ${t.due_date}` : "";
           const role = t.suggested_role ? ` · suggested role: ${t.suggested_role}` : "";
@@ -730,9 +630,24 @@ export default function App({ profile, admin, signOut }) {
       setGeneratingPlan(false);
     }
   };
-  const saveTaskDraft = () => {
-    setSavedTaskForm({ ...taskForm });
-    say("Draft saved for this session.");
+  const saveTaskDraft = async () => {
+    if (draftSaving) return;
+    setDraftSaving(true); setDraftError("");
+    try {
+      const saved = await persistTaskDraft(taskForm);
+      setSavedTaskForm(saved); setPersistedDraft(saved); say("Draft saved to your account.");
+    } catch (e) { setDraftError(e.message); }
+    finally { setDraftSaving(false); }
+  };
+  const saveNotes = async (t) => {
+    if (noteSaving) return;
+    setNoteSaving(t.id);
+    try {
+      await saveTaskNotes(t.id, notes[t.id] ?? t.notes);
+      say("Notes saved.");
+      try { await refresh(); } catch { say("Notes saved. Please refresh the board to reload them."); }
+    } catch (e) { say(e.message); }
+    finally { setNoteSaving(null); }
   };
   const submitTask = async () => {
     const title = taskForm.title.trim();
@@ -743,11 +658,9 @@ export default function App({ profile, admin, signOut }) {
       say("The start date must be on or before the due date.");
       return;
     }
-    if (!live) { say("Sample data: connect task storage to submit tasks."); return; }
+    if (!live) { say("Reconnect and refresh before creating a task."); return; }
     const description = [
       taskForm.description.trim(),
-      taskForm.startDate ? `Start date: ${taskForm.startDate}` : "",
-      taskForm.time ? `Time: ${taskForm.time}` : "",
       taskForm.summary.trim() ? `Task summary:\n${taskForm.summary.trim()}` : "",
     ].filter(Boolean).join("\n\n");
     if (description.length > 10000) { say("Task details must be 10,000 characters or fewer."); return; }
@@ -758,14 +671,14 @@ export default function App({ profile, admin, signOut }) {
         month_code: monthSource.slice(0, 7),
         description,
         due_date: taskForm.dueDate || null,
+        start_date: taskForm.startDate || null,
+        due_time: taskForm.time || null,
+        owner_code: taskForm.ownerCode || null,
+        assignee_text: person(taskForm.ownerCode)?.name || "",
         priority: taskForm.priority,
         status: "todo",
       });
-      const taskRecord = {
-        ...created,
-        start: uiDate(taskForm.startDate) || created.start,
-        notes: description,
-      };
+      const taskRecord = created;
       setTasks((current) => [taskRecord, ...current]);
       say(`Created “${title}”.`);
       setStack([{ n: "dash" }, { n: "task", id: taskRecord.id }]);
@@ -794,10 +707,10 @@ export default function App({ profile, admin, signOut }) {
   };
   const getMemberStatus = (member) => {
     const memberTasks = TASKS.filter((t) => owns(t, member.id));
-    const transferRequests = live ? [] : reqs;
+    const transferRequests = reqs;
     const transferredRequestTasks = new Set(transferRequests
-      .filter((request) => request.status === "approved" && sameMember(request.to, member.id))
-      .map((request) => String(request.task)));
+      .filter((request) => request.status === "approved" && sameMember(request.proposed_assignee_code, member.id))
+      .map((request) => String(request.task_id)));
     const isTransferred = (t) => sameMember(currentOwner(t), member.id) &&
       ((initialOwner(t) != null && !sameMember(initialOwner(t), currentOwner(t))) ||
         transferredRequestTasks.has(String(t.id)));
@@ -808,11 +721,11 @@ export default function App({ profile, admin, signOut }) {
     return { completed, pending, overdue, transferred };
   };
   const getReassignmentCounts = (member) => {
-    const requests = live ? [] : reqs;
+    const requests = reqs;
     return {
-      requested: requests.filter((request) => sameMember(request.from, member.id)).length,
-      approved: requests.filter((request) => request.status === "approved" && sameMember(request.from, member.id)).length,
-      received: requests.filter((request) => request.status === "approved" && sameMember(request.to, member.id)).length,
+      requested: requests.filter((request) => sameMember(request.requester_code, member.id)).length,
+      approved: requests.filter((request) => request.status === "approved" && sameMember(request.requester_code, member.id)).length,
+      received: requests.filter((request) => request.status === "approved" && sameMember(request.proposed_assignee_code, member.id)).length,
     };
   };
 
@@ -844,12 +757,12 @@ export default function App({ profile, admin, signOut }) {
   );
 
   let page;
-  const adminPages = ["admin", "editlist", "edit", "eval", "evals", "taskmetrics", "tm", "meetmetrics", "mm", "reassigned"];
+  const adminPages = ["admin", "editlist", "edit", "eval", "evals", "taskmetrics", "tm", "meetmetrics", "mm", "reassigned", "sheetSync"];
   switch (!admin && adminPages.includes(p.n) ? "dash" : p.n) {
     case "dash": {
       // Live: the Gantt picks the week itself; admins see everyone's tasks, members their own.
       const mine = TASKS.filter((t) => owns(t, me.id));
-      const pending = TASKS.filter((t) => t.status !== "Completed");
+      const pending = TASKS.filter((t) => t.status !== "Completed" && (isAdminView || owns(t, me.id)));
       const soon = (live ? [...pending].sort((a, b) => (a.dueIso ?? "9999").localeCompare(b.dueIso ?? "9999")) : pending).slice(0, isAdminView ? 3 : 4);
       page = (<>
         <div className="top"><h1 className="greeting">Hey {me.name.split(" ")[0]}!</h1>
@@ -875,12 +788,12 @@ export default function App({ profile, admin, signOut }) {
       break;
     }
     case "meetings":
-      page = (<><Top title="Meetings" /><div style={{ textAlign: "right", marginTop: -50, marginBottom: 20, fontSize: 20, pointerEvents: "none" }}>11/14/2026</div>
+      page = (<><Top title="Meetings" /><div style={{ textAlign: "right", marginTop: -50, marginBottom: 20, fontSize: 20, pointerEvents: "none" }}>{new Date().toLocaleDateString('en-US')}</div>
         <div className="two meeting-layout" style={{ gridTemplateColumns: "180px 1fr", gap: 24 }}>
           <div className="side panel">{["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" onClick={() => setRecorder(k)}>{k}</button>)}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             {["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" style={{ padding: 28, display: "flex", alignItems: "center", gap: 10 }} onClick={() => setRecorder(k)}><Icon n="mic" />Create a new {k.toLowerCase()} recording</button>)}
-            <button className="btn alt" style={{ alignSelf: "flex-end" }} onClick={() => go("past")}>Past Meetings</button></div></div></>);
+            <button className="btn alt" style={{ alignSelf: "flex-end" }} onClick={() => go("past")}>Past Meetings</button></div></div><UploadMeeting onSaved={() => Promise.all([refresh(), reloadMeetings()])} /></>);
       break;
     case "past":
       page = (<><Top title="Your past meetings" /><table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 900, margin: "20px auto", background: "#fff", borderRadius: 16, overflow: "hidden" }}>
@@ -889,6 +802,7 @@ export default function App({ profile, admin, signOut }) {
       break;
     case "meeting": {
       const m = MEETINGS.find((x) => x.id === p.id);
+      const linkedTasks = TASKS.filter(t => String(t.meetingId) === String(p.id));
       if (!m) { page = <p>Meeting unavailable.</p>; break; }
       page = (<><Top title={m.name} /><p style={{ textAlign: "center", margin: "0 0 18px", fontSize: 20 }}>{m.date}</p>
         <p style={{ textAlign: "center" }}>{m.attendance_recorded_at
@@ -897,7 +811,7 @@ export default function App({ profile, admin, signOut }) {
         <div className="cols"><div className="panel"><h3>Notes:</h3><p>{m.summary || "No meeting notes recorded."}</p></div>
           <div className="panel"><h3>Transcript:</h3><p>{m.transcript || "No transcript recorded."}</p></div>
           <div><h3 style={{ textAlign: "center", fontSize: 24, marginTop: 0 }}>Delegated Tasks:</h3>
-            {m.tasks.map(([t, a]) => <div className="due" key={t}><Icon n="arrow" s={18} /><button className="pill" style={{ flex: 1, textAlign: "center" }} onClick={() => go("task", { id: TASKS.find((x) => x.title === t)?.id || 1 })}>{t}<br /><small>Assignee: {person(a)?.name || "Not linked"}</small></button></div>)}</div></div></>);
+            {linkedTasks.map(t => <div className="due" key={t.id}><button className="pill" onClick={() => go("task", {id:t.id})}>{t.title}<br /><small>Assignee: {who(t).name}</small></button></div>)}{!linkedTasks.length && <p>No linked tasks recorded.</p>}</div></div></>);
       break;
     }
     case "profiles":
@@ -929,14 +843,14 @@ export default function App({ profile, admin, signOut }) {
     }
     case "task": {
       const t = task(p.id);
-      if (!t) { page = (<><Top title="Task not found" /><p style={{ textAlign: "center", fontSize: 20 }}>This task isn’t in the current data (meeting links still use sample tasks).</p></>); break; }
-      const dep = t.dep ? task(t.dep) : null;
+      if (!t) { page = (<><Top title="Task not found" /><p style={{ textAlign: "center", fontSize: 20 }}>This task is not in the current board data. Refresh the task list and try again.</p></>); break; }
+      const dependencies = (t.dependsOn || []).map(task).filter(Boolean);
       const currentAssigneeId = currentOwner(t);
       const initialAssigneeId = initialOwner(t);
       const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due],
         ["Initial assignee", initialAssigneeId ? person(initialAssigneeId)?.name ?? "Not recorded" : t.assigneeText || "Not recorded"],
         ["Current assignee", currentAssigneeId ? person(currentAssigneeId)?.name ?? "Not recorded" : t.assigneeText || "Not recorded"],
-        ["Status", t.status], ["Dependency", dep ? `Depends on “${dep.title}” (${who(dep).name})` : "None"]];
+        ["Time", t.dueTime || "Not provided"], ["Status", t.status], ["Dependencies", dependencies.length ? dependencies.map(dep => `${dep.title} (${who(dep).name})`).join(", ") : "None"]];
       page = (<><Top title={t.title} /><div className="two" style={{ maxWidth: 960, margin: "10px auto" }}>
         <div className="panel">
           {t.status !== "Completed" && <label>Request reassignment to
@@ -949,8 +863,8 @@ export default function App({ profile, admin, signOut }) {
           </label>}
           <div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
           {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
-        <div className="panel"><h3>Notes</h3><textarea className="field" style={{ minHeight: 200 }} placeholder="Add notes for yourself or an admin…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
-          <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" onClick={() => say("Notes saved (placeholder)")}>Save notes</button></div></div></div></>);
+        <div className="panel"><h3>Description</h3><p style={{whiteSpace:"pre-wrap"}}>{t.description || "No description recorded."}</p><h3>Board notes</h3><textarea className="field" style={{ minHeight: 200 }} maxLength={10000} placeholder="Add a task note visible to the board…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
+          <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" disabled={noteSaving === t.id} onClick={() => saveNotes(t)}>Save notes</button></div></div></div></>);
       break;
     }
     case "tasks": {
@@ -966,12 +880,12 @@ export default function App({ profile, admin, signOut }) {
             if (!c) return <button className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }} title="Find board members whose skills fit this task" onClick={() => loadCandidates(t)}>Suggest</button>;
             if (c.loading) return <small>Checking skills…</small>;
             if (c.error) return <small title={c.error}>Couldn’t check · <a href="#retry" onClick={(e) => { e.preventDefault(); loadCandidates(t); }}>retry</a></small>;
-            if (!c.list.length) return <small>No one else has the skills for this</small>;
+            if (!c.list.length) return <small>No matching suggestions found.</small>;
             return c.list.map((s) => { const q = person(s.code) ?? { id: s.code, name: s.name };
               return <Avatar key={s.code} p={q} cls="sm" title={`${s.name} · ${s.fit === "strong" ? "Strong fit" : "Possible fit"}\n${s.matched_skills.join(", ")}\n${s.due_this_week} due this week · ${s.open} open\n${s.reason}`}
                 style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => { setRequestError(""); setRequestReason(""); setModal({ reassign: [t, q, s] }); }} />; });
           })() : <small>Reconnect to request reassignment.</small>)}</div>
-          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!tasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
+          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
@@ -1034,6 +948,7 @@ export default function App({ profile, admin, signOut }) {
               <input className="field" type="time" value={taskForm.time}
                 onChange={(e) => setTaskForm({ ...taskForm, time: e.target.value })} />
             </label>
+            <label>Assigned to<select className="field" value={taskForm.ownerCode || ""} onChange={e => setTaskForm({ ...taskForm, ownerCode: e.target.value })}><option value="">Unassigned</option>{PEOPLE.map(q => <option key={q.id} value={q.id}>{q.name} · {q.role}</option>)}</select></label>
             <label>Priority
               <select className="field" value={taskForm.priority}
                 onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}>
@@ -1052,7 +967,7 @@ export default function App({ profile, admin, signOut }) {
         </div>
         <div className="create-task-actions">
           <button className="btn alt" type="button" onClick={() => setTaskForm({ ...(savedTaskForm ?? initialForm) })}>Revert Changes</button>
-          <button className="btn out" type="button" onClick={saveTaskDraft}>Save Draft</button>
+          <button className="btn out" type="button" disabled={draftSaving || submittingTask} onClick={saveTaskDraft}>{draftSaving ? "Saving…" : "Save Draft"}</button>
           <button className="btn" type="button" disabled={submittingTask} onClick={submitTask}>
             {submittingTask ? "Submitting…" : "Submit"}
           </button>
@@ -1061,10 +976,11 @@ export default function App({ profile, admin, signOut }) {
     }
     case "admin":
       page = (<><Top title="Admin Settings" tag noBack /><div className="admin-menu">
-        <button onClick={() => go("editlist")}>Edit Profiles</button>
+        <button onClick={() => go("editlist")}>Board Information</button>
         <button onClick={() => go("metricsOverview")}>Metrics Overview</button>
         <button onClick={() => go("review")}>Task Reassignment Requests</button>
         <button onClick={() => go("attendance")}>Manage Meeting Attendance</button>
+        <button onClick={() => go("sheetSync")}>Google Sheets Sync</button>
         <button onClick={() => { setPlanInput({ ...EMPTY_PLAN_INPUT }); setPlanError(""); go("planTask"); }}>Create Task</button>
       </div>
         <div style={{ textAlign: "center" }}><button className="btn alt" onClick={() => setStack([{ n: "dash" }])}>Back to dashboard</button></div></>);
@@ -1140,20 +1056,17 @@ export default function App({ profile, admin, signOut }) {
               </svg>
             </div>
             <p className="metrics-note">Counts reflect tasks currently assigned to each member.</p>
-            {live && <p className="metrics-note">Transfer history is unavailable until the backend exposes reassignment data.</p>}
           </div>
           <div className="panel">
             <h2>Recent Reassignment Requests</h2>
-            {live
-              ? <p className="metrics-note">Reassignment requests are not connected to the backend yet.</p>
-              : <div className="metrics-recent-list">{[...reqs].slice(0, 6).map((request) => (
+            <div className="metrics-recent-list">{[...reqs].slice(0, 6).map((request) => (
                 <div className="metrics-request" key={request.id}>
-                  <b>{task(request.task)?.title ?? "Task"}</b>
-                  <div>{person(request.from)?.name} to {person(request.to)?.name}</div>
+                  <b>{task(request.task_id)?.title ?? "Task"}</b>
+                  <div>{person(request.requester_code)?.name || request.requester_code} to {person(request.proposed_assignee_code)?.name || request.proposed_assignee_code}</div>
                   <div>{request.reason}</div>
-                  <small>{request.requestedAt} · {request.status}</small>
+                  <small>{new Date(request.created_at).toLocaleDateString()} · {request.status}</small>
                 </div>
-              ))}{!reqs.length && <p className="empty">No requests yet.</p>}</div>}
+              ))}{!reqs.length && <p className="empty">No requests yet.</p>}</div>
           </div>
           <div className="panel">
             <h2>View Individual Metrics</h2>
@@ -1195,8 +1108,6 @@ export default function App({ profile, admin, signOut }) {
                 <span>{label}</span><span className="reassignment-bar-track"><i style={{ width: `${count / highestReassignment * 100}%` }} /></span><b>{count}</b>
               </div>)}
           </div>
-          {live && <p className="metrics-note">Reassignment history is not available from the current backend.</p>}
-          {!live && <p className="metrics-note">Sample history is shown for this session only.</p>}
         </div>
         <div className="metrics-task-list">
           {groups.map(([label, items]) => <div className="panel" key={label}>
@@ -1209,6 +1120,9 @@ export default function App({ profile, admin, signOut }) {
       </>);
       break;
     }
+    case "sheetSync":
+      page = <><Top title="Google Sheets Sync" tag /><SheetSync onApplied={refresh} /></>;
+      break;
     case "attendance": {
       page = <><Top title="Meeting Attendance" tag />
         {meetingsLoading && <p role="status">Loading meetings…</p>}
@@ -1218,53 +1132,21 @@ export default function App({ profile, admin, signOut }) {
       break;
     }
     case "editlist":
-      page = <Grid title="Edit Profiles" tag onPick={(q) => go("edit", { id: q.id })} />;
+      page = <Grid title="Board Information" tag description="Board information comes from the approved roster files and is read-only here." onPick={(q) => go("edit", { id: q.id })} />;
       break;
     case "edit": {
-    const q = person(p.id);
-    const profileDraft = profileDrafts[q.id] ?? {
-      previousRoles: (q.previousRoles ?? []).join("\n"),
-      previousRoleSkills: (q.previousRoleSkills ?? []).join("\n"),
-    };
-    const savePreviousRoles = () => {
-      if (live) {
-        say("Previous roles are not connected to the backend yet; nothing was saved.");
-        return;
-      }
-      const previousRoles = profileDraft.previousRoles.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-      const previousRoleSkills = profileDraft.previousRoleSkills.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-      setPeople((current) => current.map((member) => {
-        if (!sameMember(member.id, q.id)) return member;
-        const regularSkills = (member.skills ?? []).filter((skill) => !(member.previousRoleSkills ?? []).includes(skill));
-        return { ...member, previousRoles, previousRoleSkills, skills: [...new Set([...regularSkills, ...previousRoleSkills])] };
-      }));
-      setProfileDrafts((current) => ({ ...current, [q.id]: { previousRoles: previousRoles.join("\n"), previousRoleSkills: previousRoleSkills.join("\n") } }));
-      say("Previous roles and skills saved in sample data for this session only.");
-    };
-      page = (<><Top title="Edit Profile" tag /><div className="id"><Avatar p={q} cls="lg" tabIndex={-1} /><div style={{ flex: 1 }}><input className="field" defaultValue={q.name} aria-label="Name" style={{ maxWidth: 500, fontSize: 26 }} /><input className="field" defaultValue={q.role} aria-label="Position" style={{ maxWidth: 500, marginTop: 8 }} /></div></div>
-        <div className="two"><div className="panel"><h3>Edit Tasks</h3><ul>{TASKS.filter((t) => owns(t, q.id)).map((t) => <li key={t.id}>{t.title} ({t.status})</li>)}</ul></div>
-          <div className="panel"><h3>Edit Skills</h3><ul>{q.skills.map((s) => <li key={s}><input className="field" defaultValue={s} style={{ padding: "4px 12px", width: "80%" }} /></li>)}</ul></div></div>
-      <div className="panel" style={{ marginTop: 18 }}><h3>Previous Roles &amp; Skills</h3>
-        <label>Previous roles (one per line)<textarea className="field" rows={3} value={profileDraft.previousRoles} disabled={live}
-          onChange={(event) => setProfileDrafts((current) => ({ ...current, [q.id]: { ...profileDraft, previousRoles: event.target.value } }))} /></label>
-        <label style={{ display: "block", marginTop: 12 }}>Skills gained from those roles (one per line)<textarea className="field" rows={3} value={profileDraft.previousRoleSkills} disabled={live}
-          onChange={(event) => setProfileDrafts((current) => ({ ...current, [q.id]: { ...profileDraft, previousRoleSkills: event.target.value } }))} /></label>
-        <p className="metrics-note">{live ? "Previous roles are read-only until backend support is available." : "These skills are added to the member profile for this session only."}</p>
-      </div>
-      <div style={{ textAlign: "center", marginTop: 18 }}><button className="btn" disabled={live} onClick={savePreviousRoles}>Save Previous Roles &amp; Skills</button></div></>);
+      const q = person(p.id);
+      page = q ? <><Top title="Board Information" tag /><ProfileEditor key={q.id} member={q} /></> : <p>Member not found.</p>;
       break;
     }
     case "evals":
       page = <Grid title="Member Performance" tag description="Select a member to review their performance evaluation." onPick={(q) => go("eval", { id: q.id })} />;
       break;
     case "eval": {
-      const q = person(p.id), seed = seedOf(q.id) * 7;
-      const M = [["On-time task completion", 70 + (seed % 28)], ["Meeting attendance", 66 + ((seed * 3) % 32)], ["Task follow-through (not reassigned)", 74 + ((seed * 5) % 24)], ["Deadline buffer (avg. early completion)", 55 + ((seed * 2) % 40)]];
-      const overall = Math.round(M.reduce((a, b) => a + b[1], 0) / M.length);
-      page = (<><Top title={`${q.name}'s Evaluation`} tag /><Ident q={q} />
-        <div className="score"><div className="panel" style={{ textAlign: "center" }}><h3>Overall score</h3><div className="big">{overall}%</div><p>Based on placeholder metrics — backend supplies real data.</p></div>
-          <div className="panel">{M.map(([k, v]) => <div key={k} style={{ marginBottom: 12 }}><div className="lbl">{k}: {v}%</div><div className="meter"><i style={{ width: `${v}%` }} /></div></div>)}</div></div>
-        <div className="panel" style={{ marginTop: 18 }}><h3>Admin comments</h3><textarea className="field" placeholder="Write feedback for this member…" /><div style={{ textAlign: "center", marginTop: 10 }}><button className="btn" onClick={() => say("Evaluation saved (placeholder)")}>Save evaluation</button></div></div></>);
+      const q = person(p.id);
+      page = q ? <><Top title={`${q.name}'s Evaluation`} tag /><Ident q={q} />
+        <EvaluationPanel key={q.id} member={q} tasks={TASKS} meetings={MEETINGS} requests={reqs}
+          meetingsUnavailable={Boolean(meetingError || meetingsLoading)} /></> : <p>Member not found.</p>;
       break;
     }
     case "taskmetrics":
@@ -1326,6 +1208,8 @@ export default function App({ profile, admin, signOut }) {
       {dataError && <div role="alert">Could not refresh Supabase data: {dataError} <button onClick={() => refresh().catch(() => {})}>Retry</button></div>}
       {loading && <p role="status">Loading tasks and requests?</p>}
       {meetingError && ['past', 'meeting', 'mm', 'memberStatus'].includes(p.n) && <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry meetings</button></p>}
+      {admin && draftError && <p role="alert">Draft storage: {draftError}</p>}
+      {admin && persistedDraft && p.n === "planTask" && <button className="btn alt" onClick={() => openTaskCreator(persistedDraft)}>Resume saved draft</button>}
       <main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
@@ -1339,7 +1223,7 @@ export default function App({ profile, admin, signOut }) {
         {requestError && <p role="alert">{requestError}</p>}
         {!profile.member_code && <p role="alert">Your account must be linked to the member roster before requesting a reassignment.</p>}
         <div className="acts"><button className="btn alt" disabled={requestBusy} onClick={() => setModal(null)}>Cancel</button><button className="btn" disabled={requestBusy || !profile.member_code || !live} onClick={sendRequest}>{requestBusy ? "Saving?" : "Send request"}</button></div></div></div>)}
-      {recorder && <Recorder kind={recorder} onClose={() => { setRecorder(null); reloadMeetings().catch(() => {}); }} />}
+      {recorder && <Recorder kind={recorder} onSaved={() => Promise.all([refresh(), reloadMeetings()])} onClose={() => { setRecorder(null); Promise.all([refresh(),reloadMeetings()]).catch(() => {}); }} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <div role="status" style={{ position: "fixed", top: 8, right: 12, fontSize: 12, padding: "4px 10px", borderRadius: 999, background: live ? "#7fb08a" : "#e8a36b", color: "#fff", fontWeight: 700 }}>{source}</div>
     </div>

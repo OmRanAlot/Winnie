@@ -88,8 +88,9 @@ to a new semester's workbook. Use the workbook that the data came from: historic
 Spring exports keep the Spring workbook ID even when Fall is the current semester.
 
 The current importer reads CSV/TSV exports and saves reviewed changes to Supabase.
-Live access to private Google Sheets and automatic recurring sync are not implemented
-yet. The [import guide](docs/TRACKER_IMPORT.md) covers database setup, permanent task
+Live private-sheet reads, admin previews and an optional polling worker are available;
+follow [Google Sheets sync setup and monthly rollover](docs/GOOGLE_SHEETS_SYNC.md).
+The [import guide](docs/TRACKER_IMPORT.md) covers database setup, permanent task
 IDs, previewing changes, and applying an import.
 
 ## Checks
@@ -129,7 +130,7 @@ dashboard's timeline. Without Supabase settings the recorder still works, but ta
    ```
    The service-role key bypasses row-level security, so it stays server-side: never in
    `frontend/.env`, never committed, never logged (the API only logs "set"/"MISSING").
-   All tables have RLS enabled with no policies, so the public anon key can read nothing.
+   Database access is controlled by RLS and scoped grants; the service-role key stays on the server.
 4. **Seed and check:**
    ```powershell
    Set-Location backend
@@ -143,10 +144,10 @@ Deadlines are parsed from what was said ("tonight", "Monday morning", "by Monday
 the meeting time in America/New_York (`backend/app/deadlines.py`). Anything else is stored as said
 in `deadline_raw` with no date and listed as *Unscheduled*, never guessed.
 
-**Replacing the frontend:** the timeline only uses `GET /api/tasks` and
-`PATCH /api/tasks/{id}/status` (shape: `TaskView` in `backend/app/schemas.py`). Delete
-`frontend/src/features/timeline/` and its one line in `App.tsx`, and build the new UI against
-those two endpoints. The browser never talks to Supabase directly.
+The dashboard uses authenticated backend APIs for tasks, members, meetings and administrator
+forms, plus Supabase Auth and approved reassignment RPCs. See the
+[frontend/backend connection guide](docs/FRONTEND_BACKEND.md) for the required dashboard
+migration, connected actions and demo verification steps.
 
 ## What exists today
 

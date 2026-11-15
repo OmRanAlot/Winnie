@@ -16,13 +16,14 @@ export default function Login({ sessionNotice = '' }: { sessionNotice?: string }
 
     const go = (next: Page) => { setError(''); setNotice(''); setPage(next); };
 
-    async function run(action: () => Promise<{ error: { message: string } | null }>, done?: string) {
+    async function run(action: (client: NonNullable<typeof supabase>) => Promise<{ error: { message: string } | null }>, done?: string) {
         if (pending) return;
+        if (!supabase) { setError('Login is not configured. Contact an administrator.'); return; }
         setPending(true);
         setError('');
         setNotice('');
         try {
-            const { error: authError } = await action();
+            const { error: authError } = await action(supabase);
             if (authError) setError(authError.message);
             else if (done) setNotice(done);
         } catch {
@@ -34,12 +35,12 @@ export default function Login({ sessionNotice = '' }: { sessionNotice?: string }
 
     function signIn(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        run(() => supabase.auth.signInWithPassword({ email: email.trim(), password }));
+        run(client => client.auth.signInWithPassword({ email: email.trim(), password }));
     }
 
     function reset(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
-        run(() => supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/auth/set-password` }),
+        run(client => client.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/auth/set-password` }),
             'If that email has an account, a reset link is on its way.');
     }
 
