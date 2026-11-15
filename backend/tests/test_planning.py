@@ -235,3 +235,20 @@ async def test_gemini_plan_uses_one_structured_call(monkeypatch):
     assert len(calls) == 1
     payload = json.loads(calls[0][1][1])
     assert payload == {"request": request().model_dump(mode="json"), "historical_examples": []}
+
+
+def test_missing_production_provider_package_has_actionable_safe_error(tmp_path, monkeypatch):
+    monkeypatch.setenv('WINNIE_PLANNING_MODE','deepagents')
+    monkeypatch.setenv('WINNIE_PLANNING_MODEL','google_genai:example')
+    monkeypatch.setenv('WINNIE_PLANNING_KNOWLEDGE_PATH',str(tmp_path/'not-shipped.json'))
+    async def missing(*args):
+        raise ModuleNotFoundError('private provider details must not appear')
+    monkeypatch.setattr('app.services.planning.deep_plan',missing)
+    app.dependency_overrides[authorize_tasks] = lambda: None
+    try:
+        with TestClient(app) as client:
+            response=client.post('/api/planning/drafts',json=request().model_dump(mode='json'))
+        assert response.status_code==503
+        assert 'provider package' in response.json()['detail'] and 'private provider' not in response.text
+    finally:
+        app.dependency_overrides.pop(authorize_tasks,None)

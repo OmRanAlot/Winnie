@@ -1,5 +1,7 @@
 # Deadline reminders and delivery deduplication
 
+The current cloud scheduler/notification setup is documented in [AUTOMATION.md](AUTOMATION.md). The listener instructions below are the development transport; cloud mode runs without a laptop.
+
 Reminder timing is deterministic; no Gemini call decides whether to send a deadline
 reminder. The backend scans canonical unfinished tasks in the active semester. The
 existing Photon listener polls the backend's persistent outbox and sends authorized

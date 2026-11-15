@@ -29,13 +29,13 @@ linking, or the hosted database's complete migration history. A phone test is st
 | Requests: propose, accept/deny, approve/reject | Authenticated Supabase RPCs plus `/api/photon/dispatch` | Connected with SQL consent/approval enforcement. General task PATCH bypass is fixed in source; deploy the task-permission update. |
 | Attendance | `/api/meetings`, create and attendance PATCH | Connected; administrator writes enforced. |
 | Evaluations | `/api/dashboard/evaluations/{code}` | Connected; administrator feedback persisted, metrics computed from loaded records. |
-| Sheets preview/apply | `/api/sheet-sync/sources`, preview and apply | Connected; reviewed apply is separate from preview. Automatic operation requires an external scheduled runner. |
+| Sheets preview/apply | `/api/sheet-sync/sources`, preview and apply | Connected; reviewed apply is separate from preview. The authenticated scheduled runner is implemented; run setup-automation.ps1 after migration/deployment. |
 | Audio upload | `/api/meetings/ingest` | Connected, creates tasks immediately rather than the planned approval stage. |
 | Browser Recorder | `/api/recordings`, `/{id}/assignments` | Connected, but file storage and success reporting need fixes below. |
 | Plan Event generation | `/api/planning/drafts` | Connected to simple draft generation; staged runs/review API is not used by this screen. |
 | Save/reopen/review event plan | `/api/event-plans` | Fixed in source: shared Supabase drafts, revisions, approval/rejection and atomic task/dependency/notice creation. Apply the event-plan migration and deploy. |
 | Manual task creation / saved task draft | Backend endpoints exist | Current App imports creation/draft helpers but has no creation call or reachable task form. Leftover resume branch refers to undefined `openTaskCreator`. Earlier connection documentation overstates this feature. |
-| Nudge | App displays “delivery is not connected” | Intentionally does not send; no backend nudge action is wired. |
+| Nudge | `/api/notifications/tasks/{id}/nudge` | Fixed in source: admin-authorized daily-deduped notices, queued through Photon with failure reporting. Requires automation migration/setup. |
 | HelpReview | Legacy component and decision API | Imported but not rendered; old transfer decisions are disabled in favor of canonical Requests. Remove or redirect stale UI. |
 | FairyLights, CursorFx, PlanLoading | Presentation only | No backend connection needed. |
 
@@ -65,12 +65,11 @@ linking, or the hosted database's complete migration history. A phone test is st
    have the file. Use private shared object storage with access controls and retention.
    Planning runs use SQLite and FastAPI BackgroundTasks: move these to shared persistence
    and durable execution before claiming hosted restart-safe pause/resume.
-6. **Complete notifications and scheduling.** Current Photon work drains reassignment notices;
-   it does not schedule deadline scans. Deploy a scheduled path for reminders and optional
-   Sheets auto-apply, with bounded retries and visible errors. Implement initial assignment
-   notices, dependency-completion notices and manual nudges. Current reminder slots do not
-   implement the original plan's daily overdue behavior. Keep these gaps distinct from working
-   inbound messaging and reassignment notifications.
+6. **Notifications and scheduling implemented; hosted setup required.** Nudge, new-assignment
+   notices, dependency-ready notices, scheduled deadline scans, daily overdue notices and
+   auto-apply Sheets scans are wired. Admin Settings exposes job/queue status. Apply the
+   admin-first and automation migrations and follow AUTOMATION.md on the authenticated
+   deployment machine. No real cloud jobs or texts were created during local verification.
 7. **Verify production context parity.** Docker copies only `data/eboardMembers.json`.
    Planning history/taxonomy and local skill/history fallbacks are not shipped. Deepagents
    simple drafts explicitly fall back to idea-only planning without history; default mock
@@ -101,3 +100,5 @@ linking, or the hosted database's complete migration history. A phone test is st
 Recommended sequence: task authorization → shared proposals and activation → recording
 correctness/storage → scheduled notifications → production context and release gates →
 live multi-user acceptance. Existing authentication, roster and Sheets work can be retained.
+
+Follow-up: reassignment is now admin-first, then recipient consent, with name/number choices and immutable completed-handoff history. See HELP_WORKFLOW.md.

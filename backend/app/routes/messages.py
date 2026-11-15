@@ -94,6 +94,8 @@ async def handle_message(
 
 async def process_message(message, members, tasks, completions, interpreter, help_requests, reassignments, settings, memory_store=None):
     """Shared business logic; callers must first verify bridge credentials or a Photon signature."""
+    if message.conversation_type == 'dm' and message.text.strip().lower() == 'ping':
+        return {'reply': 'pong 🏓'}  # Health checks must not create/evict conversation turns.
     context, memory_failed = None, False
     if message.conversation_type == 'dm' and getattr(settings, 'message_memory_enabled', False):
         try:
@@ -131,10 +133,24 @@ async def _process_message(message, members, tasks, completions, interpreter, he
     if text in ("", "help", "menu", "start") and message.conversation_type != "group":
         return {"reply": MENU}
     try:
+        if context is not None and context.pending_help_no:
+            pending = await run_in_threadpool(help_requests.get, context.pending_help_no)
+            chosen = context.helper_choice(message.text, pending)
+            if chosen:
+                reply = await help_workflow_reply(message.model_copy(update={
+                    'text': f'choose HELP-{context.pending_help_no} {chosen}',
+                }), members, tasks, help_requests, settings)
+                if reply and reply.startswith(('Saved REQ-', 'Already saved as REQ-')):
+                    context.reset_question()
+                return {'reply': reply}
+        if message.conversation_type != 'group':
+            reply = await reassignment_reply(message, members, tasks, reassignments, settings, interpreter, context)
+            if reply is not None:
+                return {'reply': reply}
         if message.conversation_type == "group":
             reply = await group_reply(message, members, tasks, completions, interpreter, help_requests, settings)
             return {"reply": reply}
-        elif text in ("1", "tasks", "my tasks", "2", "whoami"):
+        elif text in ("1", "tasks", "my tasks", "2", "whoami") and not (context is not None and context.awaiting_answer and text in ('1', '2')):
             reply = await run_in_threadpool(personal_reply, message, members, tasks, settings.active_semester)
             if context is not None and text in ('1', 'tasks', 'my tasks'):
                 candidates = await run_in_threadpool(tasks.unfinished_for_semester, settings.active_semester)
@@ -143,10 +159,8 @@ async def _process_message(message, members, tasks, completions, interpreter, he
                 context.prompt_tasks(selected[:5])
                 context.focus([selected[0]['id']] if len(selected) == 1 else [])
         else:
-            reply = await reassignment_reply(message, members, tasks, reassignments, settings)
-            if reply is not None and context is not None:
-                context.focus([])  # REQ actions always require their explicit request number.
-            if reply is None:
+            reply = None
+            if reply is None and not (context is not None and context.awaiting_answer and not HELP_COMMAND.fullmatch(message.text.strip())):
                 reply = await help_workflow_reply(message, members, tasks, help_requests, settings)
                 command = HELP_COMMAND.fullmatch(message.text.strip())
                 if context is not None and command and reply and reply.startswith(('HELP-', 'Saved HELP-', 'Saved help request')):
@@ -162,6 +176,10 @@ async def _process_message(message, members, tasks, completions, interpreter, he
                         }), members, tasks, help_requests, settings)
                     else:
                         reply = "The reassignment workflow is disabled. Contact the project admin."
+            if context is not None and reply and reply.startswith('HELP-'):
+                offered = await run_in_threadpool(help_requests.receipt, message)
+                if offered:
+                    context.offer_helpers(offered)
     except StorageUnavailable:
         reply = "I couldn't load member or task data right now. Please try again later."
     except AliasConflict:

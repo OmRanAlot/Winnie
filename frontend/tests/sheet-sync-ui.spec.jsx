@@ -6,7 +6,7 @@ import SheetSync from '../src/SheetSync.jsx';
 import { applySheetSync, getSheetSyncSources, previewSheetSync } from '../src/lib/api.js';
 
 vi.mock('../src/lib/api.js', () => ({
-  applySheetSync: vi.fn(), getSheetSyncSources: vi.fn(), previewSheetSync: vi.fn(),
+  getAutomationStatus: vi.fn().mockResolvedValue({jobs:[],notifications:{}}), applySheetSync: vi.fn(), getSheetSyncSources: vi.fn(), previewSheetSync: vi.fn(),
 }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const source = {key:'fall-board',spreadsheet_id:'demo',semester_code:'fall-2026',tab_id:7};

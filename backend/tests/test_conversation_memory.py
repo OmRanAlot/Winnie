@@ -202,3 +202,117 @@ def test_memory_storage_failure_degrades_without_exposing_or_inventing_context(m
             headers={'X-Winnie-Bridge-Secret':'synthetic-memory-secret'})
     assert response.status_code==200 and 'Conversation memory is unavailable' in response.json()['reply']
     assert llm.calls[0]['history'] is None and tasks.rows[A]['status']=='todo'
+
+def test_exact_help_clarification_loop_preserves_intent_across_task_name_reply_and_ping(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.agents.message_interpreter import MessageDecision
+    monkeypatch.setenv('WINNIE_MESSAGE_MEMORY_ENABLED','true')
+    monkeypatch.setenv('WINNIE_MESSAGE_AI_ENABLED','true')
+    monkeypatch.setenv('WINNIE_HELP_WORKFLOW_ENABLED','true')
+    monkeypatch.setenv('WINNIE_PHOTON_ENABLED','false')
+    monkeypatch.setenv('WINNIE_MESSAGING_BRIDGE_SECRET','synthetic-memory-secret')
+    store,tasks=Store(),Tasks()
+    tasks.rows[A].update(title='Post Opportunities',task_code='WIN-202610-110')
+    tasks.rows[B].update(title='Slides for GBM 3')
+    class Clarifying:
+        def __init__(self): self.calls=[]
+        def interpret(self,text,tasks,**kwargs):
+            self.calls.append((text,kwargs))
+            ids=[A] if len(self.calls)==1 else [A,B]
+            reply=("Did you complete 'Post Opportunities' or do you need help with it?" if len(self.calls)==1
+                else 'Which task do you need help with, Post Opportunities or Slides for GBM 3?')
+            return MessageDecision(intent='clarify',task_ids=ids,completion_asserted=False,evidence_quote='',confidence=.99,reply=reply)
+    llm=Clarifying()
+    async def workflow(msg,*args):
+        return 'Saved HELP-1; replacement recommendations are pending.' if msg.text=='help WIN-202610-110' else None
+    helper=AsyncMock(side_effect=workflow)
+    monkeypatch.setattr(messages,'help_workflow_reply',helper)
+    monkeypatch.setitem(app.dependency_overrides,messages.get_memory_store,lambda:store)
+    monkeypatch.setitem(app.dependency_overrides,messages.get_member_store,Members)
+    monkeypatch.setitem(app.dependency_overrides,messages.get_task_store,lambda:tasks)
+    monkeypatch.setitem(app.dependency_overrides,messages.get_completion_store,lambda:Completions(tasks))
+    monkeypatch.setitem(app.dependency_overrides,messages.get_message_interpreter,lambda:llm)
+    headers={'X-Winnie-Bridge-Secret':'synthetic-memory-secret'}
+    with TestClient(app) as client:
+        def send(text,event):
+            return client.post('/api/messages',json=message(text,message_id=event,space_id='same-dm').model_dump(),headers=headers).json()['reply']
+        assert 'Did you complete' in send('About Post Opportunities','first')
+        assert 'Which task' in send('no but could caithy do it i need help','help')
+        before=deepcopy(store.rows)
+        assert 'pong' in send('ping','health-check')
+        assert store.rows==before,'ping must not create, replace, or evict a memory checkpoint'
+        assert send('post opportunities','answer').startswith('Saved HELP-1')
+        assert len(llm.calls)==2,'named answer must resolve the existing help intent, not start another question'
+        assert llm.calls[1][1]['history'] and llm.calls[1][1]['focus_task_id']==A
+        assert helper.call_args.args[0].text=='help WIN-202610-110'
+        assert tasks.rows[A]['status']=='todo'
+
+
+def test_single_task_clarification_keeps_focus_and_short_yes_is_not_a_completion():
+    store,tasks=Store(),Tasks()
+    class Asking(Interpreter):
+        def interpret(self,text,tasks,**kwargs):
+            self.calls.append(kwargs)
+            if len(self.calls)==1:
+                return MessageDecision(intent='clarify',task_ids=[A],completion_asserted=False,evidence_quote='',confidence=.99,
+                    reply='Do you want details about Book room?')
+            return MessageDecision(intent='answer',task_ids=[A],completion_asserted=False,evidence_quote='',confidence=.99,
+                reply='Book room is due November 20.')
+    llm=Asking()
+    turn(store,tasks,message('Tell me about Book room',message_id='question'),llm)
+    ctx,reply,_,completions=turn(store,tasks,message('yes',message_id='answer'),llm)
+    assert reply=='Book room is due November 20.'
+    assert llm.calls[-1]['focus_task_id']==A and llm.calls[-1]['history']
+    assert completions.writes==0 and not ctx.awaiting_answer
+
+
+def test_pending_help_accepts_numbered_task_answer_and_does_not_infer_approval():
+    from app.services.conversation import HelpIntent
+    store,tasks=Store(),Tasks()
+    ctx=prepare_context(message('I need help',message_id='question'),Members(),tasks,config(),store)
+    ctx.observe_input('I need help')
+    ctx.prompt_tasks(list(tasks.rows.values())[:2]); ctx.clarify([A,B])
+    ctx.record(message('I need help',message_id='question'),'Which task: 1. Book room or 2. Make flyer?')
+    restored=prepare_context(message('2',message_id='answer'),Members(),tasks,config(),store)
+    llm=Interpreter(); completion=Completions(tasks)
+    reply=conversation_reply(message('2',message_id='answer'),Members(),tasks,completion,llm,config(),restored)
+    assert reply==HelpIntent('WIN-202610-2') and not llm.calls and completion.writes==0
+
+
+def test_help_rejection_clears_pending_intent_instead_of_requesting_a_transfer():
+    store,tasks=Store(),Tasks()
+    msg=message('I need help',message_id='first')
+    ctx=prepare_context(msg,Members(),tasks,config(),store)
+    ctx.prompt_tasks(list(tasks.rows.values())[:2]);ctx.observe_input(msg.text);ctx.clarify([A]);ctx.record(msg,'Need help with Book room?')
+    class BadHelp(Interpreter):
+        def interpret(self,text,tasks,**kwargs):
+            return MessageDecision(intent='request_help',task_ids=[A],completion_asserted=False,evidence_quote=text,confidence=.99,reply='Help')
+    _,reply,_,completions=turn(store,tasks,message("I don't need help",message_id='no'),BadHelp())
+    assert 'no new help request' in reply and completions.writes==0
+
+
+def test_named_candidate_selects_only_a_saved_suggestion_in_the_same_help_request(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    store,tasks=Store(),Tasks()
+    ctx=prepare_context(message('help WIN-202610-1'),Members(),tasks,config(),store)
+    ctx.focus([A])
+    request={'request_no':5,'task_id':A,'requester_code':'ONE','status':'suggestions_ready',
+        'candidates':[{'code':'TWO','name':'Caithy Example'},{'code':'THREE','name':'Other Example'}]}
+    ctx.offer_helpers(request)
+    ctx.record(message('help WIN-202610-1'),'HELP-5: suggested replacements: Caithy Example, Other Example.')
+    reply_msg=message('Caithy',message_id='choice')
+    restored=prepare_context(reply_msg,Members(),tasks,config(),store)
+    class HelpStore:
+        def get(self,number): assert number==5; return request
+    helper=AsyncMock(return_value='Saved REQ-12. Recipient acceptance and admin approval required.')
+    monkeypatch.setattr(messages,'help_workflow_reply',helper)
+    result=asyncio.run(messages._process_message(reply_msg,Members(),tasks,None,None,HelpStore(),None,
+        SimpleNamespace(),restored))
+    assert result['reply'].startswith('Saved REQ-12')
+    assert helper.call_args.args[0].text=='choose HELP-5 TWO'
+    assert restored.pending_help_no is None
+    assert restored.helper_choice('Caithy',{**request,'requester_code':'OTHER'}) is None

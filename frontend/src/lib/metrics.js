@@ -12,7 +12,7 @@ export function memberMetrics(code, tasks, meetings, requests) {
   const onTime = timed.filter(t => nyDate(t.completedAt) <= t.dueIso).length;
   const recorded = meetings.filter(m => m.attendance_recorded_at);
   const attended = recorded.filter(m => (m.attendees || []).includes(code)).length;
-  const transfers = requests.filter(r => r.status === 'approved' && r.requester_code === code).length;
+  const transfers = requests.filter(r => r.status === 'approved' && (r.previous_owner_code || r.requester_code) === code).length;
   const rate = (n, d) => d ? Math.round(n * 100 / d) : null;
   return { total: owned.length, completed: done.length, completion: rate(done.length, owned.length),
     onTime: rate(onTime, timed.length), timedCompletions: timed.length,

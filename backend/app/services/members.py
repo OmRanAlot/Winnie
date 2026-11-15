@@ -1,5 +1,6 @@
 """Resolve admin-verified sender identities and complete tracker assignee cells."""
 
+import re
 import unicodedata
 
 from httpx import HTTPError
@@ -19,6 +20,20 @@ def normalize_alias(value: str) -> str:
 
 class AliasConflict(ValueError):
     pass
+
+
+def resolve_member_choice(text: str, candidates: list[dict]) -> str | None:
+    """Resolve a saved list number or exact unique name; never fuzzy-match a recipient."""
+    value = normalize_alias(text).rstrip('.!? ')
+    value = re.sub(r'^(?:i choose|i pick|choose|pick|select|option|go with)\s+', '', value)
+    value = re.sub(r'\s+please$', '', value).lstrip('#')
+    if value.isdigit() and 1 <= int(value) <= len(candidates):
+        return candidates[int(value) - 1]['code']
+    matches = {c['code'] for c in candidates if value in {
+        normalize_alias(c['code']), normalize_alias(c.get('name', '')),
+        normalize_alias(c.get('name', '')).split(' ')[0],
+    } and value}
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def assignment_members(assignee_text: str, aliases: list[dict]) -> set[str] | None:

@@ -8,10 +8,25 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.routes import messages
 from app.services.conversation import HelpIntent
+from app.services.members import resolve_member_choice
 from app.services.messaging_reassignments import reassignment_reply
 
 
+@pytest.mark.parametrize('text,expected', [
+    ('Taylor Example', 'TARGET'), ('Taylor', 'TARGET'), ('1', 'TARGET'),
+    ('choose Taylor Example please', 'TARGET'), ('select 2', 'OTHER'),
+    ('Example', None), ('unknown', None), ('3', None),
+])
+def test_saved_suggestion_choice_uses_unique_name_or_displayed_number(text, expected):
+    candidates = [{'code': 'TARGET', 'name': 'Taylor Example'}, {'code': 'OTHER', 'name': 'Alex Example'}]
+    assert resolve_member_choice(text, candidates) == expected
+    assert resolve_member_choice('Taylor', candidates + [{'code': 'SECOND', 'name': 'Taylor Other'}]) is None
+
+
 class Members:
+    def list_active(self):
+        return [{'code':'TARGET','display_name':'Taylor Example'}]
+
     def resolve(self, platform, sender):
         return {'code': 'OWNER'} if sender == 'owner@example.com' else None
 
@@ -22,6 +37,9 @@ class Tasks:
 
 
 class Store:
+    def pending(self, message):
+        return {'can_review':True,'requests':[{'request_no':8,'title':'Demo task','can_review':True,'can_respond':False}]}
+
     def __init__(self):
         self.calls = []
 
@@ -30,8 +48,7 @@ class Store:
         if action == 'list':
             return {'requests': [{'request_no': 8, 'task_code': 'WIN-202611-1', 'title': 'Demo task',
                 'recipient_decision': 'pending', 'incoming': True}]}
-        return {'request_no': 8, 'status': 'approved' if action == 'approved' else 'pending',
-            'recipient_decision': 'accepted' if action == 'accepted' else 'pending'}
+        return {'request_no':8,'status':'approved' if action=='accepted' else 'pending','admin_decision':'approved' if action in ('approved','accepted') else 'pending','recipient_decision':'accepted' if action=='accepted' else 'pending'}
 
 
 def message(text, **extra):
@@ -47,11 +64,11 @@ def settings():
 async def test_commands_forward_verified_transport_metadata_and_exact_actions():
     store = Store()
     reply = await reassignment_reply(message('accept REQ-8'), Members(), Tasks(), store, settings())
-    assert 'Awaiting admin approval' in reply
+    assert 'Ownership transferred' in reply
     assert store.calls == [('owner@example.com', 'event-1', 'accepted', {'request_no': 8})]
-    assert 'Ownership transferred' in await reassignment_reply(message('approve REQ-8'), Members(), Tasks(), store, settings())
-    assert 'REQ-8' in await reassignment_reply(message('requests'), Members(), Tasks(), store, settings())
-    await reassignment_reply(message('reassign WIN-202611-1 to TARGET'), Members(), Tasks(), store, settings())
+    assert 'admin approved' in await reassignment_reply(message('approve REQ-8'), Members(), Tasks(), store, settings())
+    assert 'Demo task' in await reassignment_reply(message('requests'), Members(), Tasks(), store, settings())
+    await reassignment_reply(message('reassign WIN-202611-1 to Taylor Example'), Members(), Tasks(), store, settings())
     assert store.calls[-1][2] == 'submit'
     assert store.calls[-1][3]['proposed_code'] == 'TARGET'
     assert 'actor' not in store.calls[-1][3]
@@ -85,7 +102,7 @@ def test_http_routes_text_commands_and_gemini_help_to_shared_workflow(monkeypatc
         denied = client.post('/api/messages', json=message('accept REQ-8').model_dump())
         assert denied.status_code == 401 and not store.calls
         result = client.post('/api/messages', json=message('accept REQ-8').model_dump(), headers=headers)
-        assert result.status_code == 200 and 'Awaiting admin' in result.json()['reply']
+        assert result.status_code == 200 and 'Ownership transferred' in result.json()['reply']
         help_reply.side_effect = [None, 'Saved HELP-1: choose a suggested recipient']
         result = client.post('/api/messages', json=message('I need a replacement for the demo task').model_dump(), headers=headers)
         assert result.json()['reply'].startswith('Saved HELP-1')

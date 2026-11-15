@@ -156,10 +156,12 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
-      # Existing env vars, secrets, scaling and IAM on the service are kept; only the image changes.
+      # Preserve existing settings; explicitly enable conversation memory by default.
+      # A repository variable WINNIE_MESSAGE_MEMORY_ENABLED=false can opt out.
       - name: Deploy to Cloud Run
         run: >
           gcloud run deploy "$CLOUD_RUN_SERVICE" --source backend
+          --update-env-vars "WINNIE_MESSAGE_MEMORY_ENABLED=${{ vars.WINNIE_MESSAGE_MEMORY_ENABLED || 'true' }}"
           --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
       - name: Smoke test
         run: |

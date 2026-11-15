@@ -1,7 +1,9 @@
 """Signed Photon webhook -> durable inbox -> on-demand Cloud Task -> existing message flow."""
 import json
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -19,6 +21,7 @@ from app.integrations.photon import (
     normalize_payload,
     verify_signature,
 )
+from app.integrations.reminders import ReminderStore
 from app.integrations.supabase import StorageUnavailable
 from app.routes.messages import (
     IncomingMessage,
@@ -31,6 +34,9 @@ from app.routes.messages import (
     process_message,
 )
 from app.routes.reminders import authorize_reminder_bridge
+from app.services.members import MemberStore
+from app.services.reminders import next_reminder, utc_now
+from app.services.tasks import TaskStore
 
 router = APIRouter(prefix='/api/photon', tags=['photon'])
 
@@ -62,6 +68,9 @@ Reassignments = Annotated[object, Depends(get_reassignment_store)]
 def webhook_status():
     s = Settings()
     return {'integration': 'winnie-photon-spectrum', 'enabled': s.photon_enabled,
+        'conversation_memory_enabled': s.message_memory_enabled, 'conversation_protocol': 2,
+        'request_action_protocol': 1, 'message_ai_enabled': s.message_ai_enabled,
+        'help_workflow_enabled': s.help_workflow_enabled,
         'configured': bool(s.photon_webhook_secret.get_secret_value() and s.photon_webhook_id
             and s.photon_queue and s.photon_task_url and s.photon_project_id and s.photon_project_secret.get_secret_value())}
 
@@ -100,13 +109,28 @@ async def webhook(request: Request, inbox: Inbox, queue: Queue):
 
 async def dispatch_notifications(sender):
     store = HelpRequestStore()
-    for _ in range(3):
+    settings = Settings()
+    # Two request-scoped sends stay below the Cloud Task's 120-second dispatch budget.
+    for _ in range(2):
         notice = (await run_in_threadpool(store.rpc, 'claim_reassignment_notification')
                   if Settings().help_workflow_enabled else None)
         finish = 'finish_reassignment_notification'
         if not notice:
             notice = await run_in_threadpool(store.rpc, 'claim_event_plan_notification')
             finish = 'finish_event_plan_notification'
+        if not notice and settings.notifications_enabled:
+            notice = await run_in_threadpool(store.rpc, 'claim_task_notification',
+                p_semester=settings.active_semester, p_timezone=settings.reminder_timezone)
+            finish = 'finish_task_notification'
+        reminder_store = None
+        local_hour = datetime.now(ZoneInfo(settings.reminder_timezone)).hour
+        if not notice and settings.reminders_enabled and 9 <= local_hour < 20:
+            reminder_store = ReminderStore()
+            result = await run_in_threadpool(next_reminder, reminder_store, TaskStore(), MemberStore(), settings, scan=False)
+            delivery = result.get('delivery')
+            if delivery:
+                notice = {'id': delivery['id'], 'claim_token': delivery['claim_token'],
+                    'text': delivery['text'], 'recipient': delivery['recipient']}
         if not notice:
             return False
         try:
@@ -114,8 +138,11 @@ async def dispatch_notifications(sender):
             outcome = 'sent'
         except PhotonUnavailable:
             provider, outcome = None, 'uncertain'
-        await run_in_threadpool(store.rpc, finish, p_id=notice['id'],
-            p_token=notice['claim_token'], p_outcome=outcome, p_provider_id=provider)
+        if reminder_store:
+            await run_in_threadpool(reminder_store.finish, notice['id'], notice['claim_token'], outcome, provider, utc_now())
+        else:
+            await run_in_threadpool(store.rpc, finish, p_id=notice['id'],
+                p_token=notice['claim_token'], p_outcome=outcome, p_provider_id=provider)
     return True
 
 
@@ -157,6 +184,10 @@ async def work(body: Work, inbox: Inbox, sender: Sender, queue: Queue,
                     except PhotonUnavailable:
                         provider, state = None, 'uncertain'
                     await run_in_threadpool(inbox.rpc, 'photon_inbox_advance', p_id=item, p_token=token, p_state=state, p_provider=provider)
+        if body.item_id:
+            # Separate inbound interpretation/reply time from the outbound notification batch.
+            await run_in_threadpool(queue.enqueue, None, str(uuid4()))
+            return {'processed': True}
         remaining = await dispatch_notifications(sender)
         if remaining:
             await run_in_threadpool(queue.enqueue, None, str(uuid4()))

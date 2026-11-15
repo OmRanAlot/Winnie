@@ -5,6 +5,8 @@ import Recorder from "./Recorder.jsx";
 import PlanLoading from "./PlanLoading.jsx";
 import Attendance from "./Attendance.jsx";
 import SheetSync from "./SheetSync.jsx";
+import AutomationStatus from "./AutomationStatus.jsx";
+import { nudgeTask } from "./lib/api.js";
 import HelpReview from "./HelpReview.jsx";
 import ProfileEditor from "./ProfileEditor.jsx";
 import EvaluationPanel from "./EvaluationPanel.jsx";
@@ -662,6 +664,17 @@ export default function App({ profile, admin, signOut }) {
   const [draftError, setDraftError] = useState("");
   const [draftSaving, setDraftSaving] = useState(false);
   const [noteSaving, setNoteSaving] = useState(null);
+  const [nudgeSaving, setNudgeSaving] = useState(null);
+  const nudgeLock = useRef(false);
+  const sendNudge = async (t) => {
+    if (!admin || nudgeLock.current) return;
+    nudgeLock.current = true; setNudgeSaving(t.id);
+    try {
+      const saved = await nudgeTask(t.id);
+      say(saved.notification_warning || (saved.already_requested ? 'A nudge was already requested for this task today.' : 'Nudge queued. Delivery follows recipient consent and notification hours.'));
+    } catch (e) { say(`Could not queue nudge: ${e.message}`); }
+    finally { nudgeLock.current = false; setNudgeSaving(null); }
+  };
   const [statusSaving, setStatusSaving] = useState({});
   const [statusFeedback, setStatusFeedback] = useState(null);
   const statusLocks = useRef(new Set());
@@ -834,7 +847,7 @@ export default function App({ profile, admin, signOut }) {
     try {
       const saved = await requestsStore.submit(modal.reassign[0].id, modal.reassign[1].id, requestReason);
       setModal(null); setRequestReason("");
-      say(saved?.notification_warning || "Request saved. The recipient must accept before administrator approval.");
+      say(saved?.notification_warning || "Request saved for administrator review first. Recipient consent follows approval.");
       try { await refresh(); } catch { say("Request saved. Refresh failed; please retry."); }
     } catch (e) { setRequestError(e.message); }
     finally { mutationLock.current = false; setRequestBusy(false); }
@@ -850,9 +863,9 @@ export default function App({ profile, admin, signOut }) {
       // Discard refreshes started before the decision was saved.
       ++refreshVersion.current;
       reviewingRequestRef.current = null;
-      setReqs(current => [...current, { ...r, status: decision }]);
+      setReqs(current => [...current, saved?.id ? saved : { ...r, admin_decision: decision, status: decision === "rejected" ? "rejected" : "pending" }]);
       setCands({});
-      say(saved?.notification_warning || (decision === "approved" ? "Approved — task assignment saved" : "Request denied"));
+      say(saved?.notification_warning || (decision === "approved" ? "Admin approved. Awaiting recipient consent; ownership is unchanged." : "Request denied"));
       try { await refresh(); } catch { say("Decision saved. Refresh failed; please retry."); }
       setRequestDataError("");
     } catch (e) {
@@ -867,7 +880,7 @@ export default function App({ profile, admin, signOut }) {
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
     try {
       const saved = await requestsStore.respond(r.id, decision);
-      say(saved?.notification_warning || (decision === "accepted" ? "Accepted. Awaiting administrator approval." : "Request denied. Task ownership is unchanged."));
+      say(saved?.notification_warning || (decision === "accepted" ? "Accepted. Ownership transferred; the outgoing owner is recorded in transfer history." : "Request denied. Task ownership is unchanged."));
       try { await refresh(); } catch { say("Response saved. Refresh failed; please retry."); }
     } catch (e) {
       setRequestError(e.message);
@@ -1241,10 +1254,10 @@ export default function App({ profile, admin, signOut }) {
           <div className="row" style={{ gap: 8 }}>
             {isAdminView && t.status !== "Completed" && <button type="button" className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }}
               aria-label={`Nudge assignee for ${t.title}`}
-              title="Notification delivery is not connected yet"
-              disabled={!t.assignee}
-              onClick={(e) => { e.stopPropagation(); say("Nudge delivery is not connected yet; no reminder was sent."); }}>
-              Nudge
+              title="Queue a nudge for the linked, opted-in assignees (once per task per day)"
+              disabled={!live || !!nudgeSaving || !t.assignee}
+              onClick={(e) => { e.stopPropagation(); sendNudge(t); }}>
+              {nudgeSaving === t.id ? 'Queueing…' : 'Nudge'}
             </button>}
             {avs && (live ? (() => {
             // Live: only people whose skills fit this task (backend + Gemini), lightest workload first.
@@ -1434,7 +1447,7 @@ export default function App({ profile, admin, signOut }) {
         <button onClick={() => go("sheetSync")}>Google Sheets Sync</button>
         <button onClick={() => { setEventInput({ ...EMPTY_EVENT_INPUT }); setPlanError(""); go("planEvent"); }}>Plan Event</button>
       </div>
-        <div style={{ textAlign: "center" }}><button className="btn alt" onClick={() => setStack([{ n: "dash" }])}>Back to dashboard</button></div></>);
+        <div style={{ textAlign: "center" }}><button className="btn alt" onClick={() => setStack([{ n: "dash" }])}>Back to dashboard</button></div><AutomationStatus /></>);
       break;
     case "metricsOverview": {
       const memberMetrics = PEOPLE.map((member) => ({ member, ...getMemberStatus(member) }));
@@ -1624,19 +1637,21 @@ export default function App({ profile, admin, signOut }) {
             {r.request_no && <p><b>REQ-{r.request_no}</b></p>}
             {r.proposed_assignee_code === profile.member_code && <p><b>Incoming task request for you</b></p>}
             <p>Requested by {person(r.requester_code)?.name || r.requester_code}</p>
+            {r.previous_owner_code && <p>Outgoing owner: {person(r.previous_owner_code)?.name || r.previous_owner_code}</p>}
             <p>Proposed assignee: {person(r.proposed_assignee_code)?.name || r.proposed_assignee_code}</p>
-            {r.status === "pending" && <p>{r.recipient_decision === "accepted" ? "Recipient accepted — awaiting administrator approval." : "Awaiting recipient response."}</p>}
+            {r.status === "pending" && <p>{r.admin_decision === "approved" ? "Administrator approved — awaiting recipient consent." : "Awaiting administrator approval first."}</p>}
             {r.status === "declined" && <p>Recipient denied this request. Task ownership was not changed.</p>}
             <p>{r.reason || "No reason provided."}</p>
             <small>{new Date(r.created_at).toLocaleString()} ? {r.status}</small>
             {r.review_note && <p>Review: {r.review_note}</p>}
+            {r.handoff_completed_at && <p>Transfer completed {new Date(r.handoff_completed_at).toLocaleString()}. Original assignment history is preserved.</p>}
           </div>
-          {r.status === "pending" && r.proposed_assignee_code === profile.member_code && (r.recipient_decision ?? "pending") === "pending" && <div className="row">
+          {r.status === "pending" && r.proposed_assignee_code === profile.member_code && r.admin_decision === "approved" && (r.recipient_decision ?? "pending") === "pending" && <div className="row">
             <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => respondToRequest(r, "accepted")}>Accept</button>
             <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => respondToRequest(r, "denied")}>Deny</button>
           </div>}
-          {admin && r.status === "pending" && <>
-            <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError || r.recipient_decision !== "accepted"} onClick={() => decideRequest(r, "approved")}>Approve</button>
+          {admin && r.status === "pending" && (r.admin_decision ?? "pending") === "pending" && <>
+            <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "approved")}>Approve</button>
             <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Deny</button>
           </>}
           {admin && r.status !== "pending" && <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError}
@@ -1693,7 +1708,7 @@ export default function App({ profile, admin, signOut }) {
       {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />
         {modal.reassign[2] && <small style={{ display: "block", margin: "6px 0" }}><b>{modal.reassign[2].fit === "strong" ? "Strong fit" : "Possible fit"}:</b> {modal.reassign[2].reason}<br />
           Skills: {modal.reassign[2].matched_skills.join(", ")} · {modal.reassign[2].due_this_week} due this week, {modal.reassign[2].open} open</small>}
-        <small>The recipient must accept first. Then the president, VP, or an admin can approve the transfer.</small>
+        <small>An administrator reviews first. After approval, the recipient must consent before ownership transfers.</small>
         <label style={{ display: "block", marginTop: 12 }}>Reason (optional)
           <textarea className="field" maxLength={10000} value={requestReason} onChange={e => setRequestReason(e.target.value)} disabled={requestBusy} />
         </label>
