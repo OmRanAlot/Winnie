@@ -1591,6 +1591,7 @@ export default function App({ profile, admin, signOut }) {
         {done.map((t) => <div className="due" key={t.id}><span style={{ width: 110, fontSize: 18 }}>{t.finished}:</span><button className="pill" onClick={() => go("task", { id: t.id })}>{t.title}</button></div>)}</>);
       break;
     }
+      case "requestArchive":
       case "reassigned":
       case "review": {
         const archivedOnly = p.n === "requestArchive";
