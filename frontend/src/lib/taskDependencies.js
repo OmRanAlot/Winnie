@@ -7,9 +7,11 @@ const ROLE = {
   publicRelations: /\b(public relations|pr chair)\b/i,
   industryPartnerships: /\bindustry partnership\b/i,
   technicalDirector: /\btechnical director\b/i,
+  communityOutreach: /\bcommunity outreach\b/i,
 };
 
 const PROJECT_ANCHORS = [
+  /\b(e ?board|executive board).{0,30}(recruit|election|candidate)|(recruit|election|candidate).{0,30}\b(e ?board|executive board)\b/i,
   /\bgirlhacks?\b/i,
   /\bwics gala\b|\bgala\b/i,
   /\bgbm\b|\bgeneral body meeting\b/i,
@@ -49,6 +51,17 @@ function sameProject(left, right) {
   return PROJECT_ANCHORS.some((anchor) => anchor.test(leftText) && anchor.test(rightText));
 }
 
+function sameRecruitmentProject(left, right) {
+  const leftLabel = projectLabel(left);
+  const rightLabel = projectLabel(right);
+  if (leftLabel && rightLabel) return leftLabel === rightLabel;
+  const leftText = contentOf(left);
+  const rightText = contentOf(right);
+  const eboard = /\b(e ?board|executive board)\b/;
+  return (eboard.test(leftText) && eboard.test(rightText))
+    || (hasCandidateContext(leftText) && hasCandidateContext(rightText));
+}
+
 function createsCycle(graph, taskId, dependsOnId) {
   const pending = [dependsOnId];
   const visited = new Set();
@@ -63,7 +76,7 @@ function createsCycle(graph, taskId, dependsOnId) {
 }
 
 function hasCandidateContext(text) {
-  return /\b(candidate|applicant|interview|recruitment|election|e board|executive board|officer)\b/.test(text);
+  return /\b(candidate|applicant|interview|recruitment|election|e ?board|executive board|officer)\b/.test(text);
 }
 
 function isShortlisting(task) {
@@ -76,13 +89,13 @@ function isDeliberation(task) {
   const text = contentOf(task);
   return /\b(deliberat(?:e|ion|ing)?|discuss|review|evaluate)\b/.test(text)
     && !/\b(announce|notify|publish|communicate)\b/.test(text)
-    && (hasCandidateContext(text) || /\be board\b|\bexecutive board\b/.test(text));
+    && (hasCandidateContext(text) || /\be ?board\b|\bexecutive board\b/.test(text));
 }
 
 function isDecisionAnnouncement(task) {
   const text = contentOf(task);
-  return /\b(announc(?:e|ing|ement)|notify|publish|communicate|share)\b/.test(text)
-    && /\b(candidate|applicant|decision|selection|e board|executive board|officer|election)\b/.test(text);
+  return /\b(announc(?:e|ed|ing|ement|ements)|notify|publish|communicate|share)\b/.test(text)
+    && /\b(candidate|applicant|decisions?|selections?|e ?board|executive board|officer|election)\b/.test(text);
 }
 
 function isSupplyList(task) {
@@ -140,6 +153,31 @@ function isEventRecap(task) {
   return /\b(recap|post-event|post event|event photos|capture photos|record content)\b/.test(text);
 }
 
+function isEventMarketing(task) {
+  return /\b(flyer|poster|marketing|promot(?:e|ion|ing)|social media|newsletter|event posting)\b/.test(contentOf(task));
+}
+
+function isEventPreparation(task) {
+  return /\b(prepare|preparations?|materials?|catering|food order|equipment|supplies|purchase|order|inventory)\b/.test(contentOf(task));
+}
+
+function isEventExecution(task) {
+  return /\b(day of|event execution|run (?:the )?event|host (?:the )?event|execute (?:the )?event|manage event logistics)\b/.test(contentOf(task));
+}
+
+function isSpeakerRecruitment(task) {
+  return /\b(secur(?:e|ing)|recruit(?:ing)?|confirm(?:ing)?)\b/.test(contentOf(task))
+    && /\b(speaker|panelist|presenter|lecturer)\b/.test(contentOf(task));
+}
+
+function isMeetingNotesOrActions(task) {
+  return /\b(minutes|meeting notes|action items|meeting follow-up)\b/.test(contentOf(task));
+}
+
+function isBudgetOrFundingRequest(task) {
+  return /\b(budget|funding request|grant application|submit funding|senate funding)\b/.test(contentOf(task));
+}
+
 function explicitlyFollows(task, prerequisite) {
   const taskText = contentOf(task);
   const prerequisiteTitle = normalize(prerequisite.title);
@@ -184,7 +222,7 @@ export function inferTaskDependencies(tasks, people = []) {
     ]));
   for (const deliberation of deliberations) {
     for (const shortlist of shortlists) {
-      if (hasCandidateContext(contentOf(shortlist))) {
+      if (hasCandidateContext(contentOf(shortlist)) && sameRecruitmentProject(deliberation, shortlist)) {
         addCandidate(candidates, graph, deliberation, shortlist,
           "Board deliberation follows the shortlist of interview candidates.");
       }
@@ -192,8 +230,10 @@ export function inferTaskDependencies(tasks, people = []) {
   }
   for (const announcement of announcements) {
     for (const deliberation of deliberations) {
-      addCandidate(candidates, graph, announcement, deliberation,
-        "Candidate decisions should be announced after E-Board deliberation.");
+      if (sameRecruitmentProject(announcement, deliberation)) {
+        addCandidate(candidates, graph, announcement, deliberation,
+          "Candidate decisions should be announced after E-Board deliberation.");
+      }
     }
   }
 
@@ -257,6 +297,70 @@ export function inferTaskDependencies(tasks, people = []) {
       if (sameProject(recap, execution)) {
         addCandidate(candidates, graph, recap, execution,
           "The event recap follows the event's day-of logistics and execution.");
+      }
+    }
+  }
+
+  const eventMarketingTasks = tasks.filter((task) => isEventMarketing(task)
+    && roleMatches(task, peopleById, [ROLE.publicRelations, ROLE.secretary]));
+  for (const marketing of eventMarketingTasks) {
+    for (const confirmedDetail of venueTasks) {
+      if (sameProject(marketing, confirmedDetail)) {
+        addCandidate(candidates, graph, marketing, confirmedDetail,
+          "Event promotion follows confirmed event registration, timing, or room details.");
+      }
+    }
+  }
+
+  const executionTasks = tasks.filter((task) => isEventExecution(task) || isDayOfLogistics(task));
+  const preparationTasks = tasks.filter((task) => isEventPreparation(task)
+    && roleMatches(task, peopleById, [ROLE.eventCoordinator, ROLE.treasurer]));
+  for (const execution of executionTasks) {
+    for (const preparation of preparationTasks) {
+      if (sameProject(execution, preparation)) {
+        addCandidate(candidates, graph, execution, preparation,
+          "Event execution depends on the related materials, purchases, and logistics being ready.");
+      }
+    }
+    for (const recruitment of girlHacksRecruitment) {
+      if (sameProject(execution, recruitment)) {
+        addCandidate(candidates, graph, execution, recruitment,
+          "GirlHacks event execution depends on recruiting judges, volunteers, and mentors.");
+      }
+    }
+  }
+
+  const speakerRecruitment = tasks.filter((task) => isSpeakerRecruitment(task)
+    && roleMatches(task, peopleById, [ROLE.communityOutreach]));
+  for (const execution of executionTasks) {
+    for (const speaker of speakerRecruitment) {
+      if (sameProject(execution, speaker)) {
+        addCandidate(candidates, graph, execution, speaker,
+          "The event depends on confirming its speakers or panelists.");
+      }
+    }
+  }
+
+  const meetingNotes = tasks.filter((task) => isMeetingNotesOrActions(task)
+    && roleMatches(task, peopleById, [ROLE.secretary]));
+  const followUps = tasks.filter((task) => /\b(follow up|complete|send|submit|update|circulate)\b/.test(contentOf(task))
+    && !isMeetingNotesOrActions(task));
+  for (const followUp of followUps) {
+    for (const notes of meetingNotes) {
+      if (explicitlyFollows(followUp, notes)) {
+        addCandidate(candidates, graph, followUp, notes,
+          "This follow-up explicitly depends on the meeting's recorded action items.");
+      }
+    }
+  }
+
+  const fundingTasks = tasks.filter((task) => isBudgetOrFundingRequest(task)
+    && roleMatches(task, peopleById, [ROLE.treasurer, ROLE.president]));
+  for (const purchase of purchases) {
+    for (const funding of fundingTasks) {
+      if (sameProject(purchase, funding)) {
+        addCandidate(candidates, graph, purchase, funding,
+          "Event purchases depend on the related budget or funding request being in place.");
       }
     }
   }
