@@ -1,6 +1,6 @@
 """Task API validation, used by routes/tasks.py and services/tasks.py."""
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -55,6 +55,17 @@ class TaskCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_identity(self):
+        if self.start_date is None:
+            today = date.today()
+            if self.due_date is None:
+                self.start_date = today
+            elif self.due_date <= today:
+                # Keep overdue tasks valid under the start-on-or-before-due rule.
+                self.start_date = self.due_date
+            elif (self.due_date - today).days < 7:
+                self.start_date = today
+            else:
+                self.start_date = self.due_date - timedelta(days=7)
         if self.start_date and self.due_date and self.start_date > self.due_date:
             raise ValueError("Start date must be on or before due date.")
         if self.source_task_id is not None and self.source_spreadsheet_id is None:

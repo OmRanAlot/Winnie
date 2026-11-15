@@ -7,7 +7,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run test:profiles && npm --prefix frontend test",
     "test:profiles": "node --test supabase/tests/profiles.test.mjs supabase/tests/roster.test.mjs"
   },
   "repository": {

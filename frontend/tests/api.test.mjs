@@ -22,7 +22,7 @@ test('dashboard reads and updates the same UUID task records', async () => {
     const updated = await updateTaskStatus(id, 'In-Progress');
     assert.equal(updated.id, id);
     assert.equal(updated.status, 'In-Progress');
-    assert.equal(calls[0].url, '/api/tasks/records?limit=100&offset=0');
+    assert.equal(calls[0].url, '/api/tasks/records?limit=250&offset=0');
     assert.equal(calls[1].url, `/api/tasks/records/${id}`);
     assert.deepEqual(JSON.parse(calls[1].options.body), { status: 'in_progress' });
   } finally { globalThis.fetch = original; }

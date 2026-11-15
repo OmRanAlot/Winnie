@@ -305,7 +305,7 @@ test('linked-task arrows appear for admin and member Gantt views', async () => {
   }
 });
 
-test('admin reviews and persists inferred dependency links', async () => {
+test('Gantt draws inferred candidate recruitment dependency arrows when linked tasks are enabled', async () => {
   setup();
   const tasks = [
     { id: 'shortlist', title: 'Shortlist interview candidates', status: 'Upcoming', dueIso: '2026-11-10', startIso: '2026-11-10', due: '11/10/2026', start: '11/10/2026', finished: '', event: 'E-Board Recruitment', assignee: 'VP' },
@@ -316,20 +316,19 @@ test('admin reviews and persists inferred dependency links', async () => {
     { id: 'PRESIDENT', name: 'President', role: 'President' },
     { id: 'VP', name: 'Vice President', role: 'Vice President' },
   ];
-  let renderer, refreshed = false;
+  let renderer;
   try {
     await act(async () => { renderer = TestRenderer.create(React.createElement(Gantt, {
       tasks, allTasks: tasks, people, isAdminView: true, showAll: true,
-      onShowAllChange() {}, onOpen() {}, async onDependenciesSaved() { refreshed = true; },
+      onShowAllChange() {}, onOpen() {},
     })); });
-    await act(async () => button(renderer, 'Review inferred dependencies').props.onClick());
-    assert.ok(text(renderer.root.findByProps({ className: 'gantt-inference' })).includes('External E-Board deliberation'));
-    await act(async () => button(renderer, 'Save 2 inferred links').props.onClick());
-    assert.deepEqual(globalThis.__dashboard.savedDependencies.map(({ task_id, depends_on_id }) => [task_id, depends_on_id]), [
-      ['deliberation', 'shortlist'], ['announcement', 'deliberation'],
-    ]);
-    assert.equal(refreshed, true);
-    assert.ok(renderer.root.findAllByProps({ role: 'status' }).some(node => text(node).includes('2 dependency links saved.')));
+    const linkedTasksToggle = renderer.root.findAllByType('button').find(node => text(node).includes('Show linked tasks'));
+    await act(async () => linkedTasksToggle.props.onClick());
+    const svg = renderer.root.findByProps({ className: 'dependency-lines' });
+    const paths = svg.findAll(node => node.type === 'path' && node.props.markerEnd);
+    assert.equal(paths.length, 2);
+    assert.ok(text(svg).includes('External E-Board deliberation is a dependency for Announce E-Board candidate decisions'));
+    assert.ok(text(svg).includes('Shortlist interview candidates is a dependency for External E-Board deliberation'));
   } finally {
     if (renderer) await act(async () => renderer.unmount());
     delete globalThis.window;

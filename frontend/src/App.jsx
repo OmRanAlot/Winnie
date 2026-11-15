@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { getAssignments, getCandidates, getEventLabels, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, saveTaskDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
-import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan } from "./lib/eventPlans.js";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
+import { getAssignments, getCandidates, getEventLabels, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
+import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan, reviewEventPlan } from "./lib/eventPlans.js";
 import Recorder from "./Recorder.jsx";
 import PlanLoading from "./PlanLoading.jsx";
 import Attendance from "./Attendance.jsx";
@@ -51,6 +51,26 @@ const who = (t) => person(t.assignee) ?? { id: null, name: t.assigneeText ? t.as
 const normalizeRole = (role) => String(role ?? "").trim().toLowerCase()
   .replace(/\bpartnerships\b/g, "partnership").replace(/\s+/g, " ");
 
+function readDashboardCache(memberCode) {
+  try {
+    const raw = window.sessionStorage.getItem(`winnie:dashboard-cache:${memberCode || "board"}`);
+    const cached = raw ? JSON.parse(raw) : null;
+    return cached && Array.isArray(cached.tasks) && Array.isArray(cached.people) ? cached : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDashboardCache(memberCode, tasks, people, savedAt) {
+  try {
+    window.sessionStorage.setItem(`winnie:dashboard-cache:${memberCode || "board"}`, JSON.stringify({
+      tasks, people, savedAt: savedAt.toISOString(),
+    }));
+  } catch {
+    // The dashboard still works when browser storage is unavailable or full.
+  }
+}
+
 /* ---------- Styles (palette pulled from the logo) ---------- */
 export const CSS = `
 :root{--ink:#3a1410;--maroon:#5a0d05;--rust:#b5472a;--paper:#f3ebe2;--surface:#eadfd2;--hover:#e0d0bf;--line:#d6c4b2;--muted:#7a6459;--sun:#e0b25a;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--r:6px;--frame-band:clamp(12px,6.6vw,96px)}
@@ -66,6 +86,7 @@ h1,h2,h3,h4,.big{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif;l
 button.btn,button.pill,button.link,button.bell,button.back,button.chev,button.rb,.nav button,.hub button{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif;letter-spacing:.07em}
 .app{max-width:calc(1120px + var(--frame-band) + var(--frame-band));width:calc(100% - var(--frame-band) - var(--frame-band));margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:var(--s5) var(--s6) 0;background:var(--paper);border-left:var(--frame-band) solid var(--rust);border-right:var(--frame-band) solid var(--rust)}
 .page-content{display:flex;flex:1;flex-direction:column;min-width:0;padding-bottom:48px}
+.page-content.dashboard-content{padding-bottom:8px}
 .top{display:flex;align-items:center;gap:var(--s4);min-height:56px;margin-bottom:var(--s4)}
 .top h1{flex:1;text-align:center;font-size:28px;margin:0;font-weight:700;letter-spacing:.07em}
 .top .greeting{text-align:left;font-size:40px;font-weight:600}
@@ -113,13 +134,6 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .gantt-key span{display:inline-flex;align-items:center;gap:var(--s1)}
 .gantt-key b{color:#6b3e2e;font-size:16px;line-height:1}
 .gantt-key .gantt-key-star{color:var(--sun);font-size:15px;text-shadow:0 0 1px var(--ink)}
-.gantt-inference{margin:var(--s3) 0;padding:var(--s3);border:1px solid var(--line);border-radius:var(--r);background:#fffaf5}
-.gantt-inference p{margin:0 0 var(--s2)}
-.gantt-inference ol{margin:var(--s2) 0;padding-left:var(--s5)}
-.gantt-inference li{margin:var(--s2) 0}
-.gantt-inference small{display:block;color:var(--muted)}
-.gantt-inference-actions{display:flex;gap:var(--s2);flex-wrap:wrap}
-.gantt-inference-status{margin:var(--s2) 0;color:var(--muted);font-size:13px}
 .nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:0 calc(var(--s6) * -1);padding:var(--s4) var(--s6);position:sticky;bottom:0;z-index:5}
 .nav button{border:1px solid var(--line);background:var(--paper);border-radius:var(--r);padding:var(--s3);font-size:20px;font-weight:600;color:var(--ink);cursor:pointer}
 .nav button:hover{background:var(--ink);color:var(--paper)}
@@ -146,8 +160,11 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .bar{position:absolute;top:10px;height:20px;border-radius:3px}
 .bar-star{position:absolute;right:3px;top:50%;transform:translateY(-50%);color:var(--sun);-webkit-text-stroke:.7px var(--ink);font-size:13px;line-height:1;text-shadow:0 1px 2px var(--ink);pointer-events:none}
 .bar.related-bar{outline:2px solid var(--rust);outline-offset:1px}
+.bar.outside-week-bar{outline-style:dashed}
 .bar.linked-highlight{outline:3px solid var(--maroon);outline-offset:1px;filter:saturate(1.25) brightness(1.08)}
 .bar.unrelated-dim{opacity:.4}
+.dependency-edge-halo{fill:none;stroke:var(--surface);stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.dependency-edge-line{fill:none;stroke:#6b3e2e;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .tog{display:flex;align-items:center;gap:var(--s2);justify-content:flex-end;font-size:14px;margin-bottom:var(--s2);padding:0;border:0;background:transparent;color:inherit;cursor:pointer}
 .sw{width:40px;height:22px;border-radius:99px;background:var(--line);position:relative}
 .sw i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--ink);transition:left .15s}
@@ -265,7 +282,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 @keyframes plan-float{50%{transform:translateY(-5px) rotate(3deg)}}
 @keyframes plan-line{50%{opacity:.3;transform:translateX(2px)}}
 @media(max-width:520px){.plan-loading{gap:12px;padding:16px}.plan-loading-paper{width:40px}.plan-loading-copy strong{font-size:16px}}
-.dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 510px);pointer-events:none}
+.dependency-lines{position:absolute;z-index:3;top:0;right:10px;width:calc(100% - 510px);pointer-events:none;overflow:visible}
 .app button:not(:disabled),.app .avatar,.app .chart-member rect{transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease,filter .16s ease}
 @media(hover:hover){
   .app button:not(:disabled):hover:not(.back):not(.avatar):not(.bell):not(.chev):not(.rb){transform:translateY(-1px);box-shadow:0 4px 10px rgba(58,20,16,.1)}
@@ -377,26 +394,53 @@ const Icon = ({ n, s = 22 }) => <svg width={s} height={s} viewBox="0 0 24 24" fi
 const Avatar = ({ p, cls = "", ...r }) => <button className={`avatar ${cls}`} title={p.name} aria-label={p.name} {...r}>{ini(p.name)}</button>;
 
 /* ---------- Gantt ---------- */
-export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAdminView = false, showAll, onShowAllChange, onOpen, onDependenciesSaved = async () => {}, who: owner }) {
-  const [deps, setDeps] = useState(false);
+function useSessionState(key, initialValue) {
+  const storageKey = `winnie:${key}`;
+  const [value, setValue] = useState(() => {
+    try {
+      const saved = window.sessionStorage.getItem(storageKey);
+      return saved === null ? initialValue : JSON.parse(saved);
+    } catch {
+      return initialValue;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(storageKey, JSON.stringify(value));
+    } catch {
+      // Keep the in-memory state when browser storage is unavailable.
+    }
+  }, [storageKey, value]);
+  return [value, setValue];
+}
+
+export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAdminView = false, showAll, onShowAllChange, onOpen, who: owner, stateKey = "board" }) {
+  const [deps, setDeps] = useSessionState(`${stateKey}:gantt-linked-tasks`, false);
   const [hoveredTaskId, setHoveredTaskId] = useState(null);
-  const [dependencySuggestions, setDependencySuggestions] = useState(null);
-  const [dependencySaving, setDependencySaving] = useState(false);
-  const [dependencyMessage, setDependencyMessage] = useState("");
-  const [dependencyActionError, setDependencyActionError] = useState("");
-  const [week, setWeek] = useState(0); // 0 = this week, -1 = last week, 1 = next week
+  const [week, setWeek] = useSessionState(`${stateKey}:gantt-week`, 0); // 0 = this week, -1 = last week, 1 = next week
+  // Older session state can contain a string or invalid value. Keep date math numeric
+  // so changing weeks cannot pass an invalid date into the chart.
+  const selectedWeek = Number.isFinite(Number(week)) ? Number(week) : 0;
   const H = 40, W = 700, cw = W / 7;
   // Live tasks carry a real due date: place each one on the selected week's Mon..Sun columns.
   const monday = weekStart();
-  monday.setDate(monday.getDate() + 7 * week);
+  monday.setDate(monday.getDate() + 7 * selectedWeek);
   const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
   const fmt = (d) => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const weekTasks = (list) => list
-    .filter((t) => t.dueIso)
+  const weekTasks = (list, includeOutsideWeek = false) => list
+    .filter((t) => t.dueIso || includeOutsideWeek)
     .map((t) => {
+      if (!t.dueIso) return { ...t, day: 0, len: 1, visible: true, outsideWeek: true };
       const first = Math.round((new Date(`${t.startIso || t.dueIso}T00:00:00`) - monday) / 86400000);
       const last = Math.round((new Date(`${t.dueIso}T00:00:00`) - monday) / 86400000);
-      return { ...t, day: Math.max(0,first), len: Math.min(6,last)-Math.max(0,first)+1, visible: last>=0 && first<7 };
+      const visible = last >= 0 && first < 7;
+      return {
+        ...t,
+        day: visible ? Math.max(0, first) : last < 0 ? 0 : 6,
+        len: visible ? Math.min(6, last) - Math.max(0, first) + 1 : 1,
+        visible: visible || includeOutsideWeek,
+        outsideWeek: !visible,
+      };
     })
     .filter(t => t.visible)
     .sort(compareByDueDate);
@@ -404,8 +448,26 @@ export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAd
   const baseTasks = weekTasks(scopeTasks);
   const taskIds = new Set(baseTasks.map((t) => t.id));
   const ownTaskIds = new Set(weekTasks(all).map((t) => t.id));
-  const weeklyAllTasks = weekTasks(allTasks);
-  const getConnectedTaskIds = (rootIds, scopeTasks = weeklyAllTasks) => {
+  const inferredDependencies = useMemo(
+    () => inferTaskDependencies(allTasks, people), [allTasks, people],
+  );
+  const dependenciesByTask = new Map(allTasks.map((task) => [
+    task.id, new Set(task.dependsOn || (task.dep ? [task.dep] : [])),
+  ]));
+  inferredDependencies.forEach(({ task_id, depends_on_id }) => {
+    dependenciesByTask.get(task_id)?.add(depends_on_id);
+  });
+  const tasksWithDependencies = allTasks.map((task) => ({
+    ...task,
+    dependsOn: [...(dependenciesByTask.get(task.id) ?? [])],
+  }));
+  const titleById = new Map(tasksWithDependencies.map((task) => [task.id, task.title]));
+  const dependentsByTask = new Map(tasksWithDependencies.map((task) => [task.id, []]));
+  tasksWithDependencies.forEach((task) => task.dependsOn.forEach((id) => {
+    dependentsByTask.get(id)?.push(task.title);
+  }));
+  const weeklyAllTasks = weekTasks(tasksWithDependencies, deps);
+  const getConnectedTaskIds = (rootIds, scopeTasks = tasksWithDependencies) => {
     const connected = new Set(rootIds);
     const scopeIds = new Set(scopeTasks.map((task) => task.id));
     const pending = [...rootIds];
@@ -427,44 +489,26 @@ export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAd
     return connected;
   };
   const linkedIds = deps ? getConnectedTaskIds([...taskIds]) : new Set();
-  const hoverScope = weeklyAllTasks;
+  const hoverScope = tasksWithDependencies;
   const highlightedIds = hoveredTaskId === null
     ? new Set() : getConnectedTaskIds([hoveredTaskId], hoverScope);
-  const showLinkedTasks = deps || hoveredTaskId !== null;
-  const chartTaskIds = new Set([...taskIds, ...linkedIds, ...highlightedIds]);
+  const showLinkedTasks = deps;
+  const chartTaskIds = deps
+    ? new Set([...taskIds, ...linkedIds, ...highlightedIds])
+    : taskIds;
   const chartTasks = weeklyAllTasks.filter((t) => chartTaskIds.has(t.id)).sort(compareByDueDate);
   const idx = Object.fromEntries(chartTasks.map((t, i) => [t.id, i]));
-  const titleById = new Map(allTasks.map((task) => [task.id, task.title]));
-  const reviewInferredDependencies = () => {
-    setDependencyMessage("");
-    setDependencyActionError("");
-    setDependencySuggestions(inferTaskDependencies(allTasks, people));
-  };
-  const saveInferredDependencies = async () => {
-    setDependencySaving(true);
-    setDependencyActionError("");
-    setDependencyMessage("");
-    try {
-      const result = await saveTaskDependencies(dependencySuggestions);
-      setDependencySuggestions(null);
-      setDependencyMessage(`${result.added} dependency link${result.added === 1 ? "" : "s"} saved.`);
-      try {
-        await onDependenciesSaved();
-      } catch (error) {
-        setDependencyActionError(`Links were saved, but the Gantt could not refresh: ${error.message}`);
-      }
-    } catch (error) {
-      setDependencyActionError(error.message);
-    } finally {
-      setDependencySaving(false);
-    }
-  };
+  const dependencyEdges = chartTasks.flatMap((dependent) =>
+    (dependent.dependsOn || (dependent.dep ? [dependent.dep] : []))
+      .filter((id) => idx[id] !== undefined)
+      .map((id) => ({ dependent, prerequisite: chartTasks[idx[id]] })),
+  );
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 6 }}>
-        <button className="btn alt" style={{ padding: "4px 14px" }} aria-label="Previous week" onClick={() => setWeek(week - 1)}>◀</button>
-        <b>{fmt(monday)} – {fmt(sunday)}{week === 0 ? " (this week)" : ""}</b>
-        <button className="btn alt" style={{ padding: "4px 14px" }} aria-label="Next week" onClick={() => setWeek(week + 1)}>▶</button>
+        <button className="btn alt" style={{ padding: "4px 14px" }} aria-label="Previous week" onClick={() => setWeek((current) => (Number.isFinite(Number(current)) ? Number(current) : 0) - 1)}>◀</button>
+        <b>{fmt(monday)} – {fmt(sunday)}{selectedWeek === 0 ? " (this week)" : ""}</b>
+        <button className="btn alt" style={{ padding: "4px 14px" }} aria-label="Next week" onClick={() => setWeek((current) => (Number.isFinite(Number(current)) ? Number(current) : 0) + 1)}>▶</button>
       </div>
       <div className={`gantt-controls${isAdminView ? " admin-controls" : ""}`}>
         {isAdminView && (
@@ -476,42 +520,11 @@ export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAd
         <button type="button" className="tog" aria-pressed={deps} onClick={() => setDeps((visible) => !visible)}>
           Show linked tasks <span className={`sw ${deps ? "on" : ""}`} aria-hidden="true"><i /></span>
         </button>
-        {isAdminView && <button type="button" className="btn alt" onClick={reviewInferredDependencies}>
-          Review inferred dependencies
-        </button>}
       </div>
-      {dependencySuggestions !== null && (
-        <div className="gantt-inference" aria-label="Inferred task dependencies">
-          {dependencySuggestions.length ? <>
-            <p>Review these high-confidence links before saving:</p>
-            <ol>{dependencySuggestions.map((edge) => (
-              <li key={`${edge.task_id}-${edge.depends_on_id}`}>
-                <b>{titleById.get(edge.task_id)}</b> depends on <b>{titleById.get(edge.depends_on_id)}</b>
-                <small>{edge.reason}</small>
-              </li>
-            ))}</ol>
-            <div className="gantt-inference-actions">
-              <button type="button" className="btn" disabled={dependencySaving} onClick={saveInferredDependencies}>
-                {dependencySaving ? "Saving…" : `Save ${dependencySuggestions.length} inferred link${dependencySuggestions.length === 1 ? "" : "s"}`}
-              </button>
-              <button type="button" className="btn alt" disabled={dependencySaving} onClick={() => setDependencySuggestions(null)}>Cancel</button>
-            </div>
-          </> : <p>No new high-confidence dependency links were found.
-            <button type="button" className="link" onClick={() => setDependencySuggestions(null)}>Dismiss</button>
-          </p>}
-        </div>
-      )}
-      {dependencyActionError && <p className="gantt-inference-status" role="alert">{dependencyActionError}</p>}
-      {dependencyMessage && <p className="gantt-inference-status" role="status">{dependencyMessage}</p>}
-      <div className="gantt-key" aria-label="Gantt chart key">
-        <span><b aria-hidden="true">↓</b> Depends on</span>
-        <span><b aria-hidden="true">↑</b> Dependency for</span>
-        <span><b className="gantt-key-star" aria-hidden="true">★</b> High priority</span>
-      </div>
-      <p style={{fontSize:13,color:'var(--muted)',margin:'4px 0 12px'}}>
+      {!isAdminView && <p style={{fontSize:13,color:'var(--muted)',margin:'4px 0 12px'}}>
         {baseTasks.length} scheduled in the selected week · {scopeTasks.length} tasks in this view.
         {scopeTasks.some(t => !t.dueIso) && ` ${scopeTasks.filter(t => !t.dueIso).length} without a due date are available in Tasks.`}
-      </p>
+      </p>}
       <div className="gantt">
         <div className="gh"><span>Task title</span><span>Priority</span><span>Start date</span><span>Due date</span><span>Date finished</span>
           <div className="days">{DAYS.map((d) => <span key={d}>{d}</span>)}</div></div>
@@ -522,15 +535,22 @@ export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAd
             const isDimmed = hoveredTaskId !== null && !isHighlighted;
             const ownerName = people.find((member) => member.id === t.assignee)?.name;
             const showOwner = isRelated || (isAdminView && showAll && !ownTaskIds.has(t.id));
+            const prerequisites = t.dependsOn.map((id) => titleById.get(id) ?? id);
+            const dependents = dependentsByTask.get(t.id) ?? [];
+            const relationshipLabel = [
+              prerequisites.length ? `Depends on: ${prerequisites.join(", ")}` : "",
+              dependents.length ? `Dependency for: ${dependents.join(", ")}` : "",
+            ].filter(Boolean).join(". ");
             const priority = t.priority ?? "normal";
             const priorityLabel = priority.charAt(0).toUpperCase() + priority.slice(1);
             return (
-            <div className="gr" key={t.id} onClick={() => onOpen(t.id)}
+            <div className="gr" key={t.id} aria-label={`${t.title}${relationshipLabel ? `. ${relationshipLabel}` : ""}`}
+              title={relationshipLabel || t.title} onClick={() => onOpen(t.id)}
               onMouseEnter={() => setHoveredTaskId(t.id)} onMouseLeave={() => setHoveredTaskId(null)}>
-              <span title={showOwner ? `${t.title} — ${ownerName}` : t.title}>{t.title}{showOwner && ownerName ? ` · ${ownerName}` : ""}</span>
+              <span title={`${t.title}${t.outsideWeek ? " · outside the selected week" : ""}${showOwner && ownerName ? ` — ${ownerName}` : ""}`}>{t.title}{showOwner && ownerName ? ` · ${ownerName}` : ""}{t.outsideWeek ? <small> · outside week</small> : ""}</span>
               <span className={`priority-${priority}`} title={`${priorityLabel} priority`}>{priorityLabel}</span>
               <span>{t.start.slice(0, 5)}</span><span>{t.due.slice(0, 5)}</span><span>{t.finished ? t.finished.slice(0, 5) : "—"}</span>
-              <div className="lane"><div className={`bar${isRelated ? " related-bar" : ""}${isHighlighted ? " linked-highlight" : ""}${isDimmed ? " unrelated-dim" : ""}`}
+              <div className="lane"><div className={`bar${isRelated ? " related-bar" : ""}${t.outsideWeek ? " outside-week-bar" : ""}${isHighlighted ? " linked-highlight" : ""}${isDimmed ? " unrelated-dim" : ""}`}
                 style={{ left: `${(t.day / 7) * 100}%`, width: `${(t.len / 7) * 100}%`, background: COLORS[t.status] }}>
                 {priority.toLowerCase() === "high" && <span className="bar-star" aria-label="High priority">★</span>}
               </div></div>
@@ -541,43 +561,53 @@ export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAd
             No tasks due {owner ? `for ${owner} ` : ""}this week. Use ◀ ▶ to see other weeks.</p>}
           {showLinkedTasks && (
             <svg className="dependency-lines" viewBox={`0 0 ${W} ${chartTasks.length * H}`} preserveAspectRatio="none" role="img"
-              aria-label="Task dependency arrows point from dependent tasks to their prerequisites" style={{ height: chartTasks.length * H }}>
+              aria-label="Task dependency arrows point from prerequisites to the tasks that depend on them" style={{ height: chartTasks.length * H }}>
               <defs>
-                <marker id="gantt-dependency-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+                <marker id="gantt-dependency-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6"
                   markerUnits="strokeWidth" orient="auto">
-                  <path d="M0 0 L10 5 L0 10 Z" fill="#6b3e2e" />
+                  <path d="M0 0 L10 5 L0 10 Z" fill="#6b3e2e" stroke="var(--surface)" strokeWidth="1" strokeLinejoin="round" />
                 </marker>
               </defs>
-              {chartTasks.flatMap(t => (t.dependsOn || (t.dep ? [t.dep] : []))
-                .filter(id => idx[id] !== undefined)
-                .map(id => ({ task: t, dependency: chartTasks[idx[id]] })))
-                .map(({ task: dependent, dependency }) => {
-                  const x1 = (dependent.day + 0.1) * cw, y1 = idx[dependent.id] * H + H / 2;
-                  const x2 = (dependency.day + dependency.len) * cw, y2 = idx[dependency.id] * H + H / 2;
-                  const bendX = (x1 + x2) / 2;
-                  const verticalDirection = y2 < y1 ? -1 : 1;
-                  const arrowStart = y2 - verticalDirection * 8;
-                  return <g key={`${dependent.id}-${dependency.id}`}>
-                    <path d={`M${x1} ${y1} H${bendX} V${y2} H${x2}`}
-                      fill="none" stroke="#6b3e2e" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
-                    <path d={`M${x2} ${arrowStart} V${y2}`}
-                      fill="none" stroke="#6b3e2e" strokeWidth="1.8" vectorEffect="non-scaling-stroke"
-                      markerEnd="url(#gantt-dependency-arrowhead)">
-                      <title>{dependent.title} depends on {dependency.title}; {dependency.title} is a dependency for {dependent.title}</title>
-                    </path>
-                  </g>;
+              {dependencyEdges.map(({ dependent, prerequisite }) => {
+                const gap = 7;
+                const sourceX = Math.min(W - 4, (prerequisite.day + prerequisite.len) * cw + gap);
+                const targetX = (dependent.day + dependent.len / 2) * cw;
+                const sourceY = idx[prerequisite.id] * H + H / 2;
+                const targetY = idx[dependent.id] * H + 10;
+                const incoming = dependencyEdges.filter((edge) => edge.dependent.id === dependent.id);
+                const sameTarget = incoming.length;
+                const peerIndex = incoming.findIndex((edge) => edge.prerequisite.id === prerequisite.id);
+                const fan = peerIndex - (sameTarget - 1) / 2;
+                const midpoint = (sourceX + targetX) / 2;
+                const routeX = targetX > sourceX
+                  ? Math.max(sourceX + 10, Math.min(targetX - 10, midpoint + fan * 10))
+                  : Math.min(W - 8, Math.max(sourceX, targetX) + 14 + Math.abs(fan) * 8);
+                const path = `M${sourceX} ${sourceY} H${routeX} V${targetY - 7} H${targetX} V${targetY}`;
+                return <g key={`${dependent.id}-${prerequisite.id}`} className="dependency-edge">
+                  <path d={path} className="dependency-edge-halo" />
+                  <path d={path} className="dependency-edge-line" markerEnd="url(#gantt-dependency-arrowhead)">
+                    <title>{prerequisite.title} is a dependency for {dependent.title}; {dependent.title} depends on {prerequisite.title}</title>
+                  </path>
+                </g>;
               })}
             </svg>
           )}
         </div>
       </div>
       <div className="legend">{Object.entries(COLORS).map(([k, c]) => <span key={k}><i style={{ background: c }} />{k}</span>)}{deps && !showAll && <span><i className="related-swatch" />Related task</span>}{isAdminView && showAll && <span><i className="related-swatch" />Other E-board tasks</span>}</div>
+      <div className="gantt-key" aria-label="Gantt chart key">
+        <span><b aria-hidden="true">↓</b> Depends on</span>
+        <span><b aria-hidden="true">↑</b> Dependency for</span>
+        <span><b className="gantt-key-star" aria-hidden="true">★</b> High priority</span>
+      </div>
     </div>
   );
 }
 
 /* ---------- App ---------- */
 export default function App({ profile, admin, signOut }) {
+  const dashboardCacheKey = profile.member_code || "board";
+  const [dashboardCache] = useState(() => readDashboardCache(dashboardCacheKey));
   const [stack, setStack] = useState([{ n: "dash" }]);
   const [viewAs, setViewAs] = useState(null);
   const [adminShowAllGantt, setAdminShowAllGantt] = useState(true);
@@ -590,10 +620,11 @@ export default function App({ profile, admin, signOut }) {
   const [dataError, setDataError] = useState("");
   const [requestDataError, setRequestDataError] = useState("");
   const [dependencyError, setDependencyError] = useState("");
-  const [lastTaskRefresh, setLastTaskRefresh] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [lastTaskRefresh, setLastTaskRefresh] = useState(() => dashboardCache?.savedAt ? new Date(dashboardCache.savedAt) : null);
+  const [loading, setLoading] = useState(() => !dashboardCache);
   const refreshVersion = useRef(0);
   const refreshInFlight = useRef(0);
+  const [savedTaskForm, setSavedTaskForm] = useState(null);
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
   const [eventPlanError, setEventPlanError] = useState("");
@@ -645,11 +676,37 @@ export default function App({ profile, admin, signOut }) {
       .then((list) => setCands((c) => ({ ...c, [t.id]: { list } })))
       .catch((e) => setCands((c) => ({ ...c, [t.id]: { error: e.message } })));
   };
-  const [TASKS, setTasks] = useState([]);
-  const [PEOPLE, setPeople] = useState([]);
+  const [TASKS, setTasks] = useState(() => dashboardCache?.tasks ?? []);
+  const [PEOPLE, setPeople] = useState(() => dashboardCache?.people ?? []);
+  const taskRelations = useMemo(() => {
+    const relations = new Map(TASKS.map((item) => [item.id, {
+      dependsOn: new Set([...(item.dependsOn ?? []), ...(item.dep ? [item.dep] : [])]),
+      dependedBy: new Set(),
+    }]));
+    inferTaskDependencies(TASKS, PEOPLE).forEach(({ task_id, depends_on_id }) => {
+      relations.get(task_id)?.dependsOn.add(depends_on_id);
+    });
+    relations.forEach((relation, taskId) => relation.dependsOn.forEach((id) => {
+      relations.get(id)?.dependedBy.add(taskId);
+    }));
+    return relations;
+  }, [TASKS, PEOPLE]);
+  const taskRelationshipText = (taskId) => {
+    const relation = taskRelations.get(taskId);
+    if (!relation) return "Dependencies: None";
+    const titleFor = (id) => TASKS.find((item) => item.id === id)?.title;
+    const prerequisites = [...relation.dependsOn].map(titleFor).filter(Boolean);
+    const dependents = [...relation.dependedBy].map(titleFor).filter(Boolean);
+    return [
+      prerequisites.length ? `Depends on: ${prerequisites.join(", ")}` : "",
+      dependents.length ? `Dependency for: ${dependents.join(", ")}` : "",
+    ].filter(Boolean).join(" · ") || "Dependencies: None";
+  };
   const [eventOverrides, setEventOverrides] = useState({});
   const tasks = TASKS; // the redesign's screens read `tasks`; same live list
-  const [source, setSource] = useState("Loading tasks…");
+  const [source, setSource] = useState(() => dashboardCache
+    ? `Live cache: ${dashboardCache.tasks.length} tasks, ${dashboardCache.people.length} members`
+    : "Loading tasks…");
   const live = source.startsWith("Live");
   currentTasks = TASKS;
   currentPeople = PEOPLE;
@@ -658,33 +715,72 @@ export default function App({ profile, admin, signOut }) {
     refreshInFlight.current += 1;
     // Secondary failures must not prevent current task data from reaching the chart.
     const secondary = Promise.allSettled([requestsStore.list(), getDependencies()]);
+    const membership = Promise.allSettled([getMembers(), getAssignments()]);
     try {
-      const [ts, people, assignments] = await Promise.all([
-        getTasks(), getMembers(), getAssignments(),
-      ]);
+      const ts = await getTasks();
       if (version !== refreshVersion.current) return;
-      const byTask = assignments.byTask;
-      const enriched = ts.map((t) => {
-        const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
-        return { ...t, assignees: codes, assignee: codes[0] ?? null, dependsOn: [], dep: null };
-      });
+      let enriched = ts.map((t) => ({
+        ...t,
+        assignees: t.ownerCode ? [t.ownerCode] : [],
+        assignee: t.ownerCode ?? null,
+        dependsOn: [],
+        dep: null,
+      }));
       setTasks(enriched);
-      setPeople(people);
       setDataError("");
-      setSource(`Live: ${ts.length} tasks, ${people.length} members`);
-      setLastTaskRefresh(new Date());
+      setSource(`Live: ${ts.length} tasks`);
       setLoading(false);
+
+      const [memberResult, assignmentResult] = await membership;
+      if (version !== refreshVersion.current) return;
+      let people = PEOPLE;
+      if (memberResult.status === "fulfilled") {
+        people = memberResult.value;
+        setPeople(people);
+      } else {
+        setDataError(memberResult.reason?.message || "Board member details could not be loaded.");
+      }
+      if (assignmentResult.status === "fulfilled") {
+        const byTask = assignmentResult.value.byTask;
+        enriched = enriched.map((t) => {
+          const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
+          return { ...t, assignees: codes, assignee: codes[0] ?? null };
+        });
+        setTasks(enriched);
+      } else {
+        setDataError(assignmentResult.reason?.message || "Task assignments could not be loaded.");
+      }
+      setSource(`Live: ${ts.length} tasks, ${people.length} members`);
+      const refreshedAt = new Date();
+      setLastTaskRefresh(refreshedAt);
+      writeDashboardCache(dashboardCacheKey, enriched, people, refreshedAt);
+
       const [requests, dependencies] = await secondary;
       if (version !== refreshVersion.current) return;
+      let tasksForCache = enriched;
       if (requests.status === 'fulfilled') {
         setReqs(requests.value.filter(request => request.id !== reviewingRequestRef.current)); setRequestDataError("");
       } else { setRequestDataError(requests.reason?.message || 'Request history could not be loaded.'); }
       if (dependencies.status === 'fulfilled') {
         const links = {};
         dependencies.value.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
-        setTasks(current => current.map(t => ({ ...t, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null })));
+        const refreshedTasks = enriched.map(t => ({
+          ...t, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null,
+        }));
+        setTasks(refreshedTasks);
+        tasksForCache = refreshedTasks;
         setDependencyError("");
-      } else { setDependencyError(dependencies.reason?.message || 'Task dependencies could not be loaded.'); }
+      } else {
+        setDependencyError(dependencies.reason?.message || 'Task dependencies could not be loaded.');
+        const cachedLinks = Object.fromEntries((dashboardCache?.tasks ?? []).map((task) => [
+          task.id, task.dependsOn ?? (task.dep ? [task.dep] : []),
+        ]));
+        tasksForCache = enriched.map((task) => ({
+          ...task, dependsOn: cachedLinks[task.id] ?? [], dep: cachedLinks[task.id]?.[0] ?? null,
+        }));
+        setTasks(tasksForCache);
+      }
+      writeDashboardCache(dashboardCacheKey, tasksForCache, people, refreshedAt);
       // Enrich tasks whose event is "Miscellaneous" or blank with a Gemini-suggested label.
       const needsLabel = enriched.filter((t) => !t.event || t.event.toLowerCase() === "miscellaneous");
       if (needsLabel.length > 0) {
@@ -704,7 +800,7 @@ export default function App({ profile, admin, signOut }) {
       refreshInFlight.current -= 1;
       if (version === refreshVersion.current) setLoading(false);
     }
-  }, []);
+  }, [dashboardCacheKey]);
   useEffect(() => {
     const reload = () => { if (!refreshInFlight.current) refresh().catch(() => {}); };
     reload();
@@ -1008,7 +1104,7 @@ export default function App({ profile, admin, signOut }) {
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
             : <button className="bell" aria-label="Notifications" onClick={() => go("review")}><Icon n="bell" s={26} /><b>{reqs.filter(r => r.status === "pending").length}</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
-        <div className="home"><div><h3>{isAdminView && adminShowAllGantt ? 'All E-board Gantt Chart:' : 'Your Gantt Chart:'}</h3><button className="link" onClick={() => go("tasks")}>View all {isAdminView ? TASKS.length : mine.length} tasks</button><Gantt tasks={mine} allTasks={TASKS} people={PEOPLE} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} onDependenciesSaved={refresh} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
+        <div className="home"><div><h3>{isAdminView && adminShowAllGantt ? 'All E-board Gantt Chart:' : 'Your Gantt Chart:'}</h3><button className="link" onClick={() => go("tasks")}>View all {isAdminView ? TASKS.length : mine.length} tasks</button><Gantt tasks={mine} allTasks={TASKS} people={PEOPLE} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} who={live && !isAdminView ? me.name : null} stateKey={profile.member_code || "board"} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
             {isAdminView && <Avatar p={who(t)} cls="sm" onClick={() => t.assignee && go("profile", { id: t.assignee })} />}
             <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
@@ -1084,13 +1180,12 @@ export default function App({ profile, admin, signOut }) {
     case "task": {
       const t = task(p.id);
       if (!t) { page = (<><Top title="Task not found" /><p style={{ textAlign: "center", fontSize: 20 }}>This task is not in the current board data. Refresh the task list and try again.</p></>); break; }
-      const dependencies = (t.dependsOn || []).map(task).filter(Boolean);
       const currentAssigneeId = currentOwner(t);
       const initialAssigneeId = initialOwner(t);
       const rows = [["Date assigned", t.assigned], ["Start date", t.start], ["Due date", t.due],
         ["Initial assignee", initialAssigneeId ? person(initialAssigneeId)?.name ?? "Not recorded" : t.assigneeText || "Not recorded"],
         ["Current assignee", currentAssigneeId ? person(currentAssigneeId)?.name ?? "Not recorded" : t.assigneeText || "Not recorded"],
-        ["Time", t.dueTime || "Not provided"], ["Status", t.status], ["Dependencies", dependencies.length ? dependencies.map(dep => `${dep.title} (${who(dep).name})`).join(", ") : "None"]];
+        ["Time", t.dueTime || "Not provided"], ["Status", t.status], ["Dependencies", taskRelationshipText(t.id)]];
       page = (<><Top title={t.title} /><div className="two" style={{ maxWidth: 960, margin: "10px auto" }}>
         <div className="panel">
           {t.status !== "Completed" && <label>Request reassignment to
@@ -1133,7 +1228,7 @@ export default function App({ profile, admin, signOut }) {
               return <Avatar key={s.code} p={q} cls="sm" title={`${s.name} · ${s.fit === "strong" ? "Strong fit" : "Possible fit"}\n${s.matched_skills.join(", ")}\n${s.due_this_week} due this week · ${s.open} open\n${s.reason}`}
                 style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => { setRequestError(""); setRequestReason(""); setModal({ reassign: [t, q, s] }); }} />; });
           })() : <small>Reconnect to request reassignment.</small>)}</div>
-          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
+          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}<br />{taskRelationshipText(t.id)}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
@@ -1549,11 +1644,12 @@ export default function App({ profile, admin, signOut }) {
       {dataError && <div role="alert">Could not refresh Supabase data: {dataError} <button onClick={() => refresh().catch(() => {})}>Retry</button></div>}
       {requestDataError && <p role="alert">Requests unavailable: {requestDataError} <button onClick={() => refresh().catch(() => {})}>Retry requests</button></p>}
       {dependencyError && <p role="alert">Task links unavailable: {dependencyError}. Tasks are still refreshed.</p>}
-      {p.n === "dash" && <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}><button className="btn alt" onClick={() => refresh().catch(() => {})}>Refresh tasks</button><small>{lastTaskRefresh ? `Tasks refreshed at ${lastTaskRefresh.toLocaleTimeString()}` : 'Waiting for task data…'}</small></div>}
       {loading && <p role="status">Loading tasks and requests?</p>}
       {meetingError && ['past', 'meeting', 'mm', 'memberStatus'].includes(p.n) && <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry meetings</button></p>}
       {admin && persistedDraft && p.n === "planTask" && <button className="btn alt" onClick={() => openTaskCreator(persistedDraft)}>Resume saved draft</button>}
-      <main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
+      <main className={`page-content${p.n === "dash" ? " dashboard-content" : ""}`}>{page}</main>
+      {p.n === "dash" && <div style={{display:'flex',alignItems:'center',justifyContent:'flex-start',gap:12,marginBottom:8}}><button className="btn alt" onClick={() => refresh().catch(() => {})}>Refresh tasks</button><small>{lastTaskRefresh ? `Tasks refreshed at ${lastTaskRefresh.toLocaleTimeString()}` : 'Waiting for task data…'}</small></div>}
+      {p.n === "dash" && <Nav />}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
       {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />

@@ -131,7 +131,7 @@ def list_task_records(
     semester_code: SemesterCode | None = None,
     status: TaskStatus | None = None,
     stakeholder_code: StakeholderCode | None = None,
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=250),
     offset: int = Query(default=0, ge=0, le=100000),
 ):
     meta = {"limit": limit, "offset": offset}

@@ -81,7 +81,7 @@ test('task reads and updates use the live UUID records API without caching', asy
   try {
     assert.equal((await getTasks())[0].ownerCode, 'NEW');
     assert.equal((await updateTaskStatus('uuid', 'Completed')).originalAssigneeCode, 'OLD');
-    assert.equal(calls[0][0], '/api/tasks/records?limit=100&offset=0');
+    assert.equal(calls[0][0], '/api/tasks/records?limit=250&offset=0');
     assert.equal(calls[1][0], '/api/tasks/records/uuid');
     assert.equal(calls[0][1].cache, 'no-store');
     assert.deepEqual(JSON.parse(calls[1][1].body), { status: 'done' });
