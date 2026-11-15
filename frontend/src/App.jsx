@@ -497,9 +497,6 @@ export default function App({ profile, admin, signOut }) {
   const [loading, setLoading] = useState(true);
   const refreshVersion = useRef(0);
   const refreshInFlight = useRef(0);
-  const [planInput, setPlanInput] = useState(EMPTY_PLAN_INPUT);
-  const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
-  const [savedTaskForm, setSavedTaskForm] = useState(null);
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
   const [eventPlanError, setEventPlanError] = useState("");
@@ -513,6 +510,7 @@ export default function App({ profile, admin, signOut }) {
   const [planError, setPlanError] = useState("");
   const [storedReqs, setReqs] = useState([]);
   const [reviewingRequestId, setReviewingRequestId] = useState(null);
+  const reviewingRequestRef = useRef(null);
   const reqs = storedReqs.filter(r => r.id !== reviewingRequestId);
   const [persistedDraft, setPersistedDraft] = useState(null);
   const [draftError, setDraftError] = useState("");
@@ -570,7 +568,6 @@ export default function App({ profile, admin, signOut }) {
       if (version !== refreshVersion.current) return;
       const byTask = assignments.byTask;
       const links = {};
-      dependencies.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
       const enriched = ts.map((t) => {
         const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
         return { ...t, assignees: codes, assignee: codes[0] ?? null, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null };
@@ -584,7 +581,7 @@ export default function App({ profile, admin, signOut }) {
       const [requests, dependencies] = await secondary;
       if (version !== refreshVersion.current) return;
       if (requests.status === 'fulfilled') {
-        setReqs(requests.value); setRequestDataError("");
+        setReqs(requests.value.filter(request => request.id !== reviewingRequestRef.current)); setRequestDataError("");
       } else { setRequestDataError(requests.reason?.message || 'Request history could not be loaded.'); }
       if (dependencies.status === 'fulfilled') {
         const links = {};
@@ -600,6 +597,7 @@ export default function App({ profile, admin, signOut }) {
             if (version === refreshVersion.current) setEventOverrides((prev) => ({ ...prev, ...overrides }));
           })
           .catch(() => {}); // non-fatal
+      }
     } catch (e) {
       if (version === refreshVersion.current) {
         setDataError(e.message);
@@ -634,15 +632,21 @@ export default function App({ profile, admin, signOut }) {
     if (mutationLock.current || requestDataError || !admin) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
     setReviewingRequestId(r.id);
+    reviewingRequestRef.current = r.id;
+    setReqs(current => current.filter(request => request.id !== r.id));
     try {
       const saved = await requestsStore.review(r.id, decision);
       // Discard refreshes started before the decision was saved.
       ++refreshVersion.current;
-      setReqs(current => current.map(request => request.id === r.id ? { ...request, status: decision } : request));
+      reviewingRequestRef.current = null;
+      setReqs(current => [...current, { ...r, status: decision }]);
       setCands({});
       say(saved?.notification_warning || (decision === "approved" ? "Approved — task assignment saved" : "Request denied"));
       try { await refresh(); } catch { say("Decision saved. Refresh failed; please retry."); }
+      setRequestDataError("");
     } catch (e) {
+      reviewingRequestRef.current = null;
+      setReqs(current => [...current.filter(request => request.id !== r.id), r]);
       setRequestError(e.message);
       refresh().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); setReviewingRequestId(null); }
@@ -1356,7 +1360,7 @@ export default function App({ profile, admin, signOut }) {
           </div>}
           {admin && r.status === "pending" && <>
             <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError || r.recipient_decision !== "accepted"} onClick={() => decideRequest(r, "approved")}>Approve</button>
-            <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Reject request</button>
+            <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Deny</button>
           </>}
         </div>;
         page = <><Top title={approvedOnly ? "Approved Reassignments" : admin ? "Reassignment Requests" : "Your Reassignment Requests"} tag={admin} />
