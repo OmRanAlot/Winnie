@@ -55,6 +55,25 @@ restore forgotten dialogue. Concurrent saves use optimistic version checks and f
 instead of overwriting a newer conversation. Duplicate message IDs cannot append twice
 or be reused with different content within the retained history.
 
+Winnie retains a pending clarification question and an explicit request for help while
+the member identifies the task. A task-name-only reply completes that clarification;
+it does not start a fresh completion-versus-help question. Replies to a pending model
+question bypass the older reminder yes/no router. Short conversational yes/no replies
+can reach the model, but cannot complete tasks or approve/accept a transfer.
+
+After a saved HELP recommendation, a unique saved candidate name or displayed number
+can select that candidate without restating the HELP code. The existing database
+allowlist and recipient/admin consent rules still apply. `ping` is handled before
+memory loading and never creates, replaces or evicts a conversation turn.
+
+The public `/api/photon/webhook` readiness JSON now includes
+`conversation_memory_enabled` and `conversation_protocol` (currently `2`). These
+non-secret fields confirm the deployed backend revision has the continuation fix.
+The deploy workflow enables memory by default; the repository variable
+`WINNIE_MESSAGE_MEMORY_ENABLED=false` can explicitly opt out. Updating only Cloud Run
+environment variables does not deploy changed Python source. Merge/deploy the updated
+backend image/source; GitHub auto-deployment runs on `main`, not `photon-work`.
+
 ## Verify
 
 From a linked member's DM:

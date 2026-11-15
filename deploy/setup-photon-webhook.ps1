@@ -58,9 +58,10 @@ try {
    Invoke-Gcloud @('secrets','add-iam-policy-binding',$name,'--project',$ProjectId,"--member=serviceAccount:$runtime",'--role=roles/secretmanager.secretAccessor','--quiet')
   } finally {Remove-Item -LiteralPath $secretTemp -Force -ErrorAction SilentlyContinue}
  }
- $envVars=@('WINNIE_PHOTON_ENABLED=true',"WINNIE_PHOTON_PROJECT_ID=$($config.project_id)","WINNIE_PHOTON_WEBHOOK_ID=$($config.webhook_id)","WINNIE_PHOTON_QUEUE=projects/$ProjectId/locations/$Region/queues/$Queue", "WINNIE_PHOTON_TASK_URL=$apiUrl/api/photon/work",'WINNIE_MESSAGE_AI_ENABLED=true','WINNIE_HELP_WORKFLOW_ENABLED=true')
+ $envVars=@('WINNIE_PHOTON_ENABLED=true',"WINNIE_PHOTON_PROJECT_ID=$($config.project_id)","WINNIE_PHOTON_WEBHOOK_ID=$($config.webhook_id)","WINNIE_PHOTON_QUEUE=projects/$ProjectId/locations/$Region/queues/$Queue", "WINNIE_PHOTON_TASK_URL=$apiUrl/api/photon/work",'WINNIE_MESSAGE_AI_ENABLED=true','WINNIE_HELP_WORKFLOW_ENABLED=true','WINNIE_MESSAGE_MEMORY_ENABLED=true')
  Invoke-Gcloud @('run','services','update',$Service,'--project',$ProjectId,'--region',$Region,'--update-env-vars',($envVars -join ','),'--update-secrets','WINNIE_PHOTON_PROJECT_SECRET=WINNIE_PHOTON_PROJECT_SECRET:latest,WINNIE_PHOTON_WEBHOOK_SECRET=WINNIE_PHOTON_WEBHOOK_SECRET:latest','--quiet')
  $status=Invoke-RestMethod -Uri $WebhookUrl
  if (-not $status.enabled -or -not $status.configured) {throw 'Route deployed, but readiness is incomplete. Check Cloud Run settings.'}
+ if (-not $status.conversation_memory_enabled -or $status.conversation_protocol -lt 2) {throw 'The deployed backend is missing the current conversation-memory implementation. Deploy the updated source, not only environment changes.'}
  Write-Host 'Webhook route is enabled and configured. Stop the local Photon listener, then text ping to verify end-to-end delivery.'
 } finally {Pop-Location}

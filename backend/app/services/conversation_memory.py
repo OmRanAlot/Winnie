@@ -10,6 +10,10 @@ from app.services.tasks import TaskNotFound
 
 REFERENCE = re.compile(r"\b(it|its|that task|this task)\b|^what about (?:the )?(?:deadline|due date)\??$", re.IGNORECASE)
 FORGET = {'forget conversation', 'forget this conversation', 'reset conversation', 'new conversation'}
+HELP_SIGNAL = re.compile(r"\b(?:i\s+)?(?:need|want|could use)\s+(?:some\s+)?help\b|\b(reassign|replacement|take over)\b", re.IGNORECASE)
+HELP_CANCEL = re.compile(r"\b(?:don't|do not|no longer|not)\s+(?:need|want)\s+help\b|^(?:never mind|nevermind|cancel|no thanks)[.! ]*$", re.IGNORECASE)
+HELP_UNCERTAIN = re.compile(r"\b(?:if|might|maybe|hypothetical)\b|\bdo i (?:need|want) help\b", re.IGNORECASE)
+SHORT_ANSWER = {'yes', 'yeah', 'yep', 'no', 'nope', 'sure', 'yes please', 'no thanks'}
 
 
 def thread_key(message, member, semester):
@@ -44,6 +48,7 @@ class ConversationContext:
         self.known_turns = turns
         focus = values.get('focus_task_id')
         ids = {task_id for turn in turns for task_id in turn.get('task_versions', {})}
+        ids.update(values.get('question_task_ids', []))
         if focus:
             ids.add(focus)
         self.authorized = self._authorized(task_rows(tasks, ids))
@@ -51,6 +56,12 @@ class ConversationContext:
             task_id in self.authorized and self.authorized[task_id].get('updated_at') == version
             for task_id, version in turn.get('task_versions', {}).items())]
         self.focus_task_id = focus if focus in self.authorized else None
+        self.question_task_ids = [key for key in values.get('question_task_ids', []) if key in self.authorized]
+        self.awaiting_answer = bool(values.get('awaiting_answer')) and bool(self.turns)
+        self.pending_intent = values.get('pending_intent') if values.get('pending_intent') == 'request_help' else None
+        self.pending_help_no = values.get('pending_help_no') if self.focus_task_id else None
+        if values.get('question_task_ids') and not self.question_task_ids:
+            self.pending_intent, self.awaiting_answer = None, False
         self.tracked = set()
 
     def _authorized(self, rows):
@@ -77,7 +88,7 @@ class ConversationContext:
         return result
 
     def ambiguous_reference(self, text, tasks):
-        if self.focus_task_id or not REFERENCE.search(text):
+        if self.focus_task_id or self.awaiting_answer or not REFERENCE.search(text):
             return False
         lower = text.casefold()
         return not any((t.get('task_code') and t['task_code'].casefold() in lower)
@@ -86,6 +97,57 @@ class ConversationContext:
     def focus(self, ids):
         self.focus_task_id = str(ids[0]) if len(ids) == 1 else None
         self.tracked.update(str(value) for value in ids)
+
+    def observe_input(self, text):
+        """Carry only explicit help intent, never completion/approval permission."""
+        if HELP_CANCEL.search(text):
+            self.pending_intent = None
+        elif HELP_SIGNAL.search(text) and not HELP_UNCERTAIN.search(text):
+            self.pending_intent = 'request_help'
+
+    def clarify(self, ids):
+        self.awaiting_answer = True
+        if ids:
+            self.question_task_ids = list(map(str, ids))
+            if len(ids) == 1:
+                self.focus(ids)
+            else:
+                self.focus([])
+
+    def answered(self):
+        self.awaiting_answer = False
+        self.question_task_ids = []
+
+    def named_task(self, text, tasks):
+        value = text.strip().casefold().rstrip('.!? ')
+        if self.awaiting_answer and value.isdigit() and 1 <= int(value) <= len(self.question_task_ids):
+            selected = self.question_task_ids[int(value)-1]
+            return next((t for t in tasks if str(t['id']) == selected), None)
+        matches = [t for t in tasks if value in (
+            str(t.get('task_code', '')).casefold(), str(t.get('title', '')).strip().casefold())]
+        return matches[0] if len(matches) == 1 else None
+
+    def reset_question(self):
+        self.pending_intent = None
+        self.pending_help_no = None
+        self.answered()
+
+    def offer_helpers(self, request):
+        if request['requester_code'] == self.member and str(request['task_id']) == self.focus_task_id and request['status'] == 'suggestions_ready':
+            self.pending_help_no = request['request_no']
+            self.clarify([self.focus_task_id])
+
+    def helper_choice(self, text, request):
+        if (not request or request['request_no'] != self.pending_help_no or request['requester_code'] != self.member
+                or str(request['task_id']) != self.focus_task_id or request['status'] != 'suggestions_ready'):
+            return None
+        value = re.sub(r'\s+please$', '', text.strip().casefold().rstrip('.!? '))
+        candidates = request.get('candidates', [])
+        if value.isdigit() and 1 <= int(value) <= len(candidates):
+            return candidates[int(value)-1]['code']
+        matches = [c['code'] for c in candidates if value in {
+            c['code'].casefold(), c.get('name', '').casefold(), c.get('name', '').casefold().split(' ')[0]}]
+        return matches[0] if len(matches) == 1 else None
 
     def clear(self):
         self.saver.delete_thread(self.saver.thread)
@@ -106,6 +168,7 @@ class ConversationContext:
         ids = self.tracked | {task_id for turn in self.turns for task_id in turn.get('task_versions', {})}
         if self.focus_task_id:
             ids.add(self.focus_task_id)
+        ids.update(self.question_task_ids)
         authorized = self._authorized(task_rows(self.tasks, ids))
         safe_turns = [turn for turn in self.turns if all(
             task_id in authorized and authorized[task_id].get('updated_at') == version
@@ -121,7 +184,12 @@ class ConversationContext:
         # A duplicate webhook cannot append again or change the conversation focus.
         if any(t['message_id'] == message.message_id for t in safe_turns):
             return
-        self.graph.invoke({'turns': safe_turns, 'turn': turn, 'focus_task_id': focus}, self.config)
+        questions = [key for key in self.question_task_ids if key in authorized]
+        pending = self.pending_intent if not self.question_task_ids or questions else None
+        self.graph.invoke({'turns': safe_turns, 'turn': turn, 'focus_task_id': focus,
+            'pending_intent': pending, 'question_task_ids': questions,
+            'pending_help_no': self.pending_help_no if focus else None,
+            'awaiting_answer': self.awaiting_answer and (not self.question_task_ids or bool(questions))}, self.config)
 
 
 def prepare_context(message, members, tasks, settings, store):

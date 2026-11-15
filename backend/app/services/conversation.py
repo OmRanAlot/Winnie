@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from app.agents.message_interpreter import InterpretationUnavailable, MessageDecision
 from app.integrations.supabase import StorageUnavailable
+from app.services.conversation_memory import HELP_CANCEL, SHORT_ANSWER
 from app.services.members import AliasConflict, assignment_members, normalize_sender
 from app.services.message_replies import MENU, verified_personal_tasks
 from app.services.tasks import TaskNotFound
@@ -85,9 +86,19 @@ def conversation_reply(message, members, tasks, completions, interpreter, settin
             )
             if memory is not None:
                 selected = memory.prompt_tasks(selected)
+                memory.observe_input(message.text)
+                named = memory.named_task(message.text, selected)
+                if memory.pending_intent == 'request_help' and named is not None:
+                    memory.focus([named['id']])
+                    memory.pending_intent = None
+                    memory.answered()
+                    return HelpIntent(named['task_code'])
                 if memory.ambiguous_reference(message.text, selected):
                     return clarify(selected)
-            if message.text.strip().lower().rstrip(".! ") in BARE_UPDATE:
+            short_answer = message.text.strip().lower().rstrip('.! ')
+            continuing_question = memory is not None and memory.awaiting_answer
+            conversational_answer = continuing_question and short_answer in SHORT_ANSWER
+            if short_answer in BARE_UPDATE and not conversational_answer:
                 return clarify(selected)
             if len(message.text) > 3000 or len(selected) > settings.message_ai_max_tasks:
                 return clarify(selected)
@@ -100,22 +111,36 @@ def conversation_reply(message, members, tasks, completions, interpreter, settin
             if set(decision.task_ids) - allowed.keys() or len(set(decision.task_ids)) != len(decision.task_ids):
                 if memory is not None:
                     memory.focus([])
+                    memory.clarify([])
                 return clarify(selected)
             if decision.intent == "request_help":
+                if HELP_CANCEL.search(message.text):
+                    if memory is not None:
+                        memory.reset_question()
+                    return 'Okay, no new help request was made. Existing task status and requests are unchanged.'
                 if (len(decision.task_ids) != 1 or decision.confidence < 0.9
                         or decision.completion_asserted or not decision.evidence_quote.strip()
                         or decision.evidence_quote not in message.text
-                        or not re.search(r"\b(help|reassign|replacement|transfer|take over|can't|cannot)\b", message.text, re.IGNORECASE)):
+                        or (not re.search(r"\b(help|reassign|replacement|transfer|take over|can't|cannot)\b", message.text, re.IGNORECASE)
+                            and not (memory is not None and memory.pending_intent == 'request_help'))):
+                    if memory is not None and memory.focus_task_id:
+                        return "Please say whether you need help or want task details. To mark it complete, send done followed by its WIN code."
                     return clarify(selected)
                 if memory is not None:
                     memory.focus(decision.task_ids)
+                    memory.pending_intent = None
+                    memory.answered()
                 return HelpIntent(allowed[decision.task_ids[0]]["task_code"])
             if decision.intent != "complete_task":
                 if memory is not None:
-                    if decision.intent == 'clarify' or len(decision.task_ids) > 1:
+                    if decision.intent == 'clarify':
+                        memory.clarify(decision.task_ids)
+                    elif len(decision.task_ids) > 1:
                         memory.focus([])
+                        memory.answered()
                     elif decision.intent == 'answer' and decision.confidence >= 0.9 and len(decision.task_ids) == 1:
                         memory.focus(decision.task_ids)
+                        memory.answered()
                 return decision.reply
             normalized = message.text.replace("’", "'")
             if (
@@ -125,7 +150,12 @@ def conversation_reply(message, members, tasks, completions, interpreter, settin
                 or decision.evidence_quote not in message.text
                 or UNCERTAIN_COMPLETION.search(normalized)
                 or not COMPLETION_WORD.search(normalized)
+                or conversational_answer
             ):
+                if conversational_answer and memory.focus_task_id:
+                    focused = allowed.get(memory.focus_task_id)
+                    if focused:
+                        return f"No status changed. To mark {focused['title']} complete, text done {focused['task_code']}. Otherwise, tell me what help you need."
                 return clarify(selected)
             task = allowed[decision.task_ids[0]]
             # A generic title that occurs twice needs the event or canonical code.
