@@ -1,46 +1,36 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createEventPlan, getEventPlan, getEventPlans, updateEventPlan } from '../src/lib/eventPlans.js';
+import { createEventPlan, getEventPlan, getEventPlans, updateEventPlan, reviewEventPlan } from '../src/lib/eventPlans.js';
 
-function useMemoryStorage() {
-  const previous = globalThis.localStorage;
-  const values = new Map();
-  globalThis.localStorage = {
-    getItem: key => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, String(value)),
-  };
-  return () => {
-    if (previous === undefined) delete globalThis.localStorage;
-    else globalThis.localStorage = previous;
-  };
-}
-
-test('event plans persist in this browser and can be reopened and updated', async () => {
-  const restore = useMemoryStorage();
-  try {
-    const saved = await createEventPlan({
-      event_name: 'WiCS Career Panel', description: 'Alumni discussion.',
-      event_date: '2027-04-20', event_time: '18:30', plan_text: 'Reserve a room.',
-      tasks: [{ id: 'reserve', title: 'Reserve a room.', rationale: 'Ensure space is available.' }],
-    });
-    assert.ok(saved.id);
-    assert.equal((await getEventPlan(saved.id)).event_time, '18:30');
-    assert.equal((await getEventPlan(saved.id)).tasks[0].title, 'Reserve a room.');
-    assert.deepEqual((await getEventPlans()).map(plan => plan.id), [saved.id]);
-
-    const updated = await updateEventPlan(saved.id, { plan_text: 'Room reserved.' });
-    assert.equal(updated.plan_text, 'Room reserved.');
-    assert.equal((await getEventPlan(saved.id)).plan_text, 'Room reserved.');
-  } finally { restore(); }
+test('event plan reads and writes use authenticated backend storage and explicit revisions', async () => {
+ const original=globalThis.fetch, calls=[];
+ globalThis.fetch=async (url,options)=>{
+  calls.push([url,options]);
+  const row={id:'plan',revision:2,status:'draft',payload:{event_name:'Shared workshop',tasks:[]}};
+  return Response.json({success:true,data:url==='/api/event-plans' && !options.method ? [row] : row});
+ };
+ try {
+  assert.equal((await getEventPlans())[0].event_name,'Shared workshop');
+  assert.equal((await getEventPlan('plan')).revision,2);
+  await createEventPlan({event_name:'New workshop'});
+  await updateEventPlan('plan',{event_name:'Edited'},2);
+  assert.equal(calls[2][1].method,'POST');
+  assert.deepEqual(JSON.parse(calls[3][1].body),{event_name:'Edited',expected_revision:2});
+  assert.equal(calls[3][1].method,'PUT');
+ } finally {globalThis.fetch=original;}
 });
 
-test('invalid browser data and missing saved plans are reported', async () => {
-  const restore = useMemoryStorage();
-  try {
-    globalThis.localStorage.setItem('winnie.eventPlans.v1', '{');
-    await assert.rejects(getEventPlans(), /browser storage is invalid/);
-    globalThis.localStorage.setItem('winnie.eventPlans.v1', '[]');
-    await assert.rejects(getEventPlan('missing'), /not found in this browser/);
-    await assert.rejects(updateEventPlan('missing', { plan_text: 'No plan.' }), /not found in this browser/);
-  } finally { restore(); }
+test('approval preserves a committed result if text dispatch fails; conflicts stay visible', async () => {
+ const original=globalThis.fetch;
+ globalThis.fetch=async (url,options)=>{
+  if(url.includes('/photon/')) throw new Error('queue unavailable');
+  assert.deepEqual(JSON.parse(options.body),{expected_revision:3,decision:'approved'});
+  return Response.json({success:true,data:{id:'plan',status:'approved',payload:{},activated_task_ids:['task']}});
+ };
+ try {
+  const saved=await reviewEventPlan('plan',3,'approved');
+  assert.equal(saved.status,'approved'); assert.match(saved.notification_warning,/Tasks created/);
+  globalThis.fetch=async()=>Response.json({detail:'Stale revision'},{status:409});
+  await assert.rejects(updateEventPlan('plan',{event_name:'Stale'},2),/409.*Stale revision/);
+ } finally {globalThis.fetch=original;}
 });

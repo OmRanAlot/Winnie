@@ -50,7 +50,7 @@ def clarify(tasks):
     return "\n".join(lines)
 
 
-def conversation_reply(message, members, tasks, completions, interpreter, settings):
+def conversation_reply(message, members, tasks, completions, interpreter, settings, memory=None):
     if message.conversation_type != "dm":
         return "Please text me directly to discuss your tasks."
     if message.platform != "imessage" or not message.sender_id:
@@ -75,20 +75,31 @@ def conversation_reply(message, members, tasks, completions, interpreter, settin
     try:
         if direct:
             task = tasks.by_task_code(direct[1].upper(), semester)
-            assigned = assignment_members(task.get("assignee_text", ""), aliases) if task else None
+            assigned = (({task["owner_code"]} if task.get("owner_code") else
+                         assignment_members(task.get("assignee_text", ""), aliases)) if task else None)
             if assigned is None or member["code"] not in assigned:
                 return "I couldn't find a task assigned to you with that code in the active semester."
         else:
             selected, _ = verified_personal_tasks(
                 tasks.unfinished_for_semester(semester), aliases, member["code"],
             )
+            if memory is not None:
+                selected = memory.prompt_tasks(selected)
+                if memory.ambiguous_reference(message.text, selected):
+                    return clarify(selected)
             if message.text.strip().lower().rstrip(".! ") in BARE_UPDATE:
                 return clarify(selected)
             if len(message.text) > 3000 or len(selected) > settings.message_ai_max_tasks:
                 return clarify(selected)
-            decision = MessageDecision.model_validate(interpreter.interpret(message.text, selected))
+            if memory is None:
+                decision = MessageDecision.model_validate(interpreter.interpret(message.text, selected))
+            else:
+                decision = MessageDecision.model_validate(interpreter.interpret(message.text, selected,
+                    history=memory.history, focus_task_id=memory.focus_task_id))
             allowed = {str(task["id"]): task for task in selected}
             if set(decision.task_ids) - allowed.keys() or len(set(decision.task_ids)) != len(decision.task_ids):
+                if memory is not None:
+                    memory.focus([])
                 return clarify(selected)
             if decision.intent == "request_help":
                 if (len(decision.task_ids) != 1 or decision.confidence < 0.9
@@ -96,8 +107,15 @@ def conversation_reply(message, members, tasks, completions, interpreter, settin
                         or decision.evidence_quote not in message.text
                         or not re.search(r"\b(help|reassign|replacement|transfer|take over|can't|cannot)\b", message.text, re.IGNORECASE)):
                     return clarify(selected)
+                if memory is not None:
+                    memory.focus(decision.task_ids)
                 return HelpIntent(allowed[decision.task_ids[0]]["task_code"])
             if decision.intent != "complete_task":
+                if memory is not None:
+                    if decision.intent == 'clarify' or len(decision.task_ids) > 1:
+                        memory.focus([])
+                    elif decision.intent == 'answer' and decision.confidence >= 0.9 and len(decision.task_ids) == 1:
+                        memory.focus(decision.task_ids)
                 return decision.reply
             normalized = message.text.replace("’", "'")
             if (
@@ -128,7 +146,8 @@ def conversation_reply(message, members, tasks, completions, interpreter, settin
         if current.get("updated_at") != task.get("updated_at"):
             return "That task changed while I was reading your message. Text tasks and try again."
         fresh_aliases = members.aliases(semester)
-        assigned = assignment_members(current.get("assignee_text", ""), fresh_aliases)
+        assigned = ({current["owner_code"]} if current.get("owner_code") else
+                    assignment_members(current.get("assignee_text", ""), fresh_aliases))
         if current.get("semester_code") != semester or assigned is None or member["code"] not in assigned:
             return "I couldn't verify that this task is still assigned to you. No change was made."
         try:
@@ -136,6 +155,8 @@ def conversation_reply(message, members, tasks, completions, interpreter, settin
         except StorageUnavailable:
             return "I couldn't confirm whether the update was saved. Text tasks to check before retrying."
         # Only the database's committed result may claim that a task was completed.
+        if memory is not None:
+            memory.focus([task['id']])
         return result["reply"]
     except AliasConflict:
         return "Member assignment setup needs review. Please contact the project admin."
