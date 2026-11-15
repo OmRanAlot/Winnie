@@ -40,17 +40,20 @@ def with_previous_roles(members: list[dict], history: dict[str, list[str]],
     skills_by_role: dict[str, list[str]] = {}
     for m in members:
         entry = skills.get(m["code"])
+        if entry and entry.get("role") and _key(entry["role"]) != _key(m["board_role"]):
+            entry = None
         if entry:
             skills_by_role.setdefault(_key(m["board_role"]), flat(entry))
     result = []
     for m in members:
-        roles = saved.get(m["code"]) or history.get(m["code"], [])
+        roles = saved[m["code"]] if m["code"] in saved else history.get(m["code"], [])
         gained = []
         for role in roles:
             if _key(role) != _key(m["board_role"]):  # same role as now adds nothing new
                 gained += [s for s in skills_by_role.get(_key(role), []) if s not in gained]
+        gained = list(dict.fromkeys(gained + m.get("previous_role_skills_manual", [])))
         result.append({**m, "previous_roles": roles, "previous_role_skills": gained,
-                       "previous_roles_source": "supabase" if saved.get(m["code"])
+                       "previous_roles_source": "supabase" if m["code"] in saved
                        else ("board-list" if roles else None)})
     return result
 

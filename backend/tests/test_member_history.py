@@ -32,6 +32,11 @@ def test_supabase_previous_roles_win_over_the_json():
     assert t["previous_roles"] == ["Secretary"] and t["previous_roles_source"] == "supabase"
 
 
+def test_explicitly_cleared_previous_roles_do_not_reappear_from_the_source_file():
+    t, *_ = with_previous_roles(MEMBERS, HISTORY, {"T": []}, SKILLS)
+    assert t['previous_roles'] == [] and t['previous_roles_source'] == 'supabase'
+
+
 def test_advisors_are_past_holders_of_my_role_not_me():
     people = with_previous_roles(MEMBERS, HISTORY, {}, SKILLS)
     pr = next(m for m in people if m["code"] == "P")

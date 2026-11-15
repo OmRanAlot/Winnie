@@ -1,6 +1,6 @@
 """Task API validation, used by routes/tasks.py and services/tasks.py."""
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -27,10 +27,13 @@ class TaskCreate(BaseModel):
     title: Title
     month_code: MonthCode
     description: str = Field(default="", max_length=10000)
+    notes: str = Field(default="", max_length=10000)
     status: TaskStatus = "todo"
     stakeholder_codes: list[StakeholderCode] = Field(default_factory=list, max_length=50)
     owner_code: StakeholderCode | None = None
     due_date: date | None = None
+    start_date: date | None = None
+    due_time: time | None = None
     event_tag: str | None = Field(default=None, max_length=100)
     tags: list[Annotated[str, StringConstraints(min_length=1, max_length=50)]] = Field(
         default_factory=list, max_length=50
@@ -52,6 +55,8 @@ class TaskCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_identity(self):
+        if self.start_date and self.due_date and self.start_date > self.due_date:
+            raise ValueError("Start date must be on or before due date.")
         if self.source_task_id is not None and self.source_spreadsheet_id is None:
             raise ValueError("A source task ID requires a source spreadsheet ID.")
         return self
@@ -62,10 +67,13 @@ class TaskUpdate(BaseModel):
 
     title: Title | None = None
     description: str | None = Field(default=None, max_length=10000)
+    notes: str | None = Field(default=None, max_length=10000)
     status: TaskStatus | None = None
     stakeholder_codes: list[StakeholderCode] | None = Field(default=None, max_length=50)
     owner_code: StakeholderCode | None = None
     due_date: date | None = None
+    start_date: date | None = None
+    due_time: time | None = None
     event_tag: str | None = Field(default=None, max_length=100)
     tags: list[Annotated[str, StringConstraints(min_length=1, max_length=50)]] | None = Field(
         default=None, max_length=50
@@ -85,15 +93,18 @@ class TaskUpdate(BaseModel):
         if not self.model_fields_set:
             raise ValueError("Provide at least one field to update.")
         for name in (
-            "title", "description", "status", "stakeholder_codes", "tags",
+            "title", "description", "notes", "status", "stakeholder_codes", "tags",
             "priority", "assignee_text", "deadline_text",
         ):
             if name in self.model_fields_set and getattr(self, name) is None:
                 raise ValueError(f"{name} cannot be null.")
+        if self.start_date and self.due_date and self.start_date > self.due_date:
+            raise ValueError("Start date must be on or before due date.")
         return self
 
 
 class StoredTask(TaskCreate):
+    completed_at: datetime | None = None
     original_assignee_code: StakeholderCode | None = None
     id: UUID
     task_code: str

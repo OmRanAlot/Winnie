@@ -62,7 +62,9 @@ See [tracker import setup](../docs/TRACKER_IMPORT.md) for migration steps, month
 snapshot rules, permanent task IDs, the offline CSV/TSV preview, and the reviewed
 Supabase import command (`python -m app.cli.import_tracker`). Imports default to a
 database preview; actual writes require `--apply --expect-plan <plan_id>`.
-Live Google Sheets synchronization is not implemented yet.
+Live Google Sheets synchronization is available through admin previews and a separate
+polling worker. See [Google Sheets setup and monthly rollover](../docs/GOOGLE_SHEETS_SYNC.md)
+for credentials, migration, first review and changing the active tab each month.
 
 ### Google Sheets source selection and semester rollover
 
@@ -95,12 +97,11 @@ Supabase would treat it as a different source. Use the real ID from the first sa
 Keep old semester records and link carried-over work explicitly rather than assuming
 matching titles in different workbooks are the same task.
 
-Currently the importer reads an exported CSV/TSV and uses this ID for task identity.
-A live private-sheet connection will additionally need authorized Google read access
-and a configured active tab per tracker. There are no working automatic Google sync
-or Google source-selection environment settings yet. Follow the
-[import guide](../docs/TRACKER_IMPORT.md#preview-against-supabase-then-save) for the
-implemented preview/apply commands.
+The CSV importer and live sync use this ID for the same task identity. Live sync
+uses authorized Google read access and `WINNIE_SHEET_SYNC_SOURCES` to select the
+active tab. Follow the [live sync guide](../docs/GOOGLE_SHEETS_SYNC.md) for configuration
+and the [import guide](../docs/TRACKER_IMPORT.md#preview-against-supabase-then-save)
+for offline preview/apply commands.
 
 ## Login profiles
 

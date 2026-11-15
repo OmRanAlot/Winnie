@@ -9,8 +9,10 @@ Planned settings for the integrations are listed in app/__init__.py.
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.schemas.sheets import SheetSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]  # backend/app/core/settings.py -> repo root
 
@@ -34,6 +36,9 @@ class Settings(BaseSettings):
 
     messaging_bridge_secret: SecretStr = SecretStr("")
     active_semester: str = "fall-2026"
+    sheet_sync_sources: list[SheetSource] = Field(default_factory=list)
+    sheets_credentials_file: Path | None = None
+    sheet_sync_interval_seconds: int = Field(default=300, ge=60, le=86400)
     message_ai_enabled: bool = False
     message_ai_model: str = ""  # Empty uses the existing GEMINI_MODEL setting.
     message_ai_timeout_seconds: float = Field(default=10, gt=0, le=20)
@@ -85,3 +90,13 @@ class Settings(BaseSettings):
 
     # Shared secret for the task-records CRUD endpoints (routes/tasks.py, X-Winnie-Api-Key header).
     task_api_key: SecretStr = SecretStr("")
+
+    @model_validator(mode="after")
+    def validate_sheet_sources(self):
+        keys = [s.key for s in self.sheet_sync_sources]
+        trackers = [(s.spreadsheet_id, s.project_name or '') for s in self.sheet_sync_sources]
+        if len(keys) != len(set(keys)):
+            raise ValueError('Google sync source keys must be unique.')
+        if len(trackers) != len(set(trackers)):
+            raise ValueError('Configure only one active tab per workbook/project tracker.')
+        return self
