@@ -2,11 +2,16 @@
 begin;
 
 alter table public.task_reassignment_requests
-    add column archived_at timestamptz,
-    add column archived_by_profile_id uuid references public.profiles(id) on delete restrict,
-    add constraint task_reassignment_archive_state check (
-        archived_at is null or status in ('approved', 'rejected', 'declined')
-    );
+add column archived_at timestamptz,
+add column archived_by_profile_id uuid references public.profiles (id) on delete restrict,
+add constraint task_reassignment_archive_state check (
+    archived_at is null
+    or status in (
+        'approved',
+        'rejected',
+        'declined'
+    )
+);
 
 -- Preserve the existing review lock while allowing an admin to change only archive metadata.
 create or replace function public.guard_task_reassignment_request() returns trigger
@@ -85,14 +90,25 @@ end;
 $$;
 
 drop policy task_reassignment_read on public.task_reassignment_requests;
-create policy task_reassignment_read on public.task_reassignment_requests for select to authenticated using (
-    exists (select 1 from public.profiles where id = auth.uid() and is_admin) or (
-        archived_at is null and (public.can_review_task_requests() or
-            requester_code = public.current_board_member_code()
-            or proposed_assignee_code = public.current_board_member_code()
+
+create policy task_reassignment_read on public.task_reassignment_requests for
+select to authenticated using (
+        exists (
+            select 1
+            from public.profiles
+            where
+                id = auth.uid ()
+                and is_admin
         )
-    )
-);
+        or (
+            archived_at is null
+            and (
+                public.can_review_task_requests ()
+                or requester_code = public.current_board_member_code ()
+                or proposed_assignee_code = public.current_board_member_code ()
+            )
+        )
+    );
 
 create function public.archive_task_reassignment(p_request_id uuid, p_archive boolean default true)
 returns public.task_reassignment_requests
@@ -115,8 +131,13 @@ begin
     return saved;
 end;
 $$;
-revoke all on function public.archive_task_reassignment(uuid, boolean) from public, anon;
-grant execute on function public.archive_task_reassignment(uuid, boolean) to authenticated;
+
+revoke all on function public.archive_task_reassignment (uuid, boolean)
+from public, anon;
+
+grant
+execute on function public.archive_task_reassignment (uuid, boolean) to authenticated;
 
 notify pgrst, 'reload schema';
+
 commit;
