@@ -8,6 +8,10 @@ export async function getSheetSyncSources() {
   return (await request('/sheet-sync/sources')).data;
 }
 
+export async function dispatchPhotonNotifications() {
+  return (await request('/photon/dispatch', { method: 'POST' })).data;
+}
+
 export async function previewSheetSync(source, resolutions = {}) {
   return (await request(`/sheet-sync/${encodeURIComponent(source)}/preview`, {
     method: 'POST', body: JSON.stringify({ resolutions }), signal: AbortSignal.timeout(90000),

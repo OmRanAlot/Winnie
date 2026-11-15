@@ -74,10 +74,13 @@ def decide(number: int, body: Decision, store: Store):
 @internal.post("/next")
 def next_notification(store: Store):
     settings = Settings()
-    if not settings.help_workflow_enabled:
+    if not settings.help_workflow_enabled or settings.photon_enabled:
         return {"delivery": None}
     try:
-        return {"delivery": store.rpc("claim_help_notification", p_groups_enabled=settings.help_groups_enabled)}
+        delivery = store.rpc("claim_reassignment_notification")
+        if delivery is None:
+            delivery = store.rpc("claim_help_notification", p_groups_enabled=settings.help_groups_enabled)
+        return {"delivery": delivery}
     except StorageUnavailable:
         raise HTTPException(503, "Help notification storage is unavailable.")
 
@@ -87,8 +90,12 @@ def notification_result(body: NotificationResult, store: Store):
     if body.outcome == "sent" and not body.provider_id:
         raise HTTPException(422, "A provider receipt is required.")
     try:
-        return {"status": store.rpc("finish_help_notification", p_id=str(body.delivery_id),
-            p_token=str(body.claim_token), p_outcome=body.outcome, p_provider_id=body.provider_id)}
+        status = store.rpc("finish_reassignment_notification", p_id=str(body.delivery_id),
+            p_token=str(body.claim_token), p_outcome=body.outcome, p_provider_id=body.provider_id)
+        if status == "not_found":
+            status = store.rpc("finish_help_notification", p_id=str(body.delivery_id),
+                p_token=str(body.claim_token), p_outcome=body.outcome, p_provider_id=body.provider_id)
+        return {"status": status}
     except StorageUnavailable:
         raise HTTPException(503, "Could not save the notification result.")
 

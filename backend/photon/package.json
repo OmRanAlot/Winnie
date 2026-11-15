@@ -1,0 +1,1 @@
+{"name":"winnie-photon-send","private":true,"type":"module","dependencies":{"@grpc/grpc-js":"1.14.7","@photon-ai/advanced-imessage":"2.5.0","nice-grpc":"2.1.18","nice-grpc-common":"2.0.4"}}

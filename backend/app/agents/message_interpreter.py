@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 class MessageDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    intent: Literal["complete_task", "clarify", "answer"]
+    intent: Literal["complete_task", "request_help", "clarify", "answer"]
     task_ids: list[str] = Field(max_length=10)
     completion_asserted: bool
     evidence_quote: str = Field(max_length=1000)
@@ -34,11 +34,15 @@ If they report multiple completions, ask them to identify one at a time for now.
 Bare 'done', 'yes' or a display number has no context: ask for a task name/code.
 There is no previous conversation history. Never assume what 'it' refers to.
 
+Use request_help when the member explicitly asks for help finding a replacement or
+reassigning ONE supplied task they cannot handle. Include exactly that task's id,
+an exact evidence_quote from their message, confidence, and completion_asserted=false.
+Do not choose a recipient or approve a transfer. If the task or intent is ambiguous,
+ask a clarifying question instead. General advice questions use answer.
 For questions, use answer with a brief response grounded in the supplied tasks.
 For uncertain statements use clarify. Do not reveal or request another person's
-tasks/contact details. No changes other than completion are supported yet; explain
-that limitation rather than claiming to block, reassign, delete, or reschedule work.
-For non-completion, set completion_asserted=false and evidence_quote="".
+tasks/contact details. Never claim to block, reassign, delete, or reschedule work.
+For non-completion, set completion_asserted=false. Use evidence_quote="" except for request_help.
 reply must be brief plain text and must not claim to have marked anything complete.
 """
 
