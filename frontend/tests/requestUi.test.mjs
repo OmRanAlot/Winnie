@@ -46,6 +46,7 @@ await build({
           const dependencies = globalThis.__dashboard.dependencies;
           return typeof dependencies === 'function' ? dependencies() : Promise.resolve(dependencies ?? []);
         };
+        export const getDependencies = () => globalThis.__dashboard.dependencies ? globalThis.__dashboard.dependencies() : Promise.resolve([]);
         export const dispatchPhotonNotifications = () => Promise.resolve({queued:true});
         export const getTaskDraft = () => Promise.resolve(null);
         export const saveTaskDraft = form => { globalThis.__dashboard.draft = form; return Promise.resolve(form); };
