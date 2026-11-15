@@ -1,6 +1,6 @@
 """In-memory stand-in for the slice of the supabase-py client that app/db/repository.py uses.
 
-Supports table(...).select/insert/update/delete with .eq/.in_/.limit and .execute(). Mimics
+Supports table(...).select/insert/upsert/update/delete with .eq/.in_/.limit and .execute(). Mimics
 the migration's identity ids, defaults, unique constraints (23505) and foreign keys (23503),
 so repository logic is tested without a live Supabase project.
 """
@@ -80,6 +80,23 @@ class FakeClient:
         self.tables[table].extend(created)
         return copy.deepcopy(created)
 
+    def upsert(self, table: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Insert rows, or replace the row matching its unique key, as Supabase upsert does."""
+        results = []
+        for row in rows:
+            keys = self.unique_keys(table, row)
+            existing = next(
+                (current for current in self.tables[table]
+                 if keys and any(key in self.unique_keys(table, current) for key in keys)),
+                None,
+            )
+            if existing is None:
+                results.extend(self.insert(table, [row]))
+            else:
+                existing.update(copy.deepcopy(row))
+                results.append(copy.deepcopy(existing))
+        return results
+
 
 class Query:
     def __init__(self, client: FakeClient, table: str) -> None:
@@ -98,7 +115,7 @@ class Query:
         self.op, self.payload = "insert", payload if isinstance(payload, list) else [payload]
         return self
 
-    def upsert(self, payload: dict | list[dict]) -> Query:
+    def upsert(self, payload: dict | list[dict], **_options) -> Query:
         self.op, self.payload = "upsert", payload if isinstance(payload, list) else [payload]
         return self
 
@@ -140,26 +157,7 @@ class Query:
         if self.op == "insert":
             return SimpleNamespace(data=self.client.insert(self.table, self.payload))
         if self.op == "upsert":
-            result: list[dict[str, Any]] = []
-            for row in self.payload:
-                keys = self.client.unique_keys(self.table, row)
-                existing = None
-                if self.table == "tasks" and row.get("id") is not None:
-                    existing = next((r for r in rows if r.get("id") == row.get("id")), None)
-                elif keys:
-                    existing = next((r for r in rows if any(k in self.client.unique_keys(self.table, r) for k in keys)), None)
-                if existing is not None:
-                    merged = {**copy.deepcopy(existing), **copy.deepcopy(row)}
-                    if self.table in DEFAULTS:
-                        merged = {**copy.deepcopy(DEFAULTS[self.table]), **merged}
-                    if self.table == "tasks":
-                        merged["updated_at"] = datetime.now(UTC).isoformat()
-                    index = rows.index(existing)
-                    rows[index] = merged
-                    result.append(copy.deepcopy(merged))
-                else:
-                    result.extend(self.client.insert(self.table, [row]))
-            return SimpleNamespace(data=copy.deepcopy(result))
+            return SimpleNamespace(data=self.client.upsert(self.table, self.payload))
         matched = [row for row in rows if self.matches(row)]
         if self.op == "update":
             for row in matched:

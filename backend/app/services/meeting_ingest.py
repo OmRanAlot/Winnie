@@ -48,10 +48,12 @@ def audio_extension(mime_type: str) -> str | None:
 
 
 async def transcribe_and_summarize(audio: bytes, mime_type: str, api_key: str, model: str) -> TranscriptAndSummary:
-    logger.info("Transcribing %d bytes of %s with Gemini model=%s", len(audio), mime_type, model)
+    raw = mime_type.split(";")[0].strip()
+    gemini_mime = recordings.GEMINI_MIME.get(raw, raw)
+    logger.info("Transcribing %d bytes of %s (gemini=%s) with model=%s", len(audio), raw, gemini_mime, model)
     response = await task_assignment.gemini_client(api_key).aio.models.generate_content(
         model=model,
-        contents=[types.Part.from_bytes(data=audio, mime_type=mime_type.split(";")[0]), PROMPT],
+        contents=[types.Part.from_bytes(data=audio, mime_type=gemini_mime), PROMPT],
         config=types.GenerateContentConfig(
             response_mime_type="application/json", response_json_schema=ANSWER_SCHEMA
         ),

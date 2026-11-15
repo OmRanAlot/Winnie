@@ -38,8 +38,8 @@ router = APIRouter(prefix="/api/assign_task_from_gemini", tags=["assign_task_fro
 EBOARD_FILE = Path(__file__).resolve().parents[2] / "data" / "eboardMembers.json"
 UNASSIGNED = "Unassigned"
 MAX_TRANSCRIPT_CHARS = 200_000
-GEMINI_TIMEOUT_MS = 45_000
-GEMINI_ATTEMPTS = 1
+GEMINI_TIMEOUT_MS = 120_000
+GEMINI_ATTEMPTS = 2
 
 
 class AssignRequest(BaseModel):
@@ -182,9 +182,11 @@ Relations co-chairs:
 {roster}
 
 Rules:
-1. Extract only concrete tasks someone must do. Skip discussion, opinions and updates that need \
-no action. If there are no tasks, return an empty array.
-2. One task per action: split compound requests. Do not invent tasks or details.
+1. Extract EVERY concrete task someone must do — read the entire transcript carefully and do not \
+stop after the first few. Skip only pure discussion, opinions and status updates with no action \
+item. If there are no tasks at all, return an empty array.
+2. One task per action: split compound requests into separate items. Do not invent tasks or \
+details not mentioned in the transcript.
 3. If the transcript says who will do a task, by name or by role, assign it to that seat, even if \
 the role descriptions suggest someone else.
 4. Otherwise pick the seat whose role responsibilities fit best.
@@ -257,9 +259,9 @@ async def get_assignments(
         # Strip the closing tag so the transcript cannot end the data block early.
         contents=f"<transcript>\n{transcript.replace('</transcript>', '')}\n</transcript>",
         config=types.GenerateContentConfig(
-            # Gemini 3 defaults can spend substantial time reasoning. Extraction
-            # needs only low effort; minimal is unsupported on 3.8 Flash.
-            thinking_config=types.ThinkingConfig(thinking_level="low")
+            # Keep thinking enabled so Gemini reasons carefully over the full
+            # transcript. "low" was causing it to miss most tasks.
+            thinking_config=types.ThinkingConfig(thinking_level="medium")
             if model.startswith("gemini-3") else None,
             system_instruction=build_instructions(eboard),
             response_mime_type="application/json",

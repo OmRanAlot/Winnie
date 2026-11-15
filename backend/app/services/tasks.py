@@ -66,7 +66,10 @@ def store_meeting_tasks(
     A meeting left without tasks by an earlier failed insert is filled now.
     """
     meeting_id, created = repository.find_or_create_meeting(held_at, title, transcript, recording_id)
-    if not created and (existing := repository.tasks_for_meeting(meeting_id)):
+    existing = [] if created else repository.tasks_for_meeting(meeting_id)
+    # Only skip re-insertion when we got the same or more tasks last time; a prior
+    # partial extraction (fewer tasks than now) is replaced by the new full result.
+    if existing and len(existing) >= len(tasks):
         return StoredTasks([to_view(task) for task in existing], reused=True)
     stored = repository.insert_extracted_tasks(meeting_id, tasks)
     return StoredTasks([to_view(task) for task in stored], reused=False)

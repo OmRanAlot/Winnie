@@ -136,11 +136,11 @@ def test_insert_extracted_tasks_resolves_seat_person_and_deadline(db):
     assert task.raw_json["assignee"] == "Bob Newman"
 
 
-def test_insert_extracted_tasks_uses_one_batch_insert(db):
+def test_insert_extracted_tasks_uses_one_batch_upsert(db):
     meeting_id = repo.create_meeting(MEETING_AT, None, None, client=db)
     tasks = [extracted(title=f"Task {n}") for n in range(3)]
     repo.insert_extracted_tasks(meeting_id, tasks, client=db)
-    assert db.calls.count(("tasks", "insert")) == 1
+    assert db.calls.count(("tasks", "upsert")) == 1
     assert db.tables["seats"] == [] and db.tables["people"] == []
 
 
@@ -199,7 +199,7 @@ def test_unassigned_and_unparseable_tasks_keep_nulls(db):
 def test_insert_extracted_tasks_with_no_tasks_writes_nothing(db):
     meeting_id = repo.create_meeting(MEETING_AT, None, None, client=db)
     assert repo.insert_extracted_tasks(meeting_id, [], client=db) == []
-    assert ("tasks", "insert") not in db.calls
+    assert ("tasks", "upsert") not in db.calls
 
 
 def test_insert_extracted_tasks_unknown_meeting_raises(db):
@@ -260,7 +260,7 @@ def test_update_task_status_validates(db):
         repo.update_task_status("00000000-0000-4000-8000-000000000999", "done", client=db)
 
 
-# --- dependencies -----------------------------------------------------------------------------
+# --- dependencies ----------------------------------------------------------------------------
 
 
 def test_add_dependency_shows_up_on_the_task(db):
