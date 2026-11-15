@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
 
     messaging_bridge_secret: SecretStr = SecretStr("")
+    photon_enabled: bool = False
+    photon_project_id: str = ""
+    photon_project_secret: SecretStr = SecretStr("")
+    photon_webhook_id: str = ""
+    photon_webhook_secret: SecretStr = SecretStr("")
+    photon_queue: str = ""  # projects/PROJECT/locations/REGION/queues/QUEUE
+    photon_task_url: str = ""  # Deployed /api/photon/work URL
     active_semester: str = "fall-2026"
     sheet_sync_sources: list[SheetSource] = Field(default_factory=list)
     sheets_credentials_file: Path | None = None

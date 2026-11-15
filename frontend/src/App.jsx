@@ -10,11 +10,12 @@ import ProfileEditor from "./ProfileEditor.jsx";
 import EvaluationPanel from "./EvaluationPanel.jsx";
 import UploadMeeting from "./UploadMeeting.jsx";
 import { supabase } from "./lib/supabase.js";
+import { dispatchPhotonNotifications } from "./lib/api.js";
 import { reassignmentStore } from "./lib/reassignments.js";
 import { orderProfiles } from "./lib/profileOrder.js";
 import { PIXEL_ARROW_CURSOR, PIXEL_HAND_CURSOR, CUTE_CSS } from "./lib/pixelCursor.js";
 import CursorFx from "./lib/CursorFx.jsx";
-const requestsStore = reassignmentStore(supabase);
+const requestsStore = reassignmentStore(supabase, { notify: dispatchPhotonNotifications });
 
 // All board records come from the backend. No sample data fallback.
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -40,7 +41,9 @@ const dueDateKey = (t) => {
 };
 const compareByDueDate = (a, b) => {
   const aDue = dueDateKey(a), bDue = dueDateKey(b);
-  return aDue < bDue ? -1 : aDue > bDue ? 1 : 0;
+  const dateOrder = aDue < bDue ? -1 : aDue > bDue ? 1 : 0;
+  const priorityOrder = { high: 0, normal: 1, low: 2 };
+  return dateOrder || (priorityOrder[a.priority] ?? 1) - (priorityOrder[b.priority] ?? 1);
 };
 // Live tasks have no member link yet: fall back to the tracker's assignee cell.
 const who = (t) => person(t.assignee) ?? { id: null, name: t.assigneeText ? t.assigneeText.split("\n")[0] : "Unassigned" };
@@ -380,7 +383,8 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
     })
     .filter(t => t.visible)
     .sort(compareByDueDate);
-  const baseTasks = weekTasks(isAdminView && showAll ? allTasks : all);
+  const scopeTasks = isAdminView && showAll ? allTasks : all;
+  const baseTasks = weekTasks(scopeTasks);
   const taskIds = new Set(baseTasks.map((t) => t.id));
   const ownTaskIds = new Set(weekTasks(all).map((t) => t.id));
   const weeklyAllTasks = weekTasks(allTasks);
@@ -431,6 +435,10 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
           Show linked tasks <span className={`sw ${deps ? "on" : ""}`} aria-hidden="true"><i /></span>
         </button>
       </div>
+      <p style={{fontSize:13,color:'var(--muted)',margin:'4px 0 12px'}}>
+        {baseTasks.length} scheduled in the selected week · {scopeTasks.length} tasks in this view.
+        {scopeTasks.some(t => !t.dueIso) && ` ${scopeTasks.filter(t => !t.dueIso).length} without a due date are available in Tasks.`}
+      </p>
       <div className="gantt">
         <div className="gh"><span>Task title</span><span>Priority</span><span>Start date</span><span>Due date</span><span>Date finished</span>
           <div className="days">{DAYS.map((d) => <span key={d}>{d}</span>)}</div></div>
@@ -492,7 +500,7 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
 export default function App({ profile, admin, signOut }) {
   const [stack, setStack] = useState([{ n: "dash" }]);
   const [viewAs, setViewAs] = useState(null);
-  const [adminShowAllGantt, setAdminShowAllGantt] = useState(false);
+  const [adminShowAllGantt, setAdminShowAllGantt] = useState(true);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState("");
   const [requestError, setRequestError] = useState("");
@@ -500,8 +508,15 @@ export default function App({ profile, admin, signOut }) {
   const mutationLock = useRef(false);
   const [requestReason, setRequestReason] = useState("");
   const [dataError, setDataError] = useState("");
+  const [requestDataError, setRequestDataError] = useState("");
+  const [dependencyError, setDependencyError] = useState("");
+  const [lastTaskRefresh, setLastTaskRefresh] = useState(null);
   const [loading, setLoading] = useState(true);
   const refreshVersion = useRef(0);
+  const refreshInFlight = useRef(0);
+  const [planInput, setPlanInput] = useState(EMPTY_PLAN_INPUT);
+  const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
+  const [savedTaskForm, setSavedTaskForm] = useState(null);
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
   const [eventPlanError, setEventPlanError] = useState("");
@@ -520,6 +535,9 @@ export default function App({ profile, admin, signOut }) {
   const [draftError, setDraftError] = useState("");
   const [draftSaving, setDraftSaving] = useState(false);
   const [noteSaving, setNoteSaving] = useState(null);
+  const [statusSaving, setStatusSaving] = useState({});
+  const [statusFeedback, setStatusFeedback] = useState(null);
+  const statusLocks = useRef(new Set());
   const [MEETINGS, setMeetings] = useState([]);
   const [meetingError, setMeetingError] = useState('');
   const [meetingsLoading, setMeetingsLoading] = useState(true);
@@ -559,23 +577,36 @@ export default function App({ profile, admin, signOut }) {
   currentPeople = PEOPLE;
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current;
+    refreshInFlight.current += 1;
+    // Secondary failures must not prevent current task data from reaching the chart.
+    const secondary = Promise.allSettled([requestsStore.list(), getDependencies()]);
     try {
-      const [ts, people, assignments, requests, dependencies] = await Promise.all([
-        getTasks(), getMembers(), getAssignments(), requestsStore.list(), getDependencies(),
+      const [ts, people, assignments] = await Promise.all([
+        getTasks(), getMembers(), getAssignments(),
       ]);
       if (version !== refreshVersion.current) return;
       const byTask = assignments.byTask;
-      const links = {};
-      dependencies.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
       const enriched = ts.map((t) => {
         const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
-        return { ...t, assignees: codes, assignee: codes[0] ?? null, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null };
+        return { ...t, assignees: codes, assignee: codes[0] ?? null, dependsOn: [], dep: null };
       });
       setTasks(enriched);
       setPeople(people);
-      setReqs(requests);
       setDataError("");
       setSource(`Live: ${ts.length} tasks, ${people.length} members`);
+      setLastTaskRefresh(new Date());
+      setLoading(false);
+      const [requests, dependencies] = await secondary;
+      if (version !== refreshVersion.current) return;
+      if (requests.status === 'fulfilled') {
+        setReqs(requests.value); setRequestDataError("");
+      } else { setRequestDataError(requests.reason?.message || 'Request history could not be loaded.'); }
+      if (dependencies.status === 'fulfilled') {
+        const links = {};
+        dependencies.value.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
+        setTasks(current => current.map(t => ({ ...t, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null })));
+        setDependencyError("");
+      } else { setDependencyError(dependencies.reason?.message || 'Task dependencies could not be loaded.'); }
       // Enrich tasks whose event is "Miscellaneous" or blank with a Gemini-suggested label.
       const needsLabel = enriched.filter((t) => !t.event || t.event.toLowerCase() === "miscellaneous");
       if (needsLabel.length > 0) {
@@ -591,10 +622,13 @@ export default function App({ profile, admin, signOut }) {
         setSource("Connection error ? displayed data may be out of date");
       }
       throw e;
-    } finally { if (version === refreshVersion.current) setLoading(false); }
+    } finally {
+      refreshInFlight.current -= 1;
+      if (version === refreshVersion.current) setLoading(false);
+    }
   }, []);
   useEffect(() => {
-    const reload = () => { refresh().catch(() => {}); };
+    const reload = () => { if (!refreshInFlight.current) refresh().catch(() => {}); };
     reload();
     const timer = setInterval(reload, 15000);
     window.addEventListener("focus", reload);
@@ -602,40 +636,69 @@ export default function App({ profile, admin, signOut }) {
   }, [refresh]);
   useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
   const sendRequest = async () => {
-    if (mutationLock.current || !modal?.reassign) return;
+    if (mutationLock.current || requestDataError || !modal?.reassign) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
     try {
-      await requestsStore.submit(modal.reassign[0].id, modal.reassign[1].id, requestReason);
+      const saved = await requestsStore.submit(modal.reassign[0].id, modal.reassign[1].id, requestReason);
       setModal(null); setRequestReason("");
-      say("Reassignment request saved for review");
+      say(saved?.notification_warning || "Request saved. The recipient must accept before administrator approval.");
       try { await refresh(); } catch { say("Request saved. Refresh failed; please retry."); }
     } catch (e) { setRequestError(e.message); }
     finally { mutationLock.current = false; setRequestBusy(false); }
   };
   const decideRequest = async (r, decision) => {
-    if (mutationLock.current || !admin) return;
+    if (mutationLock.current || requestDataError || !admin) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
     setReviewingRequestId(r.id);
     try {
-      await requestsStore.review(r.id, decision);
+      const saved = await requestsStore.review(r.id, decision);
       // Discard refreshes started before the decision was saved.
       ++refreshVersion.current;
       setReqs(current => current.map(request => request.id === r.id ? { ...request, status: decision } : request));
       setCands({});
-      say(decision === "approved" ? "Approved ? task assignment saved" : "Request denied");
+      say(saved?.notification_warning || (decision === "approved" ? "Approved — task assignment saved" : "Request denied"));
       try { await refresh(); } catch { say("Decision saved. Refresh failed; please retry."); }
     } catch (e) {
       setRequestError(e.message);
       refresh().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); setReviewingRequestId(null); }
   };
-  const changeStatus = async (t, status) => {
-    if (!live) { say("Reconnect and refresh before saving changes"); return; }
+  const respondToRequest = async (r, decision) => {
+    if (mutationLock.current || requestDataError || r.proposed_assignee_code !== profile.member_code) return;
+    mutationLock.current = true; setRequestBusy(true); setRequestError("");
     try {
-      await updateTaskStatus(t.id, status);
-      await refresh();
-      say(`Saved: ?${t.title}? is ${status}`);
-    } catch (e) { say(`Could not refresh or save: ${e.message}`); }
+      const saved = await requestsStore.respond(r.id, decision);
+      say(saved?.notification_warning || (decision === "accepted" ? "Accepted. Awaiting administrator approval." : "Request denied. Task ownership is unchanged."));
+      try { await refresh(); } catch { say("Response saved. Refresh failed; please retry."); }
+    } catch (e) {
+      setRequestError(e.message);
+      refresh().catch(() => {});
+    } finally { mutationLock.current = false; setRequestBusy(false); }
+  };
+  const changeStatus = async (t, status) => {
+    if (statusLocks.current.has(t.id)) return;
+    if (!live) { setStatusFeedback({error:true,text:'Reconnect and refresh before saving changes.'}); return; }
+    statusLocks.current.add(t.id);
+    setStatusSaving(current => ({...current,[t.id]:true}));
+    setStatusFeedback(null);
+    try {
+      const saved = await updateTaskStatus(t.id, status);
+      if (!saved || saved.id !== t.id || saved.status !== status) throw new Error('The backend did not confirm the requested status. Refresh and try again.');
+      ++refreshVersion.current; // A poll started before this write must not overwrite it.
+      setTasks(current => current.map(item => item.id !== t.id ? item : {
+        ...item, ...saved, dep:item.dep, dependsOn:item.dependsOn,
+        assignee: saved.ownerCode || (saved.assigneeText === item.assigneeText ? item.assignee : null),
+        assignees: saved.ownerCode ? [saved.ownerCode] : saved.assigneeText === item.assigneeText ? item.assignees : [],
+      }));
+      setStatusFeedback({taskId:t.id,text:status === 'Completed'
+        ? `“${t.title}” marked Completed and moved out of Due Soon.`
+        : `“${t.title}” saved as ${status === 'In-Progress' ? 'In progress' : status}.`});
+      refresh().catch(() => {});
+    } catch (e) { setStatusFeedback({error:true,text:`Could not confirm the status change: ${e.message} Refresh tasks to check before retrying.`}); }
+    finally {
+      statusLocks.current.delete(t.id);
+      setStatusSaving(current => ({...current,[t.id]:false}));
+    }
   };
   const p = stack[stack.length - 1];
   useEffect(() => {
@@ -756,7 +819,7 @@ export default function App({ profile, admin, signOut }) {
     finally { setNoteSaving(null); }
   };
   // Status buttons in the redesign: save through the same path as the task page.
-  const setTaskStatus = (id, status) => { const t = task(id); if (t) changeStatus(t, status); };
+  const setTaskStatus = (id, status) => { const t = task(id); if (t) return changeStatus(t, status); };
   const isAdminView = admin && !viewAs;
   const ownProfile = { id: profile.member_code, name: profile.name || profile.email,
     role: profile.role, skills: profile.skills || [] };
@@ -837,18 +900,20 @@ export default function App({ profile, admin, signOut }) {
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
             : <button className="bell" aria-label="Notifications" onClick={() => go("review")}><Icon n="bell" s={26} /><b>{reqs.filter(r => r.status === "pending").length}</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
-        <div className="home"><div><h3>Your Gantt Chart:</h3><Gantt tasks={mine} allTasks={TASKS} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
+        <div className="home"><div><h3>{isAdminView && adminShowAllGantt ? 'All E-board Gantt Chart:' : 'Your Gantt Chart:'}</h3><button className="link" onClick={() => go("tasks")}>View all {isAdminView ? TASKS.length : mine.length} tasks</button><Gantt tasks={mine} allTasks={TASKS} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} who={live && !isAdminView ? me.name : null} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
             {isAdminView && <Avatar p={who(t)} cls="sm" onClick={() => t.assignee && go("profile", { id: t.assignee })} />}
             <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
             {t.status === "Upcoming"
-              ? <button className="btn alt status-action" aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>Start</button>
+              ? <button className="btn alt status-action" disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>{statusSaving[t.id] ? 'Saving…' : 'Start'}</button>
               : <button type="button" role="switch" className={`status-switch ${t.status === "Completed" ? "on" : ""}`}
                 aria-checked={t.status === "Completed"}
+                disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]}
+                title={t.status === 'Completed' ? 'Mark this task in progress' : 'Mark this task completed'}
                 aria-label={`Mark ${t.title} ${t.status === "Completed" ? "in progress" : "completed"}`}
                 onClick={() => setTaskStatus(t.id, t.status === "Completed" ? "In-Progress" : "Completed")}>
                 <span className="status-switch-track" aria-hidden="true"><i /></span>
-                {t.status === "Completed" ? "Completed" : "In progress"}
+                {statusSaving[t.id] ? 'Saving…' : t.status === "Completed" ? "Completed" : "In progress"}
               </button>}
           </div>))}</div></div>
       </>);
@@ -929,7 +994,7 @@ export default function App({ profile, admin, signOut }) {
             </select>
           </label>}
           <div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
-          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
+          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
         <div className="panel"><h3>Description</h3><p style={{whiteSpace:"pre-wrap"}}>{t.description || "No description recorded."}</p><h3>Board notes</h3><textarea className="field" style={{ minHeight: 200 }} maxLength={10000} placeholder="Add a task note visible to the board…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
           <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" disabled={noteSaving === t.id} onClick={() => saveNotes(t)}>Save notes</button></div></div></div></>);
       break;
@@ -1291,22 +1356,31 @@ export default function App({ profile, admin, signOut }) {
         const history = visible.filter(r => r.status !== "pending");
         const card = (r) => <div className="req" key={r.id}>
           <div className="panel"><strong>{task(r.task_id)?.title || `Task ${r.task_id}`}</strong>
+            {r.request_no && <p><b>REQ-{r.request_no}</b></p>}
+            {r.proposed_assignee_code === profile.member_code && <p><b>Incoming task request for you</b></p>}
             <p>Requested by {person(r.requester_code)?.name || r.requester_code}</p>
             <p>Proposed assignee: {person(r.proposed_assignee_code)?.name || r.proposed_assignee_code}</p>
+            {r.status === "pending" && <p>{r.recipient_decision === "accepted" ? "Recipient accepted — awaiting administrator approval." : "Awaiting recipient response."}</p>}
+            {r.status === "declined" && <p>Recipient denied this request. Task ownership was not changed.</p>}
             <p>{r.reason || "No reason provided."}</p>
             <small>{new Date(r.created_at).toLocaleString()} ? {r.status}</small>
             {r.review_note && <p>Review: {r.review_note}</p>}
           </div>
+          {r.status === "pending" && r.proposed_assignee_code === profile.member_code && (r.recipient_decision ?? "pending") === "pending" && <div className="row">
+            <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => respondToRequest(r, "accepted")}>Accept</button>
+            <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => respondToRequest(r, "denied")}>Deny</button>
+          </div>}
           {admin && r.status === "pending" && <>
-            <button className="btn" disabled={requestBusy || !!dataError} onClick={() => decideRequest(r, "approved")}>Approve</button>
-            <button className="btn alt" disabled={requestBusy || !!dataError} onClick={() => decideRequest(r, "rejected")}>Deny</button>
+            <button className="btn" disabled={requestBusy || !!dataError || !!requestDataError || r.recipient_decision !== "accepted"} onClick={() => decideRequest(r, "approved")}>Approve</button>
+            <button className="btn alt" disabled={requestBusy || !!dataError || !!requestDataError} onClick={() => decideRequest(r, "rejected")}>Reject request</button>
           </>}
         </div>;
         page = <><Top title={approvedOnly ? "Approved Reassignments" : admin ? "Reassignment Requests" : "Your Reassignment Requests"} tag={admin} />
           <button className="btn alt" onClick={() => refresh().catch(() => {})}>Refresh</button>
+          {admin && <button className="btn alt" onClick={() => dispatchPhotonNotifications().then(result => say(result.queued ? "Pending text notifications queued." : "Photon webhook delivery is not enabled.")).catch(e => setRequestError(e.message))}>Retry text notifications</button>}
           {requestError && <p role="alert">{requestError}</p>}
           {!approvedOnly && <><h2>Pending ({pending.length})</h2>{pending.map(card)}
-            {!loading && !dataError && !pending.length && <p className="empty">No pending requests.</p>}</>}
+            {!loading && !dataError && !requestDataError && !pending.length && <p className="empty">No pending requests.</p>}</>}
           <h2>{approvedOnly ? "Approved" : "History"}</h2>{history.map(card)}
         </>;
         break;
@@ -1327,9 +1401,18 @@ export default function App({ profile, admin, signOut }) {
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
     <div className={`app${p.n === "dash" ? "" : " inner-page"}`}><style>{CSS}{CUTE_CSS}</style><CursorFx /><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
-        <button className="link" onClick={() => go("review")}>Requests ({reqs.filter(r => r.status === "pending").length})</button>
+        <button className="link" onClick={() => go("review")}>Requests ({requestDataError ? '?' : reqs.filter(r => r.status === "pending").length})</button>
         <button className="link" onClick={() => signOut().catch(e => say(e.message))}>Sign out</button>
       </header>
+      {statusFeedback && <div className="panel" role={statusFeedback.error ? 'alert' : 'status'} style={{marginBottom:12}}>
+        {statusFeedback.text}{' '}
+        {statusFeedback.taskId && <button className="link" onClick={() => go('task',{id:statusFeedback.taskId})}>View task</button>}{' '}
+        <button className="link" aria-label="Dismiss status message" onClick={() => setStatusFeedback(null)}>Dismiss</button>
+      </div>}
+      {dataError && <div role="alert">Could not refresh Supabase data: {dataError} <button onClick={() => refresh().catch(() => {})}>Retry</button></div>}
+      {requestDataError && <p role="alert">Requests unavailable: {requestDataError} <button onClick={() => refresh().catch(() => {})}>Retry requests</button></p>}
+      {dependencyError && <p role="alert">Task links unavailable: {dependencyError}. Tasks are still refreshed.</p>}
+      {p.n === "dash" && <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}><button className="btn alt" onClick={() => refresh().catch(() => {})}>Refresh tasks</button><small>{lastTaskRefresh ? `Tasks refreshed at ${lastTaskRefresh.toLocaleTimeString()}` : 'Waiting for task data…'}</small></div>}
       {loading && <p role="status">Loading tasks and requests?</p>}
       {meetingError && ['past', 'meeting', 'mm', 'memberStatus'].includes(p.n) && <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry meetings</button></p>}
       {admin && persistedDraft && p.n === "planTask" && <button className="btn alt" onClick={() => openTaskCreator(persistedDraft)}>Resume saved draft</button>}
@@ -1339,13 +1422,13 @@ export default function App({ profile, admin, signOut }) {
       {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />
         {modal.reassign[2] && <small style={{ display: "block", margin: "6px 0" }}><b>{modal.reassign[2].fit === "strong" ? "Strong fit" : "Possible fit"}:</b> {modal.reassign[2].reason}<br />
           Skills: {modal.reassign[2].matched_skills.join(", ")} · {modal.reassign[2].due_this_week} due this week, {modal.reassign[2].open} open</small>}
-        <small>Your request goes to the president, VP, or an admin for approval.</small>
+        <small>The recipient must accept first. Then the president, VP, or an admin can approve the transfer.</small>
         <label style={{ display: "block", marginTop: 12 }}>Reason (optional)
           <textarea className="field" maxLength={10000} value={requestReason} onChange={e => setRequestReason(e.target.value)} disabled={requestBusy} />
         </label>
         {requestError && <p role="alert">{requestError}</p>}
         {!profile.member_code && <p role="alert">Your account must be linked to the member roster before requesting a reassignment.</p>}
-        <div className="acts"><button className="btn alt" disabled={requestBusy} onClick={() => setModal(null)}>Cancel</button><button className="btn" disabled={requestBusy || !profile.member_code || !live} onClick={sendRequest}>{requestBusy ? "Saving?" : "Send request"}</button></div></div></div>)}
+        <div className="acts"><button className="btn alt" disabled={requestBusy} onClick={() => setModal(null)}>Cancel</button><button className="btn" disabled={requestBusy || !!requestDataError || !profile.member_code || !live} onClick={sendRequest}>{requestBusy ? "Saving?" : "Send request"}</button></div></div></div>)}
       {recorder && <Recorder kind={recorder} onSaved={() => Promise.all([refresh(), reloadMeetings()])} onClose={() => { setRecorder(null); Promise.all([refresh(),reloadMeetings()]).catch(() => {}); }} />}
       {toast && <div className="toast" role="status">{toast}</div>}
       <div role="status" style={{ position: "fixed", top: 8, right: 12, fontSize: 12, padding: "4px 10px", borderRadius: 999, background: live ? "#7fb08a" : "#e8a36b", color: "#fff", fontWeight: 700 }}>{source}</div>

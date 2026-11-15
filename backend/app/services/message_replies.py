@@ -6,7 +6,8 @@ MENU = (
     "Hi! I am Winnie. Choose an option:\n"
     "1. Show my five earliest-due unfinished tasks\n"
     "2. Check who I am linked to\n"
-    "You can also text tasks, whoami, ping, or describe a task you finished."
+    "You can also text tasks, whoami, requests, ping, describe a task you finished, "
+    "or ask for replacement suggestions with help followed by its WIN code."
 )
 
 

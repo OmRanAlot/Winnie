@@ -42,7 +42,12 @@ class HelpRequestStore:
         }))
 
     def rpc(self, name, **values):
-        return self._execute(lambda client: client.rpc(name, values))
+        try:
+            return self._execute(lambda client: client.rpc(name, values))
+        except StorageUnavailable as exc:
+            if isinstance(exc.__cause__, APIError) and exc.__cause__.code == "P0001":
+                raise ValueError(exc.__cause__.message) from exc
+            raise
 
     def get(self, number):
         rows = self._execute(lambda client: client.table("task_help_requests").select("*").eq("request_no", number))
@@ -61,7 +66,7 @@ class HelpRequestStore:
     def pending(self):
         return self._execute(lambda client: client.table("task_help_requests").select(
             "request_no,task_id,requester_code,selected_code,status,revision,candidates,task:tasks(title,task_code)"
-        ).eq("status", "pending_approval").order("request_no").limit(100))
+        ).eq("status", "pending_approval").is_("reassignment_id", "null").order("request_no").limit(100))
 
     def group(self, group_id):
         rows = self._execute(lambda client: client.table("task_help_requests").select("*").eq(

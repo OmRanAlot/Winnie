@@ -31,7 +31,7 @@ def help_request_reply(message, members, tasks, store, semester, clock=utc_now):
     def authorized(task):
         if not task or task.get("semester_code") != semester or task["status"] == "done":
             return False
-        assigned = assignment_members(task.get("assignee_text", ""), aliases)
+        assigned = ({task["owner_code"]} if task.get("owner_code") else assignment_members(task.get("assignee_text", ""), aliases))
         return assigned is not None and member["code"] in assigned
 
     try:

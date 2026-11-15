@@ -296,3 +296,14 @@ def test_http_free_text_requires_bridge_credentials_and_uses_verified_identity(f
             assert flow.completions.writes == 1
     finally:
         app.dependency_overrides.clear()
+
+def test_gemini_help_intent_returns_authorized_task_without_completing_it(flow):
+    from app.services.conversation import HelpIntent
+    text = 'I need help finding a replacement to book the room'
+    flow.interpreter.decision = decision(text, intent='request_help', completion_asserted=False)
+    result = flow.run(message(text))
+    assert result == HelpIntent('WIN-202610-1')
+    assert flow.completions.writes == 0
+    flow.interpreter.decision = decision(text, intent='request_help', task_ids=[C], completion_asserted=False)
+    assert isinstance(flow.run(message(text)), str)
+    assert flow.completions.writes == 0

@@ -158,7 +158,7 @@ async def test_only_requester_can_choose_and_only_saved_choice_is_sent_to_rpc():
     store.row["requester_code"] = "OTHER"
     assert "couldn't find" in await help_workflow_reply(message("choose HELP-1 TWO"), Members(), Tasks(), store, config())
     assert not store.calls
-    assert "Only a designated" in await help_workflow_reply(message("approve HELP-1 v2"), Members(), Tasks(), store, config())
+    assert "Legacy HELP approvals are disabled" in await help_workflow_reply(message("approve HELP-1 v2"), Members(), Tasks(), store, config())
     assert not store.calls
 
 
