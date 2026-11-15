@@ -51,3 +51,11 @@ test('metrics distinguish zero, unknown completion times, and unrecorded attenda
   assert.equal(metric.onTime,100); assert.equal(metric.timedCompletions,1);
   assert.equal(metric.attendance,0); assert.equal(metric.recordedMeetings,1); assert.equal(metric.transfers,1);
 });
+
+
+test('transfer metrics count completed outgoing handoffs rather than pending admin approvals',()=>{
+ const requests=[{status:'pending',admin_decision:'approved',requester_code:'A'},
+  {status:'approved',requester_code:'ADMIN',previous_owner_code:'A'}];
+ assert.equal(memberMetrics('A',[],[],requests).transfers,1);
+ assert.equal(memberMetrics('ADMIN',[],[],requests).transfers,0);
+});

@@ -73,7 +73,7 @@ replace the eboard roster or its reference files.
 | Meeting list, detail and attendance | `/api/meetings` and `/api/meetings/{id}/attendance` |
 | Audio upload | Multipart `POST /api/meetings/ingest`, then reload persisted meetings/tasks |
 | Browser recording | Save `/api/recordings`, process `/api/recordings/{id}/assignments`, then refresh board |
-| Reassignment requests and decisions | Authenticated Supabase RPCs; recipient accepts/denies first, then administrator approval transfers ownership |
+| Reassignment requests and decisions | Authenticated Supabase RPCs; administrator approves first, then recipient consent transfers ownership |
 | Help review | `/api/help-requests` and its decision endpoint |
 
 Authentication accounts/passwords and operational records (tasks, meetings, attendance,
@@ -99,24 +99,15 @@ caller; use the reassignment RPC workflow to transfer ownership. Saves check the
 No new database migration is required for this policy; deploy the updated backend and
 frontend. Imports and approved database handoffs retain their separate server-side paths.
 
-Photon and browser requests share this queue after applying
-`20261115160000_unify_photon_reassignments.sql` after the recipient-consent migration.
-See [the shared workflow and demo test](HELP_WORKFLOW.md) for text commands,
-notifications, deployment settings and the recipient/admin test sequence.
+Photon and browser requests share the same queue. Apply the existing shared-flow migrations
+and `20261115195000_admin_first_reassignment.sql`. Administrators review first; only after
+approval are recipients asked to accept or deny. Acceptance atomically transfers ownership;
+rejection/denial preserves it. Original assignees and outgoing-owner history remain stored.
+See [HELP_WORKFLOW.md](HELP_WORKFLOW.md) for current name/number selection and live tests.
 
-Apply `supabase/migrations/20261115150000_reassignment_recipient_consent.sql` once
-after the existing reassignment and authentication migrations. Restart the frontend.
-The receiving member opens **Requests** to see incoming proposals and **Accept** /
-**Deny**. Acceptance saves their response and waits for administrator approval;
-denial closes the request without changing ownership. Administrators cannot approve
-an unanswered or denied proposal. Existing pending requests also require acceptance;
-historical decisions and task owners are preserved.
-
-The `respond_task_reassignment` RPC derives the member from their verified session,
-not browser-supplied identity. RLS lets the requester, recipient and reviewers see the
-request. Responses are recorded with profile ID and timestamp, can be submitted only
-once, and are protected against stale/completed tasks. Existing admin approval still
-checks the assignment atomically before transferring it. No external messages are sent.
+Notifications, Nudge and scheduled Sheets sync require `20261115200000_notification_automation.sql`
+and the cloud setup in [AUTOMATION.md](AUTOMATION.md). The frontend queues authorized nudges
+and displays automation health; it never sends provider credentials or recipient identities.
 
 ## Demo verification
 

@@ -2,12 +2,13 @@
 import React from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-const api = vi.hoisted(() => ({ edit: vi.fn(), get: vi.fn(), save: vi.fn(), ingest: vi.fn() }));
+const api = vi.hoisted(() => ({ edit: vi.fn(), get: vi.fn(), save: vi.fn(), ingest: vi.fn(), automation: vi.fn() }));
 vi.mock('../src/lib/api.js', () => ({ editMember: api.edit, getEvaluation: api.get,
-  saveEvaluation: api.save, ingestMeetingAudio: api.ingest }));
+  saveEvaluation: api.save, ingestMeetingAudio: api.ingest, getAutomationStatus: api.automation }));
 import ProfileEditor from '../src/ProfileEditor.jsx';
 import EvaluationPanel from '../src/EvaluationPanel.jsx';
 import UploadMeeting from '../src/UploadMeeting.jsx';
+import AutomationStatus from '../src/AutomationStatus.jsx';
 const member = {id:'A',name:'Alice',role:'Treasurer',skills:['Role-derived suggestion'],personalSkills:[],previousRoles:['Secretary']};
 beforeEach(()=>{ vi.resetAllMocks(); api.edit.mockResolvedValue({}); api.get.mockResolvedValue({comments:'Stored feedback'});
   api.save.mockResolvedValue({}); api.ingest.mockResolvedValue({}); });
@@ -40,4 +41,18 @@ it('audio upload processes the selected file and refreshes stored meeting/task d
   fireEvent.click(screen.getByRole('button',{name:'Upload and process'}));
   expect(await screen.findByText(/Meeting processed and saved/)).toBeTruthy();
   expect(api.ingest).toHaveBeenCalledWith(file,'Board meeting'); expect(refresh).toHaveBeenCalledOnce();
+});
+
+it('automation failures remain visible and retry reports pending/conflicted jobs without claiming delivery',async()=>{
+  api.automation.mockRejectedValueOnce(new Error('Status unavailable')).mockResolvedValue({
+    photon_enabled:true,notifications_enabled:true,reminders_enabled:true,scheduler_configured:true,
+    jobs:[{key:'sheets:board',status:'conflict',started_at:'2026-11-15T14:00:00Z'}],
+    notifications:{task_notifications:{pending:2,uncertain:1}},
+  });
+  render(<AutomationStatus />);
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent','Status unavailable');
+  fireEvent.click(screen.getByRole('button',{name:'Refresh automation status'}));
+  expect(await screen.findByText(/2 pending notifications/)).toBeTruthy();
+  expect(screen.getByText(/review conflicting changes/)).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
 });

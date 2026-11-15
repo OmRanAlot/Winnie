@@ -1,5 +1,7 @@
 # Original assignments and reassignment requests
 
+The active workflow is now administrator approval first, recipient consent second. Apply 20261115195000_admin_first_reassignment.sql and follow [HELP_WORKFLOW.md](HELP_WORKFLOW.md); older instructions below describe historical migrations.
+
 Apply `supabase/migrations/20261114160001_task_original_assignee_and_requests.sql`
 to the existing UUID task store, after the roster/profile migrations. Apply this file
 alone; the older `0001_init.sql` defines a different, incompatible tasks table.

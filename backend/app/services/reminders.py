@@ -58,7 +58,8 @@ def scan_reminders(store, tasks, members, settings, now, *, write=False):
         if not slots:
             continue
         try:
-            assigned = assignment_members(task.get("assignee_text", ""), aliases)
+            assigned = ({task["owner_code"]} if task.get("owner_code") else
+                        assignment_members(task.get("assignee_text", ""), aliases))
         except AliasConflict:
             assigned = None
         if assigned is None:
@@ -100,9 +101,9 @@ def next_reminder(store, tasks, members, settings, clock=utc_now, *, scan=True):
         authorized = False
         try:
             task = tasks.get(item["task_id"])
-            assigned = assignment_members(
+            assigned = ({task["owner_code"]} if task.get("owner_code") else assignment_members(
                 task.get("assignee_text", ""), members.aliases(settings.active_semester),
-            )
+            ))
             authorized = (
                 task.get("semester_code") == settings.active_semester
                 and assigned is not None and item["member_code"] in assigned

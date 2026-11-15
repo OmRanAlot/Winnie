@@ -5,7 +5,7 @@ import re
 from datetime import UTC, datetime
 
 from app.agents.conversation_memory import SupabaseConversationSaver, memory_graph
-from app.services.members import assignment_members, normalize_sender
+from app.services.members import assignment_members, normalize_sender, resolve_member_choice
 from app.services.tasks import TaskNotFound
 
 REFERENCE = re.compile(r"\b(it|its|that task|this task)\b|^what about (?:the )?(?:deadline|due date)\??$", re.IGNORECASE)
@@ -141,13 +141,7 @@ class ConversationContext:
         if (not request or request['request_no'] != self.pending_help_no or request['requester_code'] != self.member
                 or str(request['task_id']) != self.focus_task_id or request['status'] != 'suggestions_ready'):
             return None
-        value = re.sub(r'\s+please$', '', text.strip().casefold().rstrip('.!? '))
-        candidates = request.get('candidates', [])
-        if value.isdigit() and 1 <= int(value) <= len(candidates):
-            return candidates[int(value)-1]['code']
-        matches = [c['code'] for c in candidates if value in {
-            c['code'].casefold(), c.get('name', '').casefold(), c.get('name', '').casefold().split(' ')[0]}]
-        return matches[0] if len(matches) == 1 else None
+        return resolve_member_choice(text, request.get('candidates', []))
 
     def clear(self):
         self.saver.delete_thread(self.saver.thread)
