@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { getAssignments, getCandidates, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, saveTaskNotes } from "./lib/api.js";
-import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan } from "./lib/eventPlans.js";
+import { getAssignments, getCandidates, getEventLabels, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
 import Recorder from "./Recorder.jsx";
 import PlanLoading from "./PlanLoading.jsx";
 import Attendance from "./Attendance.jsx";
@@ -44,6 +43,8 @@ const compareByDueDate = (a, b) => {
 };
 // Live tasks have no member link yet: fall back to the tracker's assignee cell.
 const who = (t) => person(t.assignee) ?? { id: null, name: t.assigneeText ? t.assigneeText.split("\n")[0] : "Unassigned" };
+const normalizeRole = (role) => String(role ?? "").trim().toLowerCase()
+  .replace(/\bpartnerships\b/g, "partnership").replace(/\s+/g, " ");
 
 /* ---------- Styles (palette pulled from the logo) ---------- */
 export const CSS = `
@@ -140,6 +141,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .sec{font-size:22px;margin:var(--s5) 0 var(--s2);font-weight:650}
 .sum{display:grid;grid-template-columns:1fr 240px;gap:var(--s2) var(--s4);align-items:center;max-width:960px;margin:0 auto;width:100%}
 .sum .pill{display:flex;justify-content:space-between;align-items:center;width:100%;cursor:pointer}
+.event-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--rust);background:rgba(0,0,0,.07);border-radius:3px;padding:1px 6px;margin-bottom:3px;line-height:1.5}
 .chev{background:none;border:0;cursor:pointer;color:var(--ink);display:grid;transition:transform .15s}
 .chev.open{transform:rotate(180deg)}
 .det{grid-column:1/-1;background:#f9f4ee;border:1px solid var(--line);border-radius:var(--r);padding:var(--s3) var(--s4);margin:0 0 var(--s2);font-size:15px}
@@ -220,12 +222,14 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .create-task-grid .panel{min-width:0}
 .create-task-fields{display:grid;grid-template-columns:1fr;gap:var(--s3)}
 .task-summary{min-height:260px;resize:vertical}
-.event-plan-task-list{display:flex;flex-direction:column;gap:var(--s3);max-height:480px;overflow-y:auto;padding:4px}
-.event-plan-task-card{overflow:hidden;border:1px solid var(--line);border-radius:var(--r);background:#f9f4ee}
+.event-plan-task-list{display:flex;flex-direction:column;gap:var(--s4);max-height:520px;overflow-y:auto;padding:8px}
+.event-plan-task-card{flex:0 0 auto;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#fffaf5;box-shadow:0 3px 8px rgba(58,20,16,.08)}
 .event-plan-task-toggle{display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:var(--s3);padding:var(--s4);border:0;background:transparent;color:var(--ink);text-align:left;font:inherit}
+.event-plan-task-toggle>span:first-child{min-width:0}
 .event-plan-task-title{display:block;font-weight:700}
 .event-plan-task-meta{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s2);color:var(--muted);font-size:14px}
 .event-plan-task-meta span{padding:2px var(--s2);border-radius:999px;background:var(--surface)}
+.event-plan-task-meta .event-plan-task-assignment{color:var(--ink);font-weight:650}
 .event-plan-task-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3);padding:var(--s4);border-top:1px solid var(--line)}
 .event-plan-task-detail dt{font-weight:700}
 .event-plan-task-detail dd{margin:2px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
@@ -529,6 +533,7 @@ export default function App({ profile, admin, signOut }) {
   };
   const [TASKS, setTasks] = useState([]);
   const [PEOPLE, setPeople] = useState([]);
+  const [eventOverrides, setEventOverrides] = useState({});
   const tasks = TASKS; // the redesign's screens read `tasks`; same live list
   const [source, setSource] = useState("Loading tasks…");
   const live = source.startsWith("Live");
@@ -544,14 +549,24 @@ export default function App({ profile, admin, signOut }) {
       const byTask = assignments.byTask;
       const links = {};
       dependencies.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
-      setTasks(ts.map((t) => {
+      const enriched = ts.map((t) => {
         const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
         return { ...t, assignees: codes, assignee: codes[0] ?? null, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null };
-      }));
+      });
+      setTasks(enriched);
       setPeople(people);
       setReqs(requests);
       setDataError("");
       setSource(`Live: ${ts.length} tasks, ${people.length} members`);
+      // Enrich tasks whose event is "Miscellaneous" or blank with a Gemini-suggested label.
+      const needsLabel = enriched.filter((t) => !t.event || t.event.toLowerCase() === "miscellaneous");
+      if (needsLabel.length > 0) {
+        getEventLabels(needsLabel.map((t) => ({ id: t.id, title: t.title, description: t.description || "" })))
+          .then((overrides) => {
+            if (version === refreshVersion.current) setEventOverrides((prev) => ({ ...prev, ...overrides }));
+          })
+          .catch(() => {}); // non-fatal
+      }
     } catch (e) {
       if (version === refreshVersion.current) {
         setDataError(e.message);
@@ -906,7 +921,7 @@ export default function App({ profile, admin, signOut }) {
       const G = (title, st, avs) => (<>
         <h2 className="sec" style={{ gridColumn: 1 }}>{title}</h2>{avs ? <h2 className="sec" style={{ fontSize: 24 }}>Assign Task:</h2> : <span />}
         {visibleTasks.filter((t) => t.status === st).sort(compareByDueDate).map((t) => (<Fragment key={t.id}>
-          <div className="pill" onClick={() => go("task", { id: t.id })}><span>{t.title} - {t.due}</span>
+          <div className="pill" onClick={() => go("task", { id: t.id })}><span style={{ flex: 1, minWidth: 0 }}>{(() => { const ev = eventOverrides[t.id] || t.event; return ev ? <><small className="event-tag">{ev}</small><br /></> : null; })()}{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
           <div className="row" style={{ gap: 8 }}>
             {isAdminView && t.status !== "Completed" && <button type="button" className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }}
@@ -927,7 +942,7 @@ export default function App({ profile, admin, signOut }) {
               return <Avatar key={s.code} p={q} cls="sm" title={`${s.name} · ${s.fit === "strong" ? "Strong fit" : "Possible fit"}\n${s.matched_skills.join(", ")}\n${s.due_this_week} due this week · ${s.open} open\n${s.reason}`}
                 style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => { setRequestError(""); setRequestReason(""); setModal({ reassign: [t, q, s] }); }} />; });
           })() : <small>Reconnect to request reassignment.</small>)}</div>
-          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}{t.event ? ` · ${t.event}` : ""}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
+          {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
       page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
@@ -1010,6 +1025,13 @@ export default function App({ profile, admin, signOut }) {
                 const expanded = expandedEventTaskId === task.id;
                 const dependencies = (task.dependency_ids ?? []).map((id) => titleById[id] ?? id);
                 const kind = (task.kind || "general").replace(/_/g, " ");
+                const suggestedRole = task.suggested_role?.trim();
+                const roleMembers = suggestedRole
+                  ? PEOPLE.filter((member) => normalizeRole(member.role) === normalizeRole(suggestedRole))
+                  : [];
+                const suggestedRoleLabel = roleMembers.length
+                  ? `${roleMembers[0].role}: ${roleMembers.map((member) => member.name).join(", ")}`
+                  : suggestedRole || "Role not specified";
                 return <article className="event-plan-task-card" key={task.id}>
                   <button className="event-plan-task-toggle" type="button" aria-expanded={expanded}
                     aria-controls={`event-plan-task-details-${index}`}
@@ -1018,8 +1040,7 @@ export default function App({ profile, admin, signOut }) {
                       <span className="event-plan-task-title">{index + 1}. {task.title}</span>
                       <span className="event-plan-task-meta">
                         <span>{task.due_date ? `Due ${task.due_date}` : "No date proposed"}</span>
-                        <span>{task.suggested_role || "Role not specified"}</span>
-                        <span>{task.phase || "Phase not specified"}</span>
+                        <span className="event-plan-task-assignment">{suggestedRoleLabel}</span>
                       </span>
                     </span>
                     <span>{expanded ? "Collapse" : "Expand"}</span>
@@ -1027,8 +1048,7 @@ export default function App({ profile, admin, signOut }) {
                   {expanded && <div className="event-plan-task-details" id={`event-plan-task-details-${index}`}>
                     <dl className="event-plan-task-detail"><dt>Task ID</dt><dd>{task.id}</dd></dl>
                     <dl className="event-plan-task-detail"><dt>Task type</dt><dd>{kind}</dd></dl>
-                    <dl className="event-plan-task-detail"><dt>Suggested role</dt><dd>{task.suggested_role || "Not specified"}</dd></dl>
-                    <dl className="event-plan-task-detail"><dt>Phase</dt><dd>{task.phase || "Not specified"}</dd></dl>
+                    <dl className="event-plan-task-detail"><dt>Suggested role</dt><dd>{suggestedRole ? suggestedRoleLabel : "Not specified"}</dd></dl>
                     <dl className="event-plan-task-detail"><dt>Due date</dt><dd>{task.due_date || "No date proposed"}</dd></dl>
                     <dl className="event-plan-task-detail wide"><dt>Rationale</dt><dd>{task.rationale || "No rationale provided."}</dd></dl>
                     <dl className="event-plan-task-detail wide"><dt>Dependencies</dt><dd>{dependencies.length ? dependencies.join(", ") : "None"}</dd></dl>

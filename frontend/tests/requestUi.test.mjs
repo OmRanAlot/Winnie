@@ -30,6 +30,7 @@ await build({
         export const getAssignments = () => Promise.resolve({byTask: {task1: [globalThis.__dashboard.tasks[0].ownerCode]}});
         export const weekStart = () => new Date('2026-11-09T00:00:00');
         export const getCandidates = () => Promise.resolve([]);
+        export const getEventLabels = () => Promise.resolve({});
         export const updateTaskStatus = () => Promise.resolve();
         export const reviewHelpRequests = () => Promise.resolve([]);
         export const decideHelpRequest = () => Promise.resolve({reply: 'Reviewed'});
@@ -42,7 +43,7 @@ await build({
         export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return globalThis.__dashboard.planResponse ?? Promise.resolve({
           mode:'deepagents', questions:['Confirm room capacity.'], warnings:['Review suggested dates.'],
           tasks:[
-            {id:'planned',title:'Planned action',suggested_role:'Secretary',kind:'highlander_hub',due_date:'2026-11-25',phase:'before',dependency_ids:[],evidence_ids:['source-1'],rationale:'Post event details.'},
+            {id:'planned',title:'Planned action',suggested_role:'Industry Partnerships Chair',kind:'highlander_hub',due_date:'2026-11-25',phase:'before',dependency_ids:[],evidence_ids:['source-1'],rationale:'Post event details.'},
             {id:'materials',title:'Prepare materials',suggested_role:'Treasurer',kind:'materials_list',due_date:'2026-11-26',phase:'before',dependency_ids:['planned'],evidence_ids:[],rationale:'Collect supplies before the event.'},
           ],
         }); };
@@ -190,7 +191,12 @@ test('manual event plans save and reopen without creating tasks', async () => {
 });
 
 test('generated event plans receive one date and time and save as plans, not tasks', async () => {
-  setup(); let renderer;
+  setup();
+  globalThis.__dashboard.people = [
+    { id: 'MEMBER', name: 'Carlin Verano', role: 'Industry Partnership Chair', skills: [] },
+    { id: 'OTHER', name: 'Meera James', role: 'Industry Partnership Chair', skills: [] },
+  ];
+  let renderer;
   const change = async (node, value) => act(async () => node.props.onChange({ target: { value } }));
   try {
     await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
@@ -221,6 +227,9 @@ test('generated event plans receive one date and time and save as plans, not tas
     assert.equal(renderer.root.findAllByType('input').filter(node => node.props.type === 'date').length, 1);
     const taskCards = renderer.root.findAllByProps({ className: 'event-plan-task-toggle' });
     assert.equal(taskCards.length, 2);
+    const firstTaskMeta = renderer.root.findAllByProps({ className: 'event-plan-task-meta' })[0];
+    assert.ok(text(firstTaskMeta).includes('Industry Partnership Chair: Carlin Verano, Meera James'));
+    assert.ok(!text(firstTaskMeta).includes('before'));
     assert.ok(!renderer.root.findAllByType('textarea').some(node => node.props.maxLength === 20000));
     await act(async () => taskCards[0].props.onClick());
     assert.equal(renderer.root.findAllByProps({ className: 'event-plan-task-toggle' })[0].props['aria-expanded'], true);
@@ -230,6 +239,7 @@ test('generated event plans receive one date and time and save as plans, not tas
     await act(async () => renderer.root.findAllByProps({ className: 'event-plan-task-toggle' })[1].props.onClick());
     const expandedDetails = renderer.root.findAllByProps({ className: 'event-plan-task-details' })[0];
     assert.ok(text(expandedDetails).includes('Planned action'));
+    assert.ok(!text(expandedDetails).includes('Phase'));
     await act(async () => button(renderer, 'Save Event Plan').props.onClick());
     assert.equal(globalThis.__dashboard.eventPlans[0].event_name, 'Career Panel');
     assert.equal(globalThis.__dashboard.eventPlans[0].tasks.length, 2);
