@@ -151,6 +151,8 @@ def with_skills(members: list[dict], skills: dict) -> list[dict]:
     result = []
     for member in members:
         entry = skills.get(member["code"], {})
+        if entry.get("role") and entry["role"].casefold() != member["board_role"].casefold():
+            entry = {}  # Old role-derived suggestions do not describe the member's new role.
         result.append({
             **member,
             "skills": member.get("skills") or flat(entry),

@@ -17,9 +17,11 @@ semesters.
 - `app.import_tracker` compares valid rows against Supabase and previews insert,
   update, and unchanged counts. Saving requires the exact preview's confirmation hash.
 
-Live Google Sheets access, writing IDs into sheets, archive
-history storage, scheduled synchronization, and reminder sending are not implemented
-yet. A private sheet can remain private when those are added.
+Live private-sheet access and a polling sync worker are now available; see
+[Google Sheets sync setup and monthly rollover](GOOGLE_SHEETS_SYNC.md). The live
+sync adds durable baselines, conflict review and atomic applies while keeping the
+offline importer unchanged. Automatic ID writeback and archive-history storage
+remain separate work. For implemented reminder delivery, see [reminders](REMINDERS.md).
 
 ## First: apply the new migration
 
@@ -78,7 +80,7 @@ be automatically deleted or marked complete.
 Select one active tab per tracker. OLD tabs remain history and must not overwrite
 current task state or initiate reminders. The preview classifies them but does not
 store their history. Snapshot month alone is not enough to order edits within a month;
-live sync will need a revision/timestamp and an explicit active-tab configuration.
+live sync uses revision checks, durable source baselines and an explicit active-tab configuration.
 
 ## Run a preview
 

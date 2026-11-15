@@ -18,6 +18,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from app.core.auth import require_admin, require_member
+from app.core.settings import Settings
 from app.db import repository
 from app.integrations.supabase import StorageUnavailable
 from app.schemas.api import TaskStatusUpdate, failure
@@ -101,6 +102,8 @@ def run_operation(operation, meta=None):
 
 @records.post("", status_code=201, dependencies=[Depends(require_admin)])
 def create_task(task: TaskCreate, store: Store):
+    if task.semester_code is None:
+        task = task.model_copy(update={"semester_code": Settings().active_semester})
     return run_operation(lambda: store.create(task))
 
 

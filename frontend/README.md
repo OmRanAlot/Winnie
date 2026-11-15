@@ -17,9 +17,14 @@ migration, redirect URLs, SMTP, invitations, and administrator assignment.
 logout. Admin status comes from a server-verified profile. The frontend passes the
 Supabase access token to FastAPI; shared backend keys never belong in the browser.
 
-Run `npm test`, `npm run test:auth`, and `npm run build` to verify changes.
+Run `npm run typecheck`, `npm test`, `npm run test:ui`, and `npm run build` to verify changes.
+The frontend mixes JavaScript and TypeScript. TypeScript checks the TS/TSX files with
+React 18 types; existing JavaScript files are included for module resolution without
+enabling strict JavaScript checking. Both authentication and Supabase have one
+implementation, imported explicitly from their `.jsx`/`.js` files.
 
 ## Backend hookup
-Tasks and members load from the backend after authentication. Some meetings, metrics,
-and other product screens still contain sample content in src/App.jsx. Production
-hosting must serve index.html for `/auth/set-password` as well as `/`.
+Tasks, members, meetings and dashboard forms load from the backend after authentication.
+Board information is read-only. See [dashboard connections](../docs/FRONTEND_BACKEND.md)
+for migration and verification steps. Production hosting must serve index.html for
+`/auth/set-password` as well as `/`.

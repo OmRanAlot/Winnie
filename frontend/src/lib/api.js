@@ -4,6 +4,22 @@
 import { authHeaders } from './authToken.js';
 const PAGE = 100; // the backend's maximum page size for GET /api/tasks/records
 
+export async function getSheetSyncSources() {
+  return (await request('/sheet-sync/sources')).data;
+}
+
+export async function previewSheetSync(source, resolutions = {}) {
+  return (await request(`/sheet-sync/${encodeURIComponent(source)}/preview`, {
+    method: 'POST', body: JSON.stringify({ resolutions }), signal: AbortSignal.timeout(90000),
+  })).data;
+}
+
+export async function applySheetSync(source, expected_plan, resolutions = {}) {
+  return (await request(`/sheet-sync/${encodeURIComponent(source)}/apply`, {
+    method: 'POST', body: JSON.stringify({ expected_plan, resolutions }), signal: AbortSignal.timeout(90000),
+  })).data;
+}
+
 const STATUS_TO_UI = { todo: "Upcoming", in_progress: "In-Progress", blocked: "In-Progress", done: "Completed" };
 const STATUS_FROM_UI = { Upcoming: "todo", "In-Progress": "in_progress", Completed: "done" };
 const apiBase = (import.meta.env?.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -16,7 +32,7 @@ async function request(path, options = {}) {
     response = await fetch(`${apiBase}${path}`, {
       cache: "no-store",
       ...options,
-      headers: { "Content-Type": "application/json", ...await authHeaders(), ...options.headers },
+      headers: { ...(typeof FormData !== 'undefined' && options.body instanceof FormData ? {} : { "Content-Type": "application/json" }), ...await authHeaders(), ...options.headers },
       signal: options.signal ?? AbortSignal.timeout(15000),
     });
   } catch {
@@ -24,7 +40,8 @@ async function request(path, options = {}) {
   }
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) {
-    const detail = body?.error?.message || body?.detail;
+    const raw = body?.error?.message || body?.detail;
+    const detail = Array.isArray(raw) ? raw.map(e => `${e.loc?.slice(1).join('.')}: ${e.msg}`).join('; ') : raw;
     throw new Error(`${method} ${endpoint} returned HTTP ${response.status}${detail ? `: ${detail}` : ""}.`);
   }
   return body;
@@ -52,10 +69,14 @@ export function toUiTask(t, monday = weekStart()) {
     originalAssigneeCode,
     title: t.title,
     assigned: usDate(t.created_at?.slice(0, 10)),
-    start: usDate(t.due_date) || "—",
+    start: usDate(t.start_date || t.due_date) || "—",
+    startIso: t.start_date || null,
+    dueTime: t.due_time?.slice(0, 5) || '',
     due: usDate(t.due_date) || t.deadline_text || "No date",
     dueIso: t.due_date,
-    finished: t.status === "done" ? usDate(t.updated_at?.slice(0, 10)) : "",
+    finished: t.completed_at ? usDate(t.completed_at.slice(0, 10)) : "",
+    completedAt: t.completed_at || null,
+    meetingId: t.source_meeting_id ?? null,
     assignee: ownerCode,
     currentAssignee: ownerCode,
     initialAssignee: originalAssigneeCode,
@@ -63,11 +84,12 @@ export function toUiTask(t, monday = weekStart()) {
     status: STATUS_TO_UI[t.status] ?? "Upcoming",
     priority: t.priority ?? "normal",
     blocked: t.status === "blocked",
-    dep: null, // dependencies are not stored in the backend yet
+    dep: null, // Filled from the persisted dependency graph during refresh.
     day,
     len: 1,
     thisWeek: day >= 0 && day < 7,
-    notes: t.description || "",
+    description: t.description || "",
+    notes: t.notes || "",
     event: t.event_tag || t.project_name || "",
   };
 }
@@ -96,6 +118,8 @@ export async function getMembers() {
     soft: m.soft_skills ?? [],
     previousRoles: m.previous_roles ?? [],
     previousRoleSkills: m.previous_role_skills ?? [],
+    manualPreviousRoleSkills: m.previous_role_skills_manual ?? [],
+    personalSkills: m.skills_source === 'supabase' ? m.skills : [],
     skillsSource: m.skills_source ?? null, // "role-derived" = generated from the role text
   }));
 }
@@ -104,7 +128,6 @@ export async function getMeetings() {
   return (await request('/meetings')).data.map((m) => ({
     ...m, name: m.title || 'E-Board Meeting',
     date: new Date(m.held_at).toLocaleDateString('en-US', { timeZone: 'America/New_York' }),
-    tasks: [],
   }));
 }
 
@@ -131,6 +154,23 @@ export async function getCandidates(taskId) {
 
 export async function getCurrentUser(signal) {
   return (await request('/auth/me', { signal })).data;
+}
+
+export async function getDependencies() { return (await request('/dashboard/dependencies')).data; }
+export async function saveTaskNotes(id, notes) {
+  return (await request(`/tasks/records/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ notes }) })).data;
+}
+export async function getEvaluation(code) { return (await request(`/dashboard/evaluations/${encodeURIComponent(code)}`)).data; }
+export async function saveEvaluation(code, comments) {
+  return (await request(`/dashboard/evaluations/${encodeURIComponent(code)}`, { method: 'PUT', body: JSON.stringify({ comments }) })).data;
+}
+export async function getTaskDraft() { return (await request('/dashboard/draft')).data; }
+export async function saveTaskDraft(form) {
+  return (await request('/dashboard/draft', { method: 'PUT', body: JSON.stringify(form) })).data;
+}
+export async function ingestMeetingAudio(file, title) {
+  const form = new FormData(); form.append('file', file); form.append('title', title);
+  return (await request('/meetings/ingest', { method: 'POST', body: form, signal: AbortSignal.timeout(200000) })).data;
 }
 
 export async function reviewHelpRequests() {

@@ -111,7 +111,7 @@ class MemberStore:
         return members[0] if len(members) == 1 else None
 
     # Public profile fields only: contact details (email, phone_number) never leave the backend.
-    PUBLIC_FIELDS = "code,display_name,board_role,role_description,skills"
+    PUBLIC_FIELDS = "code,display_name,board_role,role_description,skills,previous_role_skills_manual"
 
     def list_active(self):
         """Active board members for the dashboard, ordered by name."""
@@ -123,10 +123,13 @@ class MemberStore:
         """{code: previous roles} from members.previous_roles; {} until that column exists
         (supabase/migrations/20261115100000_add_member_previous_roles.sql)."""
         try:
-            rows = self._execute("members", lambda table: table.select("code,previous_roles")).data
+            rows = self._execute("members", lambda table: table.select(
+                "code,previous_roles,previous_roles_override"
+            )).data
         except StorageUnavailable:
             return {}
-        return {r["code"]: r["previous_roles"] for r in rows if r.get("previous_roles")}
+        return {r["code"]: r.get("previous_roles") or [] for r in rows
+                if r.get("previous_roles") or r.get("previous_roles_override")}
 
     def list_roles(self):
         """Role text used to derive skills (services/member_skills.py). No contact details."""
