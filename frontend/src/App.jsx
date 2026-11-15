@@ -10,6 +10,8 @@ import UploadMeeting from "./UploadMeeting.jsx";
 import { supabase } from "./lib/supabase.js";
 import { reassignmentStore } from "./lib/reassignments.js";
 import { orderProfiles } from "./lib/profileOrder.js";
+import { PIXEL_ARROW_CURSOR, PIXEL_HAND_CURSOR, CUTE_CSS } from "./lib/pixelCursor.js";
+import CursorFx from "./lib/CursorFx.jsx";
 const requestsStore = reassignmentStore(supabase);
 
 // All board records come from the backend. No sample data fallback.
@@ -44,7 +46,10 @@ export const CSS = `
 :root{--ink:#3a1410;--maroon:#5a0d05;--rust:#b5472a;--paper:#f3ebe2;--surface:#eadfd2;--hover:#e0d0bf;--line:#d6c4b2;--muted:#7a6459;--sun:#e0b25a;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--r:6px;--frame-band:clamp(12px,6.6vw,96px)}
 html{scrollbar-gutter:stable both-edges}
 *{box-sizing:border-box}
-body{margin:0;background:var(--maroon);color:var(--ink);font-family:"Kabel","Josefin Sans","Hanken Grotesk","Segoe UI",system-ui,sans-serif;font-size:16px;line-height:1.5}
+body{margin:0;background:var(--maroon);color:var(--ink);font-family:"Kabel","Josefin Sans","Hanken Grotesk","Segoe UI",system-ui,sans-serif;font-size:16px;line-height:1.5;cursor:${PIXEL_ARROW_CURSOR}}
+.app{cursor:${PIXEL_ARROW_CURSOR}}
+button:not(:disabled),a[href],select,[role="button"],.gr,.tog,.sum .pill,[style*="cursor"]{cursor:${PIXEL_HAND_CURSOR}}
+button:disabled,[aria-disabled="true"]{cursor:${PIXEL_ARROW_CURSOR}}
 a{color:var(--maroon)}
 a:hover{color:var(--rust)}
 h1,h2,h3,h4,.big{font-family:"Righteous","Hanken Grotesk",system-ui,sans-serif;letter-spacing:.07em}
@@ -67,7 +72,7 @@ button{font-family:inherit}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
 .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--s4);padding-bottom:var(--s6)}
 .center h2{font-size:40px;margin:0;font-weight:700;letter-spacing:.07em;border-bottom:2px solid var(--ink);padding:0 var(--s6) var(--s3);width:min(640px,100%);text-align:center}
-.logo{width:132px;height:132px;object-fit:contain}
+.logo{width:297px;height:297px;object-fit:contain}
 .form{display:grid;grid-template-columns:auto 280px;gap:var(--s3) var(--s4);align-items:center;text-align:right;font-weight:600}
 .field{border:1px solid var(--line);background:#f9f4ee;border-radius:var(--r);padding:var(--s3) var(--s4);font-size:16px;color:var(--ink);font-family:inherit;width:100%}
 textarea.field{min-height:110px;resize:vertical}
@@ -82,7 +87,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .avatar{width:52px;height:52px;border-radius:50%;background:#f0c9b3;border:2px solid var(--maroon);box-shadow:2px 2px 0 var(--maroon);display:grid;place-items:center;font-weight:700;color:var(--maroon);flex:none;cursor:pointer;padding:0;font-size:16px}
 .avatar:hover{background:var(--sun)}
 .avatar.sm{width:40px;height:40px;font-size:13px}
-.avatar.lg{width:104px;height:104px;font-size:34px;cursor:default;box-shadow:4px 4px 0 var(--maroon)}
+.avatar.lg{width:104px;height:104px;font-size:34px;cursor:${PIXEL_ARROW_CURSOR};box-shadow:4px 4px 0 var(--maroon)}
 .id{display:flex;gap:var(--s5);align-items:center;margin-bottom:var(--s4)}
 .id h2{margin:0;font-size:32px;font-weight:700;border-bottom:2px solid var(--ink);padding-bottom:var(--s2);flex:1;max-width:640px}
 .id p{margin:var(--s2) 0 0;font-size:18px;color:var(--muted)}
@@ -213,7 +218,15 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .task-summary{min-height:260px;resize:vertical}
 .plan-error{max-width:920px;margin:var(--s4) auto 0;padding:var(--s3) var(--s4);background:#f4e3d7;border:1px solid var(--rust);border-radius:var(--r);color:var(--maroon);font-weight:600}
 .dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 510px);pointer-events:none}
-@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.app button:not(:disabled),.app .avatar,.app .chart-member rect{transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease,filter .16s ease}
+@media(hover:hover){
+  .app button:not(:disabled):hover:not(.back):not(.avatar):not(.bell):not(.chev):not(.rb){transform:translateY(-1px);box-shadow:0 4px 10px rgba(58,20,16,.1)}
+  .app .avatar:not(.lg):hover{transform:translateY(-2px) rotate(-3deg)}
+  .app .back:hover{transform:translateX(-2px)}
+  .app .chart-member:hover rect{filter:brightness(1.07)}
+}
+.app button:not(:disabled):active{transform:translateY(1px) scale(.98)}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 @media(max-width:800px){
   .app{padding:var(--s4)}
   .nav{margin:0 calc(var(--s4) * -1);padding:var(--s3) var(--s4);gap:var(--s2)}
@@ -244,7 +257,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .adm{min-width:0;font-size:11px}
   .back{width:38px;height:38px}
   .center h2{font-size:clamp(24px,8vw,34px);padding-right:var(--s3);padding-left:var(--s3)}
-  .logo{width:104px;height:104px}
+  .logo{width:234px;height:234px}
   .form{grid-template-columns:minmax(0,1fr);gap:var(--s2);width:min(100%,360px);text-align:left}
   .id{gap:var(--s3)}
   .avatar.lg{width:80px;height:80px;font-size:26px}
@@ -1210,7 +1223,7 @@ export default function App({ profile, admin, signOut }) {
 
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
-    <div className="app"><style>{CSS}</style><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
+    <div className="app"><style>{CSS}{CUTE_CSS}</style><CursorFx /><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
         <button className="link" onClick={() => go("review")}>Requests ({reqs.filter(r => r.status === "pending").length})</button>
         <button className="link" onClick={() => signOut().catch(e => say(e.message))}>Sign out</button>
       </header>
@@ -1219,7 +1232,7 @@ export default function App({ profile, admin, signOut }) {
       {meetingError && ['past', 'meeting', 'mm', 'memberStatus'].includes(p.n) && <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry meetings</button></p>}
       {admin && draftError && <p role="alert">Draft storage: {draftError}</p>}
       {admin && persistedDraft && p.n === "planTask" && <button className="btn alt" onClick={() => openTaskCreator(persistedDraft)}>Resume saved draft</button>}
-      <main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
+      <main className="page-content" key={p.n}>{page}</main>{p.n === "dash" && <Nav />}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
       {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />
