@@ -229,15 +229,9 @@ def insert_extracted_tasks(
         return []
     held_at = datetime.fromisoformat(meetings[0]["held_at"])
     rows = [_task_row(task, meeting_id, held_at, index) for index, task in enumerate(tasks)]
-    try:
-        inserted = db.table("tasks").insert(rows).execute().data
-    except APIError as error:
-        if error.code != UNIQUE_VIOLATION:
-            raise
-        existing = tasks_for_meeting(meeting_id, client=db)
-        if not existing:
-            raise
-        return existing
+    # Upsert so that re-uploading the same audio (same meeting_id, deterministic task IDs)
+    # replaces the old partial extraction with the full new one instead of returning stale data.
+    inserted = db.table("tasks").upsert(rows).execute().data
     return _hydrate(inserted, db)
 
 
