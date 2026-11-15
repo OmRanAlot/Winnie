@@ -5,6 +5,15 @@ migrations, then deploy backend and frontend together. Do not replay already-app
 migrations. This migration adds private proposal and notification tables plus task provenance;
 it does not modify the board roster or send messages when installed.
 
+Production planning images must install the `agents` extra; the Dockerfile now does so
+and checks that the Gemini LangChain provider imports during the build. For Gemini
+planning keep `WINNIE_PLANNING_MODE=deepagents` and an accessible
+`WINNIE_PLANNING_MODEL=google_genai:<model-id>`. The deployed image does not include local
+private planning history; AI mode can draft from the idea with an explicit warning.
+Missing provider packages now produce a specific rebuild/deploy error instead of the
+generic context/model/credentials message. Do not switch a working model merely because
+of that packaging error.
+
 ## Administrator flow
 
 1. Open Admin Settings → Plan Event. Generate suggestions or enter an outline manually.

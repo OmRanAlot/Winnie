@@ -79,6 +79,9 @@ class MemoryState(TypedDict, total=False):
     question_task_ids: list[str]
     awaiting_answer: bool
     pending_help_no: int | None
+    focus_request_no: int | None
+    request_choices: list[int]
+    pending_request_action: str | None
 
 
 def memory_graph(saver, max_turns):

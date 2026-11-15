@@ -81,6 +81,39 @@ test('completion queues only dependent owners after every prerequisite; reopen i
  } finally {await db.close();}
 });
 
+test('an unsent nudge can be refreshed after a deadline change, but a sent nudge cannot repeat',async()=>{
+ const db=await setup();
+ try {
+  const t=await task(db); await db.exec("update task_notifications set status='cancelled'");
+  const nudge=async()=> (await db.query("select nudge_task($1,$2,'fall-2026') result",[admin,t.id])).rows[0].result;
+  assert.equal((await nudge()).queued,1);
+  await db.query("update tasks set due_date='2027-02-01' where id=$1",[t.id]);
+  await claim(db); // Cancels the obsolete snapshot before a replacement is requested.
+  assert.equal((await nudge()).queued,1,'refresh the unsent cancelled snapshot');
+  const notice=await claim(db);
+  assert.ok(notice); assert.match(notice.text,/2027-02-01/);
+  await db.query("select finish_task_notification($1,$2,'sent','provider')",[notice.id,notice.claim_token]);
+  await db.query("update tasks set due_date='2027-02-02' where id=$1",[t.id]);
+  assert.equal((await nudge()).already_requested,true);
+  assert.equal(await claim(db),null);
+ } finally {await db.close();}
+});
+
+test('a shared-task nudge queues only opted-in recipients and defers until notification hours',async()=>{
+ const db=await setup();
+ try {
+  const t=await task(db,null,'Ada One and Ada Two');
+  await db.exec("update task_notifications set status='cancelled'; update member_identities set reminders_enabled=false where member_code='TWO'");
+  const queued=(await db.query("select nudge_task($1,$2,'fall-2026') result",[admin,t.id])).rows[0].result;
+  assert.equal(queued.queued,1);
+  const stamp=await midday(db);
+  assert.equal(await claim(db,new Date(stamp.getTime()-12*3600000)),null);
+  const notice=await claim(db,stamp);
+  assert.equal(notice.recipient,'one@example.com');
+  assert.match(notice.text,/Admin nudge/);
+ } finally {await db.close();}
+});
+
 test('overdue scanning uses local dates, daily dedupe and explicit due time; quiet hours defer sends',async()=>{
  const db=await setup();
  try {

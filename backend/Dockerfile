@@ -17,7 +17,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 # Install dependencies separately so source-only changes reuse this layer.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --extra agents --no-install-project
+RUN .venv/bin/python -c "from langchain_google_genai import ChatGoogleGenerativeAI"
 
 COPY app ./app
 COPY --from=photon /usr/local/bin/node /usr/local/bin/node

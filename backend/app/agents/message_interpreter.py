@@ -65,6 +65,10 @@ class GeminiMessageInterpreter:
     def __init__(self, settings):
         self.settings = settings
 
+    def interpret_request(self, text, requests, **context):
+        from app.agents.request_interpreter import interpret_request
+        return interpret_request(self.settings, text, requests, **context)
+
     def interpret(self, text, tasks, *, history=None, focus_task_id=None):
         settings = self.settings
         if not settings.gemini_api_key:

@@ -143,6 +143,10 @@ async def _process_message(message, members, tasks, completions, interpreter, he
                 if reply and reply.startswith(('Saved REQ-', 'Already saved as REQ-')):
                     context.reset_question()
                 return {'reply': reply}
+        if message.conversation_type != 'group':
+            reply = await reassignment_reply(message, members, tasks, reassignments, settings, interpreter, context)
+            if reply is not None:
+                return {'reply': reply}
         if message.conversation_type == "group":
             reply = await group_reply(message, members, tasks, completions, interpreter, help_requests, settings)
             return {"reply": reply}
@@ -155,9 +159,7 @@ async def _process_message(message, members, tasks, completions, interpreter, he
                 context.prompt_tasks(selected[:5])
                 context.focus([selected[0]['id']] if len(selected) == 1 else [])
         else:
-            reply = await reassignment_reply(message, members, tasks, reassignments, settings)
-            if reply is not None and context is not None:
-                context.focus([])  # REQ actions always require their explicit request number.
+            reply = None
             if reply is None and not (context is not None and context.awaiting_answer and not HELP_COMMAND.fullmatch(message.text.strip())):
                 reply = await help_workflow_reply(message, members, tasks, help_requests, settings)
                 command = HELP_COMMAND.fullmatch(message.text.strip())

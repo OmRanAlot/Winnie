@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 class PlanningUnavailable(Exception):
     """Configuration, knowledge or provider prevented a draft."""
 
+    def __init__(self, message, public_message=None):
+        super().__init__(message)
+        self.public_message = public_message
+
 
 def validate_draft(contents, request, examples):
     evidence = {task["evidence_id"] for example in examples for task in example["tasks"]}
@@ -80,7 +84,12 @@ async def create_draft(request: PlanningRequest, *, knowledge_path: Path,
                     else "configuration, context or output")
         logger.error("draft failed (%s): %s", category, type(exc).__name__)
         logger.debug("draft failure detail", exc_info=True)
-        raise PlanningUnavailable("Planning configuration, context or output is invalid.") from exc
+        public = None
+        if isinstance(exc, ImportError):
+            public = "The deployed backend is missing its planning provider package. Rebuild and deploy the updated backend image."
+        elif isinstance(exc, FileNotFoundError):
+            public = "Offline planning history is unavailable. Configure AI planning or restore the server's reviewed planning context."
+        raise PlanningUnavailable("Planning configuration, context or output is invalid.", public) from exc
     except Exception as exc:
         # Provider errors may contain private prompts or credentials; never expose them in HTTP
         # or in logs above DEBUG.

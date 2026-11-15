@@ -1,5 +1,52 @@
 # Event idea to draft task plan
 
+## Deployed website returns HTTP 503
+
+`Planning unavailable. Check local context, model and credentials.` is a backend
+error. Editing the frontend or your laptop's `.env` does not update Cloud Run.
+Check **Cloud Run → api → Logs** for `draft failed` and its exception type.
+
+The production Docker image must install the planning provider. Use:
+
+```dockerfile
+RUN uv sync --frozen --no-dev --extra agents --no-install-project
+RUN .venv/bin/python -c "from langchain_google_genai import ChatGoogleGenerativeAI"
+```
+
+The current Dockerfile contains this correction. Rebuild and deploy that code;
+restarting an old image does not install missing packages. From the repository
+root, with the Google Cloud CLI configured for the deployment project:
+
+```powershell
+gcloud run deploy api --source backend --project hack-princeton-514716 --region us-east1 --update-env-vars WINNIE_PLANNING_MODE=deepagents
+```
+
+Alternatively, push the corrected code through the repository's normal deployment
+workflow and wait for **CI → deploy-backend** to finish successfully.
+
+Under **Cloud Run → api → Edit & deploy new revision → Variables & Secrets**, verify:
+
+- `WINNIE_PLANNING_MODE=deepagents` for AI planning. Offline `mock` mode requires
+  the reviewed history file, which is deliberately absent from the production image.
+- `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is provided as a server secret.
+- `WINNIE_PLANNING_MODEL` names a model enabled for that key, using the
+  `google_genai:<model-id>` format. When it is empty, the draft route uses
+  `GEMINI_MODEL` through the same provider.
+
+Then retry event generation. A healthy `/api/health` response only verifies that
+the API started; it does not verify model access. If generation still fails,
+inspect the new revision's logs rather than copying API keys or private prompts
+into a support message. `ModuleNotFoundError` points to image dependencies;
+`FileNotFoundError` in offline mode points to missing history. Provider access,
+quota, output-validation failures and timeouts need their corresponding diagnosis.
+
+AI planning can proceed without the private history file and labels the plan as
+based on the event idea only. It never silently substitutes mock output for a
+failed model request. Do not upload local recordings or all of `backend/data/`
+to solve a missing-context error.
+
+See [Cloud Run runtime environment settings](https://docs.cloud.google.com/run/docs/configuring/services/environment-variables).
+
 `POST /api/planning/drafts` accepts an idea, event name/type, date and optional
 format (`gbm`, `technical_workshop`, `hackathon`, `other`). It returns draft tasks,
 suggested roles, date-only deadlines, dependencies, source evidence and open questions.
