@@ -17,7 +17,7 @@ from httpx import HTTPError
 from postgrest.exceptions import APIError
 
 from app.db import repository
-from app.domain.models import ExtractedTask, Task
+from app.domain.models import ExtractedTask, Task, TaskDependency
 from app.integrations.supabase import StorageUnavailable, create_task_client
 from app.integrations.supabase_client import SupabaseNotConfigured
 from app.schemas.api import TaskView
@@ -84,6 +84,10 @@ def list_task_views(
 
 def set_status(task_id: str, status: str) -> TaskView:
     return to_view(repository.update_task_status(task_id, status))
+
+
+def add_dependencies(edges: list[tuple[str, str]]) -> list[TaskDependency]:
+    return repository.add_dependencies(edges)
 
 
 # --- Task records (TaskStore, uuid-backed) ----------------------------------

@@ -371,3 +371,40 @@ def add_dependency(task_id: str, depends_on_id: str, client: Client | None = Non
             raise
     logger.info("Task %s now waits on task %s", task_id, depends_on_id)
     return edge
+
+
+def add_dependencies(
+    pairs: Iterable[tuple[str, str]], client: Client | None = None
+) -> list[TaskDependency]:
+    """Atomically validate and persist a batch of new dependency edges."""
+    requested = [TaskDependency(task_id=task_id, depends_on_id=depends_on_id)
+                 for task_id, depends_on_id in pairs]
+    if not requested:
+        return []
+
+    db = _db(client)
+    task_ids = sorted({edge.task_id for edge in requested} | {edge.depends_on_id for edge in requested})
+    found = db.table("tasks").select("id").in_("id", task_ids).execute().data
+    if len(found) != len(task_ids):
+        found_ids = {row["id"] for row in found}
+        missing = next(task_id for task_id in task_ids if task_id not in found_ids)
+        raise NotFound(f"Task {missing} does not exist.")
+
+    rows = db.table("task_dependencies").select("task_id,depends_on_id").execute().data
+    graph = {(row["task_id"], row["depends_on_id"]) for row in rows}
+    added = []
+    for edge in requested:
+        pair = (edge.task_id, edge.depends_on_id)
+        if pair in graph:
+            continue
+        if would_create_cycle(graph, edge.task_id, edge.depends_on_id):
+            raise ValueError(
+                f"Task {edge.task_id} waiting on {edge.depends_on_id} would create a dependency cycle."
+            )
+        graph.add(pair)
+        added.append(edge)
+
+    if added:
+        db.table("task_dependencies").insert([edge.model_dump() for edge in added]).execute()
+        logger.info("Added %s task dependency links", len(added))
+    return added

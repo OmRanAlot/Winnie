@@ -103,6 +103,32 @@ class TaskUpdate(BaseModel):
         return self
 
 
+class TaskDependencyEdge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: UUID
+    depends_on_id: UUID
+
+    @model_validator(mode="after")
+    def reject_self_dependency(self):
+        if self.task_id == self.depends_on_id:
+            raise ValueError("A task cannot depend on itself.")
+        return self
+
+
+class TaskDependencyBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edges: list[TaskDependencyEdge] = Field(min_length=1, max_length=250)
+
+    @model_validator(mode="after")
+    def reject_duplicate_edges(self):
+        pairs = [(edge.task_id, edge.depends_on_id) for edge in self.edges]
+        if len(set(pairs)) != len(pairs):
+            raise ValueError("Dependency edges must be unique.")
+        return self
+
+
 class StoredTask(TaskCreate):
     completed_at: datetime | None = None
     original_assignee_code: StakeholderCode | None = None

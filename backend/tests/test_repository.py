@@ -287,6 +287,17 @@ def test_add_dependency_unknown_task(db):
         repo.add_dependency(a.id, "00000000-0000-4000-8000-000000000999", client=db)
 
 
+def test_add_dependencies_is_idempotent_and_rejects_cyclic_batch(db):
+    a, b, c = seed_three(db)
+    added = repo.add_dependencies([(a.id, b.id), (b.id, c.id)], client=db)
+    assert [(edge.task_id, edge.depends_on_id) for edge in added] == [(a.id, b.id), (b.id, c.id)]
+    assert repo.add_dependencies([(a.id, b.id), (b.id, c.id)], client=db) == []
+
+    with pytest.raises(ValueError, match="cycle"):
+        repo.add_dependencies([(c.id, a.id)], client=db)
+    assert len(db.tables["task_dependencies"]) == 2
+
+
 def test_would_create_cycle():
     edges = [(1, 2), (2, 3)]
     assert repo.would_create_cycle(edges, task_id=3, depends_on_id=1)

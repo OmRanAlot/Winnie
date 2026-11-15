@@ -27,6 +27,7 @@ def signed_token(monkeypatch):
 
 @pytest.mark.parametrize("path,method", [
     ("/api/tasks", "get"), ("/api/tasks/records", "get"), ("/api/members", "get"),
+    ("/api/tasks/records/dependencies", "post"),
     ("/api/recordings", "post"), ("/api/meetings/ingest", "post"),
     ("/api/assign_task_from_gemini", "post"), ("/api/planning/drafts", "post"),
     ("/api/help-requests", "get"), ("/api/auth/me", "get"),
@@ -55,6 +56,9 @@ def test_me_uses_private_profile_and_does_not_trust_user_metadata(signed_token):
         assert profile["role"] == "Treasurer" and profile["is_admin"] is False
         assert client.get("/api/help-requests", headers=signed_token).status_code == 403
         assert client.delete(f"/api/tasks/records/{USER_ID}", headers=signed_token).status_code == 403
+        assert client.post("/api/tasks/records/dependencies", headers=signed_token, json={"edges": [
+            {"task_id": USER_ID, "depends_on_id": "22222222-2222-4222-8222-222222222222"},
+        ]}).status_code == 403
         assert client.post(f"/api/planning/runs/{USER_ID}/review", headers=signed_token,
                            json={"decision": "approve", "expected_revision": "0" * 64}).status_code == 403
 
