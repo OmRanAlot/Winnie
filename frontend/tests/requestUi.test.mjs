@@ -30,6 +30,7 @@ await build({
         export const getAssignments = () => Promise.resolve({byTask: {task1: [globalThis.__dashboard.tasks[0].ownerCode]}});
         export const weekStart = () => new Date('2026-11-09T00:00:00');
         export const getCandidates = () => Promise.resolve([]);
+        export const getEventLabels = () => Promise.resolve({});
         export const updateTaskStatus = () => Promise.resolve();
         export const reviewHelpRequests = () => Promise.resolve([]);
         export const decideHelpRequest = () => Promise.resolve({reply: 'Reviewed'});
