@@ -24,8 +24,13 @@ MEETING_AT = datetime(2026, 11, 13, 18, 0, tzinfo=NEW_YORK)
 
 @pytest.fixture
 def db(monkeypatch) -> FakeClient:
+    from app.routes.tasks import get_task_store
+    from app.services.tasks import TaskStore
+
     fake = FakeClient()
+    fake.postgrest = SimpleNamespace(session=SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(repository, "get_client", lambda: fake)
+    monkeypatch.setitem(app.dependency_overrides, get_task_store, lambda: TaskStore(lambda: fake))
     return fake
 
 
@@ -90,13 +95,12 @@ def test_patch_status_errors(client, db):
 
 
 def test_record_api_and_timeline_share_ingested_uuid_tasks(client, db):
-    from app.routes.tasks import authorize_tasks, get_task_store
+    from app.routes.tasks import get_task_store
     from app.services.tasks import TaskStore
 
     seed(db)
     db.postgrest = SimpleNamespace(session=SimpleNamespace(close=lambda: None))
     app.dependency_overrides[get_task_store] = lambda: TaskStore(lambda: db)
-    app.dependency_overrides[authorize_tasks] = lambda: None
     try:
         response = client.get("/api/tasks/records", params={"limit": 1})
         assert response.status_code == 200
@@ -112,7 +116,6 @@ def test_record_api_and_timeline_share_ingested_uuid_tasks(client, db):
         assert client.get(f"/api/tasks/records/{task_id}").json()["data"]["status"] == "done"
     finally:
         app.dependency_overrides.pop(get_task_store, None)
-        app.dependency_overrides.pop(authorize_tasks, None)
 
 
 def test_unconfigured_store_returns_503(client, monkeypatch):

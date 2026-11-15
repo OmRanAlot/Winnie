@@ -663,7 +663,9 @@ export default function App({ profile, admin, signOut }) {
       refresh().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); }
   };
+  const canEditTask = (t) => admin || (!!profile.member_code && owns(t, profile.member_code));
   const changeStatus = async (t, status) => {
+    if (!canEditTask(t)) return;
     if (statusLocks.current.has(t.id)) return;
     if (!live) { setStatusFeedback({error:true,text:'Reconnect and refresh before saving changes.'}); return; }
     statusLocks.current.add(t.id);
@@ -797,6 +799,7 @@ export default function App({ profile, admin, signOut }) {
     finally { setSavingEventPlan(false); }
   };
   const saveNotes = async (t) => {
+    if (!canEditTask(t)) return;
     if (noteSaving) return;
     setNoteSaving(t.id);
     try {
@@ -893,10 +896,10 @@ export default function App({ profile, admin, signOut }) {
             {isAdminView && <Avatar p={who(t)} cls="sm" onClick={() => t.assignee && go("profile", { id: t.assignee })} />}
             <button className="pill due-task" title={t.title} onClick={() => go("task", { id: t.id })}>{t.title}</button>
             {t.status === "Upcoming"
-              ? <button className="btn alt status-action" disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>{statusSaving[t.id] ? 'Saving…' : 'Start'}</button>
+              ? <button className="btn alt status-action" disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} aria-label={`Start ${t.title}`} onClick={() => setTaskStatus(t.id, "In-Progress")}>{statusSaving[t.id] ? 'Saving…' : 'Start'}</button>
               : <button type="button" role="switch" className={`status-switch ${t.status === "Completed" ? "on" : ""}`}
                 aria-checked={t.status === "Completed"}
-                disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]}
+                disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]}
                 title={t.status === 'Completed' ? 'Mark this task in progress' : 'Mark this task completed'}
                 aria-label={`Mark ${t.title} ${t.status === "Completed" ? "in progress" : "completed"}`}
                 onClick={() => setTaskStatus(t.id, t.status === "Completed" ? "In-Progress" : "Completed")}>
@@ -982,9 +985,9 @@ export default function App({ profile, admin, signOut }) {
             </select>
           </label>}
           <div className="form task-form" style={{ textAlign: "left", fontSize: 18 }}>
-          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} disabled={!live || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
-        <div className="panel"><h3>Description</h3><p style={{whiteSpace:"pre-wrap"}}>{t.description || "No description recorded."}</p><h3>Board notes</h3><textarea className="field" style={{ minHeight: 200 }} maxLength={10000} placeholder="Add a task note visible to the board…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
-          <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" disabled={noteSaving === t.id} onClick={() => saveNotes(t)}>Save notes</button></div></div></div></>);
+          {rows.map(([k, v]) => [<span className="lbl" key={k}>{k}:</span>, k === "Status" ? <select key="s" className="field" value={v} disabled={!live || !canEditTask(t) || !!statusSaving[t.id]} aria-busy={!!statusSaving[t.id]} onChange={(e) => changeStatus(t, e.target.value)}>{Object.keys(COLORS).map((s) => <option key={s}>{s}</option>)}</select> : <span key={k + 1}>{v}</span>])}</div></div>
+        <div className="panel"><h3>Description</h3><p style={{whiteSpace:"pre-wrap"}}>{t.description || "No description recorded."}</p><h3>Board notes</h3><textarea className="field" style={{ minHeight: 200 }} maxLength={10000} readOnly={!canEditTask(t)} placeholder="Add a task note visible to the board…" value={notes[t.id] ?? t.notes} onChange={(e) => setNotes({ ...notes, [t.id]: e.target.value })} />
+          <div style={{ textAlign: "center", marginTop: 12 }}><button className="btn" disabled={!live || !canEditTask(t) || noteSaving === t.id} onClick={() => saveNotes(t)}>Save notes</button></div></div></div></>);
       break;
     }
     case "tasks": {
