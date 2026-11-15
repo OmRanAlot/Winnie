@@ -462,8 +462,12 @@ export default function App({ profile, admin, signOut }) {
   const [savingEventPlan, setSavingEventPlan] = useState(false);
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [planError, setPlanError] = useState("");
-  const [eventPlanError, setEventPlanError] = useState("");
-  const [reqs, setReqs] = useState([]);
+  const [storedReqs, setReqs] = useState([]);
+  const [reviewingRequestId, setReviewingRequestId] = useState(null);
+  const reqs = storedReqs.filter(r => r.id !== reviewingRequestId);
+  const [persistedDraft, setPersistedDraft] = useState(null);
+  const [draftError, setDraftError] = useState("");
+  const [draftSaving, setDraftSaving] = useState(false);
   const [noteSaving, setNoteSaving] = useState(null);
   const [MEETINGS, setMeetings] = useState([]);
   const [meetingError, setMeetingError] = useState('');
@@ -549,15 +553,19 @@ export default function App({ profile, admin, signOut }) {
   const decideRequest = async (r, decision) => {
     if (mutationLock.current || !admin) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
+    setReviewingRequestId(r.id);
     try {
       await requestsStore.review(r.id, decision);
+      // Discard refreshes started before the decision was saved.
+      ++refreshVersion.current;
+      setReqs(current => current.map(request => request.id === r.id ? { ...request, status: decision } : request));
       setCands({});
       say(decision === "approved" ? "Approved ? task assignment saved" : "Request denied");
       try { await refresh(); } catch { say("Decision saved. Refresh failed; please retry."); }
     } catch (e) {
       setRequestError(e.message);
       refresh().catch(() => {});
-    } finally { mutationLock.current = false; setRequestBusy(false); }
+    } finally { mutationLock.current = false; setRequestBusy(false); setReviewingRequestId(null); }
   };
   const changeStatus = async (t, status) => {
     if (!live) { say("Reconnect and refresh before saving changes"); return; }
@@ -1210,10 +1218,10 @@ export default function App({ profile, admin, signOut }) {
         <button className="link" onClick={() => go("review")}>Requests ({reqs.filter(r => r.status === "pending").length})</button>
         <button className="link" onClick={() => signOut().catch(e => say(e.message))}>Sign out</button>
       </header>
-      {dataError && <div role="alert">Could not refresh Supabase data: {dataError} <button onClick={() => refresh().catch(() => {})}>Retry</button></div>}
       {loading && <p role="status">Loading tasks and requests?</p>}
       {meetingError && ['past', 'meeting', 'mm', 'memberStatus'].includes(p.n) && <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry meetings</button></p>}
-      <main className="page-content" key={p.n}>{page}</main>{p.n === "dash" && <Nav />}
+      {admin && persistedDraft && p.n === "planTask" && <button className="btn alt" onClick={() => openTaskCreator(persistedDraft)}>Resume saved draft</button>}
+      <main className="page-content">{page}</main>{p.n === "dash" && <Nav />}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}
       {modal?.reassign && (<div className="modal"><div className="box">Request to reassign “{modal.reassign[0].title}” to {modal.reassign[1].name}?<br />

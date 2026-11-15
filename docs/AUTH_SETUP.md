@@ -3,6 +3,30 @@
 For the completed invitation/login flow and remaining hosted setup, follow
 [authentication finalization](AUTH_FINALIZATION.md). The sections below document
 the earlier profile and roster implementation.
+## Session expiry and production verification
+
+The browser client persists the session and enables Supabase's automatic token
+refresh. `frontend/src/lib/sessionFetch.js` also recovers a PostgREST 401 whose
+message is `JWT expired` (PGRST301/PGRST303): it reuses an already refreshed token
+or refreshes once, then retries the rejected request once. Concurrent failures
+share recovery. Auth requests, permission failures, network errors, and other
+JWT errors are not replayed. Expired JWT rejection occurs before RPC execution.
+If the refresh token is revoked/expired, Supabase ends the session and the
+existing auth listener returns the user to login; a transient refresh failure
+does not force sign-out.
+
+Deploy the frontend build for this change; no database migration or longer JWT
+lifetime is required. To verify against production, sign in, leave the tab idle
+past access-token expiry, return, and load the profile/request list. Confirm
+requests succeed with the refreshed token. Also verify signing out returns to
+login. Do not copy tokens into logs or bug reports.
+
+If 401s persist, inspect the failing URL and response code/message. A failure on
+`/auth/v1/token` needs Auth logs and session-policy investigation; `JWT issued at
+future` is a different clock/version issue. Backend `/api` requests use separate
+server credentials and are not handled by the browser session recovery.
+The automated tests simulate expiry with the installed Supabase SDK and a fake
+HTTP transport; they do not validate the deployed project's Auth configuration.
 
 ## WiCS roster and consent
 
