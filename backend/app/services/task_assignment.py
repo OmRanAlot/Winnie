@@ -26,7 +26,7 @@ import httpx
 from fastapi import APIRouter, Depends
 from google import genai
 from google.genai import errors, types
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter
 
 from app.core.settings import Settings
 from app.domain.models import ExtractedTask
@@ -236,9 +236,9 @@ def get_settings() -> Settings:
 
 
 @lru_cache
-def gemini_client(api_key: str) -> genai.Client:
+def gemini_client(api_key: str | SecretStr) -> genai.Client:
     return genai.Client(
-        api_key=api_key,
+        api_key=api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key,
         http_options=types.HttpOptions(
             timeout=GEMINI_TIMEOUT_MS,
             retry_options=types.HttpRetryOptions(attempts=GEMINI_ATTEMPTS),

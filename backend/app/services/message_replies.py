@@ -6,8 +6,23 @@ MENU = (
     "Hi! I am Winnie. Choose an option:\n"
     "1. Show my five earliest-due unfinished tasks\n"
     "2. Check who I am linked to\n"
-    "You can also text tasks, whoami, or ping."
+    "You can also text tasks, whoami, ping, or describe a task you finished."
 )
+
+
+def verified_personal_tasks(candidates, aliases, member_code):
+    selected, unresolved = [], False
+    for task in candidates:
+        assigned = ({task["owner_code"]} if task.get("owner_code")
+                    else assignment_members(task.get("assignee_text", ""), aliases))
+        if assigned is None:
+            unresolved = True
+        elif member_code in assigned:
+            selected.append(task)
+    selected.sort(key=lambda task: (
+        task.get("due_date") is None, task.get("due_date") or "", str(task.get("id", "")),
+    ))
+    return selected, unresolved
 
 
 def personal_reply(message, members, tasks, semester_code: str) -> str:
@@ -27,23 +42,13 @@ def personal_reply(message, members, tasks, semester_code: str) -> str:
     if not member:
         return "Your messaging account is not linked yet. Text whoami for setup details."
     aliases = members.aliases(semester_code)
-    selected, unresolved = [], False
-    for task in tasks.unfinished_for_semester(semester_code):
-        try:
-            assigned = (
-                {task["owner_code"]} if task.get("owner_code")
-                else assignment_members(task.get("assignee_text", ""), aliases)
-            )
-        except AliasConflict:
-            return "Member assignment setup needs review. Please contact the project admin."
-        if assigned is None:
-            unresolved = True
-        elif member["code"] in assigned:
-            selected.append(task)
-    # Sort again for deterministic results even if a test/store adapter returns unsorted data.
-    selected.sort(key=lambda task: (
-        task.get("due_date") is None, task.get("due_date") or "", str(task.get("id", "")),
-    ))
+    try:
+        selected, unresolved = verified_personal_tasks(
+            tasks.unfinished_for_semester(semester_code), aliases, member["code"],
+        )
+    except AliasConflict:
+        return "Member assignment setup needs review. Please contact the project admin."
+
     if not selected:
         reply = f"No unfinished tasks matched your verified assignments for {semester_code}."
     else:
@@ -54,7 +59,8 @@ def personal_reply(message, members, tasks, semester_code: str) -> str:
             if len(title) > 160:
                 title = title[:157] + "..."
             status = task["status"].replace("_", " ")
-            lines.append(f"{number}. {title} - {deadline} [{status}]")
+            code = f" ({task['task_code']})" if task.get("task_code") else ""
+            lines.append(f"{number}. {title} - {deadline} [{status}]{code}")
         reply = "\n".join(lines)
     if unresolved:
         reply += "\nSome tracker assignments still need member mapping; this list may be incomplete."

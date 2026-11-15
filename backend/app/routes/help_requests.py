@@ -1,30 +1,25 @@
 """Admin decisions require a configured key even in development; texts use verified admin identities."""
 
-from secrets import compare_digest
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.auth import require_admin
 from app.core.settings import Settings
 from app.integrations.help_requests import HelpRequestStore
 from app.integrations.supabase import StorageUnavailable
+from app.routes.reminders import authorize_reminder_bridge
 from app.services.help_workflow import decide_request
 from app.services.members import MemberStore
 from app.services.tasks import TaskStore
 
-
-def authorize_admin(x_winnie_api_key: str = Header(default="")):
-    expected = Settings().help_admin_api_key.get_secret_value()
-    if not expected:
-        raise HTTPException(503, "Configure WINNIE_HELP_ADMIN_API_KEY for admin approvals.")
-    if not compare_digest(expected.encode(), x_winnie_api_key.encode()):
-        raise HTTPException(401, "Invalid admin credentials.")
+authorize_admin = require_admin
 
 
 router = APIRouter(prefix="/api/help-requests", tags=["help-requests"], dependencies=[Depends(authorize_admin)])
-internal = APIRouter(prefix="/api/internal/help", tags=["internal-help"], dependencies=[Depends(authorize_admin)])
+internal = APIRouter(prefix="/api/internal/help", tags=["internal-help"], dependencies=[Depends(authorize_reminder_bridge)])
 
 
 def get_help_store():

@@ -59,7 +59,7 @@ SKILLS = {"AVERY": {"technical": [{"skill": "budgeting", "evidence": "Money"}],
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, signed_in_member):
     # Never read the developer's real backend/data/member_skills.json in tests.
     monkeypatch.setattr(route, "load_skills", lambda: SKILLS)
     monkeypatch.setattr(route, "load_previous_roles", dict)

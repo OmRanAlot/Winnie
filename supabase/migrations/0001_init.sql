@@ -1,3 +1,11 @@
+-- Historical bootstrap: skip on databases already using the canonical UUID schema.
+-- Numeric tasks created here are preserved and upgraded by the following migrations.
+do $bootstrap$
+begin
+    if to_regclass('public.tasks') is not null then
+        return;
+    end if;
+    execute $legacy$
 -- Winnie task store: seats, people, meetings, tasks and task dependencies.
 -- Apply with `supabase db push` (from the repo root) or paste into the Supabase SQL editor.
 -- The backend talks to these tables with the service-role key (bypasses RLS). RLS is on with no
@@ -80,3 +88,7 @@ alter table public.people            enable row level security;
 alter table public.meetings          enable row level security;
 alter table public.tasks             enable row level security;
 alter table public.task_dependencies enable row level security;
+
+$legacy$;
+end;
+$bootstrap$;

@@ -9,6 +9,10 @@ The website's Supabase Auth login is separate. Logging into the website does not
 automatically link an iMessage account, and no frontend login files are changed by
 this feature. A later onboarding flow can connect both identities to the same person.
 
+For Gemini interpretation of completion updates and the new receipt migration, see
+[task conversations](MESSAGE_CONVERSATIONS.md). Exact list/identity commands still
+work without enabling the model.
+
 ## 1. Create the member tables
 
 After both task migrations, run the contents of

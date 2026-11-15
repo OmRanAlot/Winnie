@@ -26,6 +26,11 @@ await build({
         export const weekStart = () => new Date('2026-11-09T00:00:00');
         export const getCandidates = () => Promise.resolve([]);
         export const updateTaskStatus = () => Promise.resolve();
+        export const reviewHelpRequests = () => Promise.resolve([]);
+        export const decideHelpRequest = () => Promise.resolve({reply: 'Reviewed'});
+        export const getMeetings = () => Promise.resolve([]);
+        export const createMeeting = () => Promise.resolve({id: 'synthetic-meeting'});
+        export const saveAttendance = () => Promise.resolve();
       ` : args.path.includes('reassignments') ? 'export const reassignmentStore = () => ({list: () => globalThis.__dashboard.list(), review: (...a) => globalThis.__dashboard.review(...a), submit: (...a) => globalThis.__dashboard.submit(...a)});'
         : args.path.includes('supabase') ? 'export const supabase = {};'
         : 'export default function Recorder() { return null; }',
@@ -91,4 +96,27 @@ test('member requests persist and show pending without exposing approval control
     assert.equal(button(renderer, 'Deny'), undefined);
     assert.ok(renderer.root.findAllByType('h2').some(n => text(n) === 'Pending (1)'));
   } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
+});
+
+test('nudge control is admin-only and never claims a reminder was sent', async () => {
+  setup(); let adminRenderer, memberRenderer;
+  try {
+    await act(async () => { adminRenderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(adminRenderer, 'Tasks').props.onClick());
+    const nudge = adminRenderer.root.findAllByType('button').find(b => b.props['aria-label'] === 'Nudge assignee for Database task');
+    assert.ok(nudge);
+    assert.equal(nudge.props.disabled, false);
+    await act(async () => nudge.props.onClick({ stopPropagation() {} }));
+    assert.ok(adminRenderer.root.findAllByProps({ role: 'status' }).some(n =>
+      text(n).includes('no reminder was sent'),
+    ));
+
+    await act(async () => { memberRenderer = TestRenderer.create(React.createElement(App, { profile, admin: false, signOut() {} })); });
+    await act(async () => button(memberRenderer, 'Tasks').props.onClick());
+    assert.equal(memberRenderer.root.findAllByType('button').find(b => b.props['aria-label'] === 'Nudge assignee for Database task'), undefined);
+  } finally {
+    if (adminRenderer) await act(async () => adminRenderer.unmount());
+    if (memberRenderer) await act(async () => memberRenderer.unmount());
+    delete globalThis.window;
+  }
 });

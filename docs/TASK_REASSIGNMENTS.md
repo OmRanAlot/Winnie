@@ -1,6 +1,6 @@
 # Original assignments and reassignment requests
 
-Apply `supabase/migrations/20261114160000_task_original_assignee_and_requests.sql`
+Apply `supabase/migrations/20261114160001_task_original_assignee_and_requests.sql`
 to the existing UUID task store, after the roster/profile migrations. Apply this file
 alone; the older `0001_init.sql` defines a different, incompatible tasks table.
 

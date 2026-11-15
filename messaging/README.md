@@ -45,6 +45,11 @@ one copy of the listener while testing. Stop it with Ctrl+C. Failure logs show t
 stage and HTTP status without printing phone numbers, message text or credentials.
 Personal commands are limited to direct messages; outbound/agent echoes are ignored.
 
+Automatic reminder delivery is optional: follow [the reminder setup](../docs/REMINDERS.md)
+before enabling `REMINDER_POLL_ENABLED=true`. The listener polls the backend's durable
+outbox, sends authorized DMs, and acknowledges provider IDs without retrying a send
+whose outcome is uncertain. Reminders remain off by default.
+
 `npm run dev` restarts the process when source files change. `npm run typecheck`
 checks TypeScript, `npm test` checks sender forwarding, and `npm run build` compiles to `dist/`.
 
