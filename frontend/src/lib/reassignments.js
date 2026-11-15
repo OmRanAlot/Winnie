@@ -39,5 +39,10 @@ export function reassignmentStore(client, { notify = async () => {} } = {}) {
         p_request_id: requestId, p_decision: decision,
       }));
     },
+    archive(requestId, archived = true) {
+      return result(client.rpc('archive_task_reassignment', {
+        p_request_id: requestId, p_archive: archived,
+      }));
+    },
   };
 }
