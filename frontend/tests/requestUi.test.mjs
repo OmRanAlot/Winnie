@@ -445,4 +445,3 @@ test('metrics overview places member names below the chart x-axis', async () => 
     delete globalThis.window;
   }
 });
-});
