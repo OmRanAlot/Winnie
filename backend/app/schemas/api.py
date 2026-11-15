@@ -49,6 +49,14 @@ class Recording(BaseModel):
     transcription: Transcript
     audio: Audio
 
+
+class RecordingAssignmentRequest(BaseModel):
+    """Metadata resent with assignment requests so stateless servers need no local file lookup."""
+
+    title: str = Field(min_length=1, max_length=120)
+    startedAt: datetime
+    transcription: Transcript
+
 class Member(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     email: str = Field(min_length=5, max_length=100)

@@ -83,17 +83,18 @@ export default function Recorder({ kind, onClose, onSaved = async () => {} }) {
     if (!audio.size) { setError("No audio was captured. Check your microphone."); setPhase("error"); return; }
     setPhase("saving");
     try {
-      const saved = await saveRecording({
+      const recording = {
         schemaVersion: 1,
         title: `${kind} meeting ${new Date(started.current).toLocaleDateString()}`,
         startedAt: new Date(started.current).toISOString(),
         durationMs,
         transcription: { language: "en-US", text: text.current, provider: "browser-speech-recognition", status },
         audio: { mimeType: audio.type, encoding: "base64", sizeBytes: audio.size, data: await toBase64(audio) },
-      });
+      };
+      const saved = await saveRecording(recording);
       if (!text.current.trim()) { setNotice("Saved, but no words were transcribed, so there are no tasks to extract."); setPhase("done"); setTasks([]); return; }
       setPhase("assigning");
-      setTasks(await assignRecordingTasks(saved.id));
+      setTasks(await assignRecordingTasks(saved.id, recording));
       try { await onSaved(); } catch { setNotice('Tasks were saved, but the board could not refresh. Please refresh it.'); }
       setPhase("done");
     } catch (e) {

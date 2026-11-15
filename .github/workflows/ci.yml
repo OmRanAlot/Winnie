@@ -107,10 +107,39 @@ jobs:
       - name: Build the backend image (not pushed)
         run: docker build --tag winnie-api:ci backend
 
+  deploy-changes:
+    name: detect-deploy-changes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Detect changed deploy targets
+        id: filter
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if git diff --name-only "$BEFORE" "$AFTER" -- backend | grep -q .; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+          if git diff --name-only "$BEFORE" "$AFTER" -- frontend | grep -q .; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy-backend:
     name: deploy-backend
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
-    needs: [backend, frontend, messaging, photon-send, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && needs.deploy-changes.outputs.backend == 'true'
+    needs: [backend, frontend, messaging, photon-send, docker-build, deploy-changes]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
@@ -141,8 +170,8 @@ jobs:
 
   deploy-frontend:
     name: deploy-frontend
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
-    needs: [deploy-backend]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && needs.deploy-changes.outputs.frontend == 'true' && needs.backend.result == 'success' && needs.frontend.result == 'success' && needs.messaging.result == 'success' && needs.photon-send.result == 'success' && needs.docker-build.result == 'success' && (needs.deploy-backend.result == 'success' || needs.deploy-backend.result == 'skipped')
+    needs: [backend, frontend, messaging, photon-send, docker-build, deploy-changes, deploy-backend]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production

@@ -17,6 +17,7 @@ from pathlib import Path
 from starlette.concurrency import run_in_threadpool
 
 from app.domain.models import ExtractedTask
+from app.schemas.api import RecordingAssignmentRequest
 from app.services import recordings, task_assignment
 from app.services import tasks as task_service
 
@@ -25,10 +26,17 @@ logger = logging.getLogger(__name__)
 EXAMPLE_TRANSCRIPT = Path(__file__).resolve().parents[2] / "data" / "example_transcript.json"
 
 
-async def assign_for_recording(recording_id, settings):
-    recording = await run_in_threadpool(recordings.load_recording, recording_id)
+async def assign_for_recording(recording_id, settings, request: RecordingAssignmentRequest | None = None):
+    # Cloud Run instances are stateless: the request carries the validated transcript metadata
+    # from the upload, avoiding a second request's dependence on the same local filesystem.
+    if request is None:
+        recording = await run_in_threadpool(recordings.load_recording, recording_id)
+        transcript = recording.transcription.text
+        held_at, title = recording.startedAt, recording.title
+    else:
+        transcript = request.transcription.text
+        held_at, title = request.startedAt, request.title
     source = settings.task_transcript_source
-    transcript = recording.transcription.text
     if source == "example":
         logger.info("Using the example transcript instead of recording %s", recording_id)
         transcript = EXAMPLE_TRANSCRIPT.read_text(encoding="utf-8")
@@ -43,7 +51,7 @@ async def assign_for_recording(recording_id, settings):
     try:
         stored = await run_in_threadpool(
             task_service.store_meeting_tasks,
-            recording_id, recording.startedAt, recording.title, transcript, assignments,
+            recording_id, held_at, title, transcript, assignments,
         )
     except task_service.STORAGE_ERRORS:
         logger.exception("Could not store %d tasks for %s in Supabase", len(assignments), recording_id)

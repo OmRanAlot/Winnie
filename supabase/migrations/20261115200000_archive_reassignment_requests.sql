@@ -16,75 +16,98 @@ add constraint task_reassignment_archive_state check (
 -- Preserve the existing review lock while allowing an admin to change only archive metadata.
 create or replace function public.guard_task_reassignment_request() returns trigger
 language plpgsql set search_path = '' as $$
-declare
-    task_row public.tasks%rowtype;
-    proposed_name text;
+declare t public.tasks; proposed_name text;
 begin
-    if tg_op = 'INSERT' then
-        if new.status <> 'pending' then raise exception 'New requests must be pending'; end if;
-        select * into strict task_row from public.tasks where id = new.task_id for update;
-        if task_row.status = 'done' then raise exception 'Completed tasks cannot be reassigned'; end if;
-        if not exists (select 1 from public.members where code = new.requester_code and active) then
-            raise exception 'Requester must be an active member';
+    if tg_op='INSERT' then
+        if new.status<>'pending' or new.admin_decision<>'pending' or new.recipient_decision<>'pending'
+          or new.reviewed_by_profile_id is not null or new.responded_by_profile_id is not null
+          or new.reviewed_at is not null or new.responded_at is not null or new.handoff_completed_at is not null
+          or new.archived_at is not null or new.archived_by_profile_id is not null then
+            raise exception 'New requests must await admin review';
         end if;
-        if not exists (select 1 from public.members where code = new.proposed_assignee_code and active) then
-            raise exception 'Proposed assignee must be an active member';
+        select * into strict t from public.tasks where id=new.task_id for update;
+        if t.status='done' then raise exception 'Completed tasks cannot be reassigned'; end if;
+        if not exists(select 1 from public.members where code=new.requester_code and active)
+          or not exists(select 1 from public.members where code=new.proposed_assignee_code and active) then
+            raise exception 'Requester and proposed assignee must be active';
         end if;
-        if new.proposed_assignee_code = task_row.owner_code then
-            raise exception 'Proposed assignee already owns the task';
-        end if;
-        new.previous_owner_code := task_row.owner_code;
-        new.previous_assignee_text := task_row.assignee_text;
-        new.created_at := now();
+        if new.proposed_assignee_code=t.owner_code then raise exception 'Proposed assignee already owns the task'; end if;
+        new.previous_owner_code:=t.owner_code; new.previous_assignee_text:=t.assignee_text;
+        new.initiated_by_profile_id:=auth.uid(); new.created_at:=now();
     else
-        if old.status <> 'pending' then
-            if new.status = old.status and new.archived_at is distinct from old.archived_at
-               and row(new.task_id, new.requester_code, new.proposed_assignee_code, new.reason,
-                   new.previous_owner_code, new.previous_assignee_text, new.recipient_decision,
-                   new.responded_by_profile_id, new.responded_at, new.reviewed_by_profile_id,
-                   new.reviewed_at, new.review_note, new.request_no, new.archived_by_profile_id)
-                   is not distinct from row(old.task_id, old.requester_code, old.proposed_assignee_code,
-                   old.reason, old.previous_owner_code, old.previous_assignee_text,
-                   old.recipient_decision, old.responded_by_profile_id, old.responded_at,
-                   old.reviewed_by_profile_id, old.reviewed_at, old.review_note, old.request_no,
-                   old.archived_by_profile_id)
-               and exists (select 1 from public.profiles where id = auth.uid() and is_admin) then
-                new.archived_by_profile_id := case when new.archived_at is null then null else auth.uid() end;
-                new.updated_at := now();
-                return new;
+        if new.archived_at is distinct from old.archived_at then
+            if old.status not in ('approved','rejected','declined')
+              or row(new.status,new.task_id,new.requester_code,new.proposed_assignee_code,new.reason,
+                new.previous_owner_code,new.previous_assignee_text,new.recipient_decision,
+                new.responded_by_profile_id,new.responded_at,new.reviewed_by_profile_id,new.reviewed_at,
+                new.review_note,new.request_no,new.initiated_by_profile_id,new.admin_decision,
+                new.handoff_completed_at,new.legacy_recipient_response)
+                is distinct from row(old.status,old.task_id,old.requester_code,old.proposed_assignee_code,
+                old.reason,old.previous_owner_code,old.previous_assignee_text,old.recipient_decision,
+                old.responded_by_profile_id,old.responded_at,old.reviewed_by_profile_id,old.reviewed_at,
+                old.review_note,old.request_no,old.initiated_by_profile_id,old.admin_decision,
+                old.handoff_completed_at,old.legacy_recipient_response)
+              or not exists(select 1 from public.profiles where id=auth.uid() and is_admin) then
+                raise exception 'Only admins can archive resolved requests';
             end if;
-            raise exception 'Request has already been reviewed';
+            new.archived_by_profile_id:=case when new.archived_at is null then null else auth.uid() end;
+            new.updated_at:=now();
+            return new;
         end if;
-        if row(new.task_id, new.requester_code, new.proposed_assignee_code, new.reason,
-               new.previous_owner_code, new.previous_assignee_text)
-           is distinct from row(old.task_id, old.requester_code, old.proposed_assignee_code,
-               old.reason, old.previous_owner_code, old.previous_assignee_text) then
+        if old.status<>'pending' then raise exception 'Request has already been reviewed'; end if;
+        if row(new.task_id,new.requester_code,new.proposed_assignee_code,new.reason,new.previous_owner_code,
+          new.previous_assignee_text,new.initiated_by_profile_id,new.legacy_recipient_response)
+          is distinct from row(old.task_id,old.requester_code,old.proposed_assignee_code,old.reason,
+          old.previous_owner_code,old.previous_assignee_text,old.initiated_by_profile_id,old.legacy_recipient_response) then
             raise exception 'Submitted request details cannot be changed';
         end if;
-        new.created_at := old.created_at;
-        if new.status in ('approved', 'rejected') then
-            if not exists (
-                select 1 from public.profiles p left join public.members m on m.code = p.member_code
-                where p.id = new.reviewed_by_profile_id and (p.is_admin or
-                    (m.active and lower(trim(m.board_role)) in ('president', 'vice president')))
-            ) then raise exception 'Only the president, VP, or an admin can review requests'; end if;
-            new.reviewed_at := now();
-        end if;
-        if new.status = 'approved' then
-            select * into strict task_row from public.tasks where id = new.task_id for update;
-            if task_row.status = 'done' then raise exception 'Completed tasks cannot be reassigned'; end if;
-            if row(task_row.owner_code, task_row.assignee_text)
-               is distinct from row(old.previous_owner_code, old.previous_assignee_text) then
-                raise exception 'Task assignment changed; reject this request and submit a new one';
+        new.created_at:=old.created_at;
+        if new.admin_decision is distinct from old.admin_decision then
+            if old.admin_decision<>'pending' or not public.can_review_task_requests()
+              or new.reviewed_by_profile_id is distinct from auth.uid()
+              or new.admin_decision not in ('approved','rejected') or new.recipient_decision<>'pending' then
+                raise exception 'Only an admin can review a pending proposal';
             end if;
-            select display_name into proposed_name from public.members
-                where code = new.proposed_assignee_code and active;
+            new.reviewed_at:=now();
+        elsif row(new.reviewed_by_profile_id,new.reviewed_at,new.review_note) is distinct from
+          row(old.reviewed_by_profile_id,old.reviewed_at,old.review_note) then
+            raise exception 'Administrator review is immutable';
+        end if;
+        if row(new.recipient_decision,new.responded_by_profile_id,new.responded_at) is distinct from
+          row(old.recipient_decision,old.responded_by_profile_id,old.responded_at) then
+            if old.admin_decision<>'approved' then raise exception 'Administrator approval is required before recipient consent'; end if;
+            if old.recipient_decision<>'pending' or public.current_board_member_code() is distinct from old.proposed_assignee_code
+              or new.responded_by_profile_id is distinct from auth.uid()
+              or new.recipient_decision not in ('accepted','denied') then
+                raise exception 'Only the proposed recipient can respond';
+            end if;
+            new.responded_at:=now();
+        end if;
+        if new.status is distinct from (case when new.admin_decision='rejected' then 'rejected'
+          when new.recipient_decision='denied' then 'declined'
+          when new.admin_decision='approved' and new.recipient_decision='accepted' then 'approved' else 'pending' end) then
+            raise exception 'Invalid transfer stage';
+        end if;
+        if new.admin_decision='approved' and (old.admin_decision<>'approved' or new.status='approved') then
+            select * into strict t from public.tasks where id=new.task_id for update;
+            if t.status='done' then raise exception 'Completed tasks cannot be reassigned'; end if;
+            if row(t.owner_code,t.assignee_text) is distinct from row(old.previous_owner_code,old.previous_assignee_text) then
+                raise exception 'Task assignment changed; ask for a new request';
+            end if;
+        end if;
+        if new.status='approved' then
+            select display_name into proposed_name from public.members where code=new.proposed_assignee_code and active;
             if proposed_name is null then raise exception 'Proposed assignee must be active'; end if;
-            update public.tasks set owner_code = new.proposed_assignee_code,
-                assignee_text = proposed_name where id = new.task_id;
+            if not exists(select 1 from public.profiles p join public.members m on m.code=p.member_code
+              where p.id=new.reviewed_by_profile_id and m.active and m.contact_consent and p.password_setup_complete
+              and (p.is_admin or lower(trim(m.board_role)) in ('president','vice president'))) then
+                raise exception 'Administrator approval is no longer authorized';
+            end if;
+            update public.tasks set owner_code=new.proposed_assignee_code,assignee_text=proposed_name where id=new.task_id;
+            new.handoff_completed_at:=now();
         end if;
     end if;
-    new.updated_at := now();
+    new.updated_at:=now();
     return new;
 end;
 $$;

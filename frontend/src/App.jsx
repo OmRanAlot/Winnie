@@ -112,6 +112,24 @@ textarea.field{min-height:110px;resize:vertical}
 .pill{background:var(--surface);border-radius:var(--r);padding:var(--s3) var(--s4);font-size:16px;font-weight:500;border:0;color:var(--ink);text-align:left;font-family:inherit}
 button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .panel{background:var(--surface);border-radius:var(--r);padding:var(--s5)}
+.board-profile{display:flex;flex-direction:column;gap:var(--s4);max-width:1040px;width:100%;margin:0 auto}
+.board-profile-intro{margin:0;text-align:center;color:var(--muted)}
+.board-profile-identity{display:flex;align-items:center;gap:var(--s4);padding:var(--s5);background:var(--surface);border-radius:var(--r);border:1px solid var(--line)}
+.board-profile-avatar{width:72px;height:72px;flex:none;display:grid;place-items:center;border-radius:50%;border:2px solid var(--maroon);box-shadow:3px 3px 0 var(--maroon);background:#f0c9b3;color:var(--maroon);font-size:22px;font-weight:700}
+.board-profile-label{margin:0 0 var(--s1);font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.board-profile-identity h2{margin:0;font-size:26px;line-height:1.25}
+.board-profile-role{margin:var(--s1) 0 0;color:var(--muted);font-size:17px}
+.board-profile-sections{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
+.board-profile-card{min-width:0;padding:var(--s5);background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.board-profile-card h3{margin:0 0 var(--s3);padding-bottom:var(--s2);border-bottom:1px solid var(--line);font-size:19px}
+.board-profile-summary{margin:0 0 var(--s3);line-height:1.65}
+.board-profile-card h4{margin:var(--s3) 0 var(--s2);font-size:15px}
+.board-profile-responsibilities{margin:0;padding-left:20px;line-height:1.7}
+.board-profile-card-wide{grid-column:1/-1}
+.board-profile-tags,.board-profile-list{display:flex;flex-wrap:wrap;gap:var(--s2);margin:0;padding:0;list-style:none}
+.board-profile-tags li,.board-profile-list li{padding:6px 11px;border-radius:999px;background:#f3ebe2;border:1px solid var(--line);font-size:14px;line-height:1.35}
+.board-profile-list{flex-direction:column;align-items:flex-start}
+.board-profile-empty{margin:0;color:var(--muted)}
 .panel h3{margin:0 0 var(--s3);font-size:20px;font-weight:650}
 .panel ul{margin:0;padding-left:var(--s5);line-height:1.9}
 .panel .none,.empty{color:var(--muted);list-style:none;margin-left:calc(var(--s5) * -1)}
@@ -342,6 +360,9 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
   .st{font-size:11px}
   .status-action{padding:var(--s2);font-size:11px}
   .panel{padding:var(--s4)}
+  .board-profile-sections{grid-template-columns:1fr}
+  .board-profile-card-wide{grid-column:auto}
+  .board-profile-identity{padding:var(--s4)}
   .gh,.gr{grid-template-columns:minmax(0,92px) 44px 0 0 0 minmax(0,1fr)}
   .dependency-lines{width:calc(100% - 178px)}
   .gantt{font-size:11px}
@@ -1578,7 +1599,7 @@ export default function App({ profile, admin, signOut }) {
       break;
     }
     case "editlist":
-      page = <Grid title="Board Information" tag description="Board information comes from the approved roster files and is read-only here." onPick={(q) => go("edit", { id: q.id })} />;
+      page = <Grid title="Board Information" tag description="Board information comes from the approved roster files and is read-only here." people={orderProfiles(PEOPLE)} onPick={(q) => go("edit", { id: q.id })} />;
       break;
     case "edit": {
       const q = person(p.id);
