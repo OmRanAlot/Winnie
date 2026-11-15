@@ -24,6 +24,7 @@ from app.routes.tasks import router as tasks_router
 from app.services.task_assignment import router as assign_task_router
 
 settings = Settings()
+settings.check_local_isolation()
 setup_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -45,9 +46,9 @@ app.include_router(planning_router)
 app.include_router(members_router)
 
 logger.info(
-    "Winnie API starting: env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s "
+    "Winnie API starting: mode=%s env=%s log_level=%s transcript_source=%s gemini_key=%s gemini_model=%s "
     "supabase_url=%s supabase_key=%s",
-    settings.environment, settings.log_level, settings.task_transcript_source,
+    settings.mode, settings.environment, settings.log_level, settings.task_transcript_source,
     "set" if settings.gemini_api_key else "MISSING",
     settings.gemini_model,
     "set" if settings.supabase_url else "MISSING",

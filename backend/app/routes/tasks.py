@@ -78,7 +78,7 @@ def authorize_tasks(x_winnie_api_key: str = Header(default="")):
     settings = Settings()
     expected = settings.task_api_key.get_secret_value()
     if not expected:
-        if settings.environment != "development":
+        if not settings.is_local and settings.environment != "development":
             raise HTTPException(503, "Configure WINNIE_TASK_API_KEY before exposing tasks.")
         return
     if not compare_digest(x_winnie_api_key.encode(), expected.encode()):

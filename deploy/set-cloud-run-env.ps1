@@ -72,7 +72,8 @@ foreach ($name in $SecretNames) {
     $secretMounts += "$name=$($name):latest"
 }
 
-$envVars = @()
+# Always pin the deployed service to prod mode (local mode is only for .env.local).
+$envVars = @("WINNIE_MODE=prod")
 $supabaseUrl = Read-Plain "SUPABASE_URL, e.g. https://<ref>.supabase.co (Enter to skip)" $false
 if ($supabaseUrl) { $envVars += "SUPABASE_URL=$supabaseUrl" }
 
