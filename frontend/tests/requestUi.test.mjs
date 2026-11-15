@@ -36,7 +36,7 @@ await build({
         export const getMeetings = () => Promise.resolve([]);
         export const createMeeting = () => Promise.resolve({id: 'synthetic-meeting'});
         export const saveAttendance = () => Promise.resolve();
-        export const getDependencies = () => Promise.resolve([]);
+        export const getDependencies = () => Promise.resolve(globalThis.__dashboard.dependencies ?? []);
         export const getTaskDraft = () => Promise.resolve(null);
         export const saveTaskDraft = form => { globalThis.__dashboard.draft = form; return Promise.resolve(form); };
         export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return Promise.resolve({
@@ -231,6 +231,34 @@ test('generated event plans receive one date and time and save as plans, not tas
     await act(async () => button(renderer, 'Open').props.onClick());
     assert.equal(renderer.root.findAllByProps({ className: 'event-plan-task-toggle' }).length, 2);
   } finally { if (renderer) await act(async () => renderer.unmount()); delete globalThis.window; }
+});
+
+test('linked-task arrows appear for admin and member Gantt views', async () => {
+  for (const admin of [true, false]) {
+    setup();
+    globalThis.__dashboard.tasks = [
+      { id: 'dependent', title: 'Dependent task', status: 'Upcoming', ownerCode: 'MEMBER', dueIso: '2026-11-14', startIso: '2026-11-13', due: '11/14/2026', start: '11/13/2026', finished: '' },
+      { id: 'prerequisite', title: 'Prerequisite task', status: 'Upcoming', ownerCode: 'OTHER', dueIso: '2026-11-12', startIso: '2026-11-10', due: '11/12/2026', start: '11/10/2026', finished: '' },
+    ];
+    globalThis.__dashboard.dependencies = [{ task_id: 'dependent', depends_on_id: 'prerequisite' }];
+    let renderer;
+    try {
+      await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin, signOut() {} })); });
+      assert.equal(renderer.root.findAllByProps({ className: 'dependency-lines' }).length, 0);
+      const linkedTasksToggle = renderer.root.findAllByType('button').find(node => text(node).includes('Show linked tasks'));
+      assert.ok(linkedTasksToggle, 'the linked-task toggle is visible');
+      await act(async () => linkedTasksToggle.props.onClick());
+      const svg = renderer.root.findByProps({ className: 'dependency-lines' });
+      const dependencyPath = svg.findAll(node => node.type === 'path' && node.props.markerEnd);
+      assert.equal(dependencyPath.length, 1);
+      assert.equal(dependencyPath[0].props.markerEnd, 'url(#gantt-dependency-arrowhead)');
+      assert.ok(text(svg).includes('Dependent task depends on Prerequisite task'));
+      assert.equal(renderer.root.findAllByProps({ className: 'gr' }).length, 2);
+    } finally {
+      if (renderer) await act(async () => renderer.unmount());
+      delete globalThis.window;
+    }
+  }
 });
 
 test('nudge control is admin-only and never claims a reminder was sent', async () => {

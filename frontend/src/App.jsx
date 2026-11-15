@@ -236,7 +236,7 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .event-plan-review-notes{display:grid;gap:var(--s3);margin-top:var(--s4)}
 .event-plan-review-notes ul{margin:var(--s2) 0 0;padding-left:var(--s5)}
 .plan-error{max-width:920px;margin:var(--s4) auto 0;padding:var(--s3) var(--s4);background:#f4e3d7;border:1px solid var(--rust);border-radius:var(--r);color:var(--maroon);font-weight:600}
-.dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 510px);pointer-events:none}
+.dependency-lines{position:absolute;top:0;right:10px;width:calc(100% - 510px);overflow:visible;pointer-events:none}
 .app button:not(:disabled),.app .avatar,.app .chart-member rect{transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease,filter .16s ease}
 @media(hover:hover){
   .app button:not(:disabled):hover:not(.back):not(.avatar):not(.bell):not(.chev):not(.rb){transform:translateY(-1px);box-shadow:0 4px 10px rgba(58,20,16,.1)}
@@ -444,10 +444,27 @@ function Gantt({ tasks: all, allTasks = all, isAdminView = false, showAll, onSho
           {!baseTasks.length && <p style={{ textAlign: "center", padding: "18px 0", margin: 0 }}>
             No tasks due {owner ? `for ${owner} ` : ""}this week. Use ◀ ▶ to see other weeks.</p>}
           {showLinkedTasks && (
-            <svg className="dependency-lines" viewBox={`0 0 ${W} ${chartTasks.length * H}`} preserveAspectRatio="none" style={{ height: chartTasks.length * H }}>
-              {chartTasks.flatMap(t => (t.dependsOn || (t.dep ? [t.dep] : [])).filter(id => idx[id] !== undefined).map(id => ({t,id}))).map(({t,id}) => {
-                const a = chartTasks.find(item => item.id === id), x1 = (a.day + a.len) * cw, y1 = idx[a.id] * H + H / 2, x2 = (t.day + 0.1) * cw, y2 = idx[t.id] * H + 9;
-                return <path key={`${t.id}-${id}`} d={`M${x1} ${y1} H${x1 + 8} V${y2 - 4} H${x2} V${y2}`} fill="none" stroke="#4a1109" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />;
+            <svg className="dependency-lines" viewBox={`0 0 ${W} ${chartTasks.length * H}`} preserveAspectRatio="none" role="img"
+              aria-label="Task dependency arrows point from each task to its prerequisite" style={{ height: chartTasks.length * H }}>
+              <defs>
+                <marker id="gantt-dependency-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7"
+                  markerUnits="strokeWidth" orient="auto">
+                  <path d="M0 0 L10 5 L0 10 Z" fill="#6b3e2e" />
+                </marker>
+              </defs>
+              {chartTasks.flatMap(t => (t.dependsOn || (t.dep ? [t.dep] : []))
+                .filter(id => idx[id] !== undefined)
+                .map(id => ({ task: t, dependency: chartTasks[idx[id]] })))
+                .map(({ task: dependent, dependency }) => {
+                  const x1 = (dependent.day + 0.1) * cw, y1 = idx[dependent.id] * H + H / 2;
+                  const x2 = (dependency.day + dependency.len) * cw, y2 = idx[dependency.id] * H + H / 2;
+                  const bendX = (x1 + x2) / 2;
+                  return <path key={`${dependent.id}-${dependency.id}`}
+                    d={`M${x1} ${y1} H${bendX} V${y2} H${x2}`}
+                    fill="none" stroke="#6b3e2e" strokeWidth="1.8" vectorEffect="non-scaling-stroke"
+                    markerEnd="url(#gantt-dependency-arrowhead)">
+                    <title>{dependent.title} depends on {dependency.title}</title>
+                  </path>;
               })}
             </svg>
           )}
