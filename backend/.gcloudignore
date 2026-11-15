@@ -1,6 +1,8 @@
 # Used by `gcloud run deploy --source .` (replaces the .gitignore-based default, which would
 # drop backend/data and break `COPY data ./data` in the Dockerfile).
 .git
+node_modules
+photon/node_modules
 .gcloudignore
 .env
 .env.*

@@ -57,3 +57,11 @@ The starter was generated with `create-spectrum-project@0.9.0` and adapted into 
 existing service. Its Windows subprocess setup failed, so dependencies and credentials
 were configured separately. The listener now uses the backend bridge instead of
 the original echo reply.
+
+## Production: laptop-independent delivery
+
+Use the signed webhook on the existing backend instead of leaving this development
+listener running. See [Photon webhook deployment](../docs/PHOTON_WEBHOOK.md).
+When `WINNIE_PHOTON_ENABLED=true` on the backend, this stream listener receives no
+reply payload and its help poll receives no deliveries. Stop it after the webhook
+is enabled; text processing and reassignment notifications then run on demand in Cloud Run.

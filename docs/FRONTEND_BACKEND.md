@@ -3,6 +3,19 @@
 The signed-in dashboard loads persisted board data. It starts empty while loading and shows
 connection errors instead of substituting sample records. Refresh runs every 15 seconds,
 when the window regains focus, and after successful writes.
+Request-history and dependency errors are reported separately and do not block task
+refreshes. The dashboard includes **Refresh tasks** and the last successful task-refresh
+time. Background polls skip an in-progress refresh instead of continually superseding it.
+Task status controls show **Saving…**, prevent duplicate clicks, and use the backend's
+confirmed response immediately. Completing a task removes it from Due Soon and shows
+a persistent message with **View task**. Save errors remain visible until dismissed;
+refreshing other board data is separate from confirming the write.
+
+Admins start with **All E-board tasks** selected in the Gantt; members start with their
+own assignments. The chart remains a weekly view: arrows change the week, the caption
+shows scheduled and total counts, and **View all tasks** opens the complete task list.
+Sheets changes appear only after a reviewed sync is applied or an enabled sync worker
+successfully applies them; previewing a spreadsheet does not update stored tasks.
 
 ## Apply the dashboard schema
 
@@ -59,7 +72,7 @@ replace the eboard roster or its reference files.
 | Meeting list, detail and attendance | `/api/meetings` and `/api/meetings/{id}/attendance` |
 | Audio upload | Multipart `POST /api/meetings/ingest`, then reload persisted meetings/tasks |
 | Browser recording | Save `/api/recordings`, process `/api/recordings/{id}/assignments`, then refresh board |
-| Reassignment requests and decisions | Authenticated Supabase RPCs; approved ownership is reloaded from tasks |
+| Reassignment requests and decisions | Authenticated Supabase RPCs; recipient accepts/denies first, then administrator approval transfers ownership |
 | Help review | `/api/help-requests` and its decision endpoint |
 
 Authentication accounts/passwords and operational records (tasks, meetings, attendance,
@@ -71,6 +84,27 @@ Google Sheets synchronization has a separate migration and setup guide in
 [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md).
 Messaging bridges, reminder workers and imports remain server-side integrations; they
 are not browser endpoints requiring provider secrets.
+
+## Recipient consent for reassignment
+
+Photon and browser requests share this queue after applying
+`20261115160000_unify_photon_reassignments.sql` after the recipient-consent migration.
+See [the shared workflow and demo test](HELP_WORKFLOW.md) for text commands,
+notifications, deployment settings and the recipient/admin test sequence.
+
+Apply `supabase/migrations/20261115150000_reassignment_recipient_consent.sql` once
+after the existing reassignment and authentication migrations. Restart the frontend.
+The receiving member opens **Requests** to see incoming proposals and **Accept** /
+**Deny**. Acceptance saves their response and waits for administrator approval;
+denial closes the request without changing ownership. Administrators cannot approve
+an unanswered or denied proposal. Existing pending requests also require acceptance;
+historical decisions and task owners are preserved.
+
+The `respond_task_reassignment` RPC derives the member from their verified session,
+not browser-supplied identity. RLS lets the requester, recipient and reviewers see the
+request. Responses are recorded with profile ID and timestamp, can be submitted only
+once, and are protected against stale/completed tasks. Existing admin approval still
+checks the assignment atomically before transferring it. No external messages are sent.
 
 ## Demo verification
 

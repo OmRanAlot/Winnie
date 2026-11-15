@@ -23,6 +23,7 @@ from app.routes.help_requests import router as help_router
 from app.routes.meetings import router as meetings_router
 from app.routes.members import router as members_router
 from app.routes.messages import router as messages_router
+from app.routes.photon import router as photon_router
 from app.routes.planning import router as planning_router
 from app.routes.recordings import router as recordings_router
 from app.routes.reminders import router as reminders_router
@@ -44,6 +45,7 @@ app.add_middleware(
 )
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(photon_router)
 app.include_router(dashboard_router)
 app.include_router(help_router)
 app.include_router(internal_help_router)

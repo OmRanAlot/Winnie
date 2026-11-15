@@ -35,6 +35,7 @@ test('request history paginates without silently losing pending rows', async () 
   const offsets = [];
   const chain = {
     select() { return this; }, order() { return this; },
+    abortSignal() { return this; },
     async range(start, end) {
       offsets.push([start, end]);
       return { data: Array.from({ length: start === 0 ? 100 : 2 }, (_, i) => ({ id: start + i })), error: null };
@@ -45,6 +46,19 @@ test('request history paginates without silently losing pending rows', async () 
   } });
   assert.equal((await store.list()).length, 102);
   assert.deepEqual(offsets, [[0, 99], [100, 199]]);
+});
+
+test('recipient responses send only request and decision; failures stay visible', async () => {
+  const calls = [];
+  const store = reassignmentStore({ rpc: async (name, args) => {
+    calls.push([name, args]);
+    return args.p_request_id === 'stale' ? {error:{message:'Request already answered'}} : {data:{recipient_decision:args.p_decision},error:null};
+  } });
+  assert.equal((await store.respond('one','accepted')).recipient_decision,'accepted');
+  assert.equal((await store.respond('two','denied')).recipient_decision,'denied');
+  await assert.rejects(store.respond('stale','accepted'),/already answered/);
+  assert.throws(() => store.respond('one','approved'),/Invalid response/);
+  assert.deepEqual(calls[0],['respond_task_reassignment',{p_request_id:'one',p_decision:'accepted'}]);
 });
 
 test('task mapping preserves current and original roster codes', () => {
@@ -72,4 +86,13 @@ test('task reads and updates use the live UUID records API without caching', asy
     assert.equal(calls[0][1].cache, 'no-store');
     assert.deepEqual(JSON.parse(calls[1][1].body), { status: 'done' });
   } finally { globalThis.fetch = original; }
+});
+
+test('notification enqueue failure preserves the committed reassignment result',async()=>{
+ const calls=[];
+ const store=reassignmentStore({rpc:async(name,args)=>{calls.push(name);return {data:{id:'saved',status:'pending'},error:null};}},
+  {notify:async()=>{throw new Error('Queue temporarily unavailable');}});
+ const result=await store.submit('task','TARGET');
+ assert.equal(result.id,'saved'); assert.match(result.notification_warning,/Saved/);
+ assert.deepEqual(calls,['submit_task_reassignment']);
 });

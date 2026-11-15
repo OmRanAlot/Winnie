@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
@@ -28,6 +29,11 @@ COMPLETION_WORD = re.compile(
     r"\b(done|finished|completed|sent|booked|submitted|ordered|uploaded|published|delivered|paid|confirmed)\b",
     re.IGNORECASE,
 )
+
+
+@dataclass(frozen=True)
+class HelpIntent:
+    task_code: str
 
 
 def request_hash(message):
@@ -84,6 +90,13 @@ def conversation_reply(message, members, tasks, completions, interpreter, settin
             allowed = {str(task["id"]): task for task in selected}
             if set(decision.task_ids) - allowed.keys() or len(set(decision.task_ids)) != len(decision.task_ids):
                 return clarify(selected)
+            if decision.intent == "request_help":
+                if (len(decision.task_ids) != 1 or decision.confidence < 0.9
+                        or decision.completion_asserted or not decision.evidence_quote.strip()
+                        or decision.evidence_quote not in message.text
+                        or not re.search(r"\b(help|reassign|replacement|transfer|take over|can't|cannot)\b", message.text, re.IGNORECASE)):
+                    return clarify(selected)
+                return HelpIntent(allowed[decision.task_ids[0]]["task_code"])
             if decision.intent != "complete_task":
                 return decision.reply
             normalized = message.text.replace("’", "'")
