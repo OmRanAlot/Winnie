@@ -73,6 +73,15 @@ def update_status(task_id: UUID, body: TaskStatusUpdate):
 # --- Task records ---------------------------------------------------------
 
 
+def authorize_tasks(x_winnie_api_key: str = Header(default="")):
+    settings = Settings()
+    expected = settings.task_api_key.get_secret_value()
+    if not expected:
+        if not settings.is_local and settings.environment != "development":
+            raise HTTPException(503, "Configure WINNIE_TASK_API_KEY before exposing tasks.")
+        return
+    if not compare_digest(x_winnie_api_key.encode(), expected.encode()):
+        raise HTTPException(401, "Invalid task API key.")
 authorize_tasks = require_member
 
 
