@@ -17,6 +17,7 @@ from app.core.logging_config import RequestLogMiddleware, setup_logging
 from app.core.settings import Settings
 from app.routes.auth import router as auth_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.event_plans import router as event_plans_router
 from app.routes.health import router as health_router
 from app.routes.help_requests import internal as internal_help_router
 from app.routes.help_requests import router as help_router
@@ -47,6 +48,7 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(photon_router)
 app.include_router(dashboard_router)
+app.include_router(event_plans_router)
 app.include_router(help_router)
 app.include_router(internal_help_router)
 app.include_router(recordings_router, dependencies=[Depends(require_member)])

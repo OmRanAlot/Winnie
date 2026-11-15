@@ -26,14 +26,14 @@ linking, or the hosted database's complete migration history. A phone test is st
 | Login, invitation password setup, recovery | Supabase Auth; `GET /api/auth/me` | Connected. Invitation CLI default now uses deployed callback. Supabase redirect allowlist and email delivery remain live configuration. |
 | Dashboard, task list, Gantt, status and notes | `/api/tasks/records`; `/api/dashboard/dependencies` | Connected, polling and write-error handling present. Task authorization needs tightening below. |
 | Profiles, skills, history, suggestions | `/api/members`, `/assignments`, `/candidates/{id}` | Connected. Local reference-file fallbacks are absent from production image; verify shared data completeness. Board information is intentionally read-only. |
-| Requests: propose, accept/deny, approve/reject | Authenticated Supabase RPCs plus `/api/photon/dispatch` | Connected with SQL consent/approval enforcement. General task PATCH bypasses this flow. |
+| Requests: propose, accept/deny, approve/reject | Authenticated Supabase RPCs plus `/api/photon/dispatch` | Connected with SQL consent/approval enforcement. General task PATCH bypass is fixed in source; deploy the task-permission update. |
 | Attendance | `/api/meetings`, create and attendance PATCH | Connected; administrator writes enforced. |
 | Evaluations | `/api/dashboard/evaluations/{code}` | Connected; administrator feedback persisted, metrics computed from loaded records. |
 | Sheets preview/apply | `/api/sheet-sync/sources`, preview and apply | Connected; reviewed apply is separate from preview. Automatic operation requires an external scheduled runner. |
 | Audio upload | `/api/meetings/ingest` | Connected, creates tasks immediately rather than the planned approval stage. |
 | Browser Recorder | `/api/recordings`, `/{id}/assignments` | Connected, but file storage and success reporting need fixes below. |
 | Plan Event generation | `/api/planning/drafts` | Connected to simple draft generation; staged runs/review API is not used by this screen. |
-| Save/reopen event plan | `frontend/src/lib/eventPlans.js`: localStorage | Browser-only. No backend persistence, shared review, approval or activation. Shared storage key also spans accounts using this browser. |
+| Save/reopen/review event plan | `/api/event-plans` | Fixed in source: shared Supabase drafts, revisions, approval/rejection and atomic task/dependency/notice creation. Apply the event-plan migration and deploy. |
 | Manual task creation / saved task draft | Backend endpoints exist | Current App imports creation/draft helpers but has no creation call or reachable task form. Leftover resume branch refers to undefined `openTaskCreator`. Earlier connection documentation overstates this feature. |
 | Nudge | App displays “delivery is not connected” | Intentionally does not send; no backend nudge action is wired. |
 | HelpReview | Legacy component and decision API | Imported but not rendered; old transfer decisions are disabled in favor of canonical Requests. Remove or redirect stale UI. |
@@ -48,11 +48,12 @@ linking, or the hosted database's complete migration history. A phone test is st
    crafted requests, co-assignees, stale ownership and both status routes. Frontend controls
    reflect ownership, with the API retaining authority. Deploy before treating the live issue
    as resolved. No additional database migration is needed.
-2. **Persist event proposals and implement approval/activation.** Replace browser-only plans
-   with shared database records, revisions and authorized review. Approval must atomically
-   create canonical tasks, owner links, dependencies, audit and assignment notification intent,
-   and return the same result on retries. Neither current simple drafts nor local run approval
-   activates tasks. Restore manual task creation if still part of the intended UI.
+2. **Event proposals and approval fixed in source; migration/deployment required.** Shared
+   Supabase drafts and exact-revision review now replace browser-only storage. Approval
+   atomically creates tasks, dependencies, review audit and assignment notices. Approved
+   plans are locked and repeated approval is idempotent. Apply `20261115180000_event_plan_approval.sql`
+   and deploy both services; see EVENT_PLAN_APPROVAL.md. General manual task creation
+   outside an event plan remains a separate UI gap.
 3. **Bring meeting extraction into that review flow.** Both audio paths currently store extracted
    tasks immediately. This contradicts the plan's “drafts never become assignments before
    approval.” The Recorder header still describes review-only behavior incorrectly.
