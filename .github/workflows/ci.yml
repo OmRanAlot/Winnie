@@ -177,6 +177,7 @@ jobs:
           revision="$(echo "$service" | jq -r '.status.traffic[] | select(.tag == "ci-candidate") | .revisionName')"
           test -n "$url" && test "$url" != null && test -n "$revision"
           curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors "$url/api/health"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors "$url/api/photon/webhook" | jq -e '.enabled == true and .configured == true and .conversation_protocol >= 2 and .request_action_protocol >= 1'
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
       - name: Promote tested revision
         id: promote
