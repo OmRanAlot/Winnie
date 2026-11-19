@@ -10,11 +10,14 @@ any tool that can store tasks or send messages. services/planning.py validates w
 """
 
 import json
+import logging
 
 from app.agents.models import GEMINI_PREFIX, planning_model
 from app.agents.prompts import PLANNER_SYSTEM_PROMPT
 from app.agents.runner import run_structured_agent
 from app.schemas.planning import DraftContents, PlanningRequest, ProposedTask
+
+logger = logging.getLogger(__name__)
 
 
 def mock_plan(request: PlanningRequest, examples: list[dict]) -> DraftContents:
@@ -49,7 +52,7 @@ async def deep_plan(request: PlanningRequest, examples: list[dict], model: str) 
         # This endpoint needs one answer, not filesystem tools or an agent loop.
         # Force the answer schema as the only tool, without agent-loop round trips.
         structured = planning_model(model).with_structured_output(
-            DraftContents, method="function_calling",
+            DraftContents, method="function_calling", include_raw=True,
         )
         result = await structured.ainvoke([
             ("system", PLANNER_SYSTEM_PROMPT),
@@ -57,7 +60,14 @@ async def deep_plan(request: PlanningRequest, examples: list[dict], model: str) 
                 "request": request.model_dump(mode="json"), "historical_examples": examples,
             })),
         ])
-        return DraftContents.model_validate(result)
+        raw = result["raw"]
+        usage = getattr(raw, "usage_metadata", None) or {}
+        logger.info("gemini_usage feature=event_plan model=%s input=%s output=%s total=%s",
+                    model.removeprefix(GEMINI_PREFIX), usage.get("input_tokens"),
+                    usage.get("output_tokens"), usage.get("total_tokens"))
+        if result.get("parsing_error"):
+            raise ValueError("Gemini returned an invalid event plan.")
+        return DraftContents.model_validate(result["parsed"])
     return await run_structured_agent(
         label="plan", model=model, system_prompt=PLANNER_SYSTEM_PROMPT, schema=DraftContents,
         payload={"request": request.model_dump(mode="json"), "historical_examples": examples},

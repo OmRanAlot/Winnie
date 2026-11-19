@@ -1,6 +1,7 @@
 """Poll configured Google trackers outside the API process; default invocation only previews."""
 import argparse
 import json
+import logging
 import time
 
 from app.core.settings import Settings
@@ -8,6 +9,8 @@ from app.integrations.google_sheets import SheetsUnavailable
 from app.integrations.supabase import StorageUnavailable
 from app.services.sheet_sync import SheetSyncService
 from app.services.tracker_sync import ImportConflict
+
+logger = logging.getLogger(__name__)
 
 
 def cycle(service, *, apply=False, source_key=None):
@@ -27,8 +30,10 @@ def cycle(service, *, apply=False, source_key=None):
                 report['summary'] = service.apply(source.key, plan['plan_id'])
                 report['mode'] = 'applied'
             results.append(report)
-        except (ImportConflict, SheetsUnavailable, StorageUnavailable, ValueError):
+        except (ImportConflict, SheetsUnavailable, StorageUnavailable, ValueError) as exc:
             # No provider responses, cell values, credentials or contacts in worker logs.
+            logger.warning("Sheet sync failed source=%s reason=%s", source.key,
+                           str(exc) if isinstance(exc, SheetsUnavailable) else type(exc).__name__)
             results.append({'source': source.key, 'mode': 'failed',
                             'message': 'Sync failed. Check the admin preview for details.'})
     return results

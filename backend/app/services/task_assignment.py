@@ -271,9 +271,11 @@ async def get_assignments(
     logger.info("Gemini answered in %.1f s", time.perf_counter() - started)
     usage = getattr(response, "usage_metadata", None)
     if usage:
-        logger.info("Gemini tokens: input=%s output=%s thinking=%s",
-                    usage.prompt_token_count, usage.candidates_token_count,
-                    usage.thoughts_token_count)
+        logger.info("gemini_usage feature=task_extraction model=%s input=%s output=%s thinking=%s cached=%s",
+                    model, getattr(usage, "prompt_token_count", None),
+                    getattr(usage, "candidates_token_count", None),
+                    getattr(usage, "thoughts_token_count", None),
+                    getattr(usage, "cached_content_token_count", None))
     if not response.text:
         logger.error("Gemini returned no text; prompt_feedback=%s", getattr(response, "prompt_feedback", None))
         raise ValueError("Gemini returned no text (the response may have been blocked).")
