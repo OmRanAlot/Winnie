@@ -1,11 +1,14 @@
 """Gemini interprets text against authorized tasks; it has no database or send tools."""
 
 import json
+import logging
 from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+logger = logging.getLogger(__name__)
 
 
 class MessageDecision(BaseModel):
@@ -105,10 +108,20 @@ class GeminiMessageInterpreter:
                     config=types.GenerateContentConfig(
                         system_instruction=INSTRUCTIONS, response_mime_type="application/json",
                         response_json_schema=MessageDecision.model_json_schema(),
+                        max_output_tokens=1024,
                         thinking_config=types.ThinkingConfig(thinking_level="low")
                         if model.startswith("gemini-3") else None,
                     ),
                 )
+                usage = getattr(response, "usage_metadata", None)
+                if usage is not None:
+                    logger.info(
+                        "gemini_usage feature=message_interpretation model=%s input=%s output=%s thinking=%s cached=%s",
+                        model, getattr(usage, "prompt_token_count", None),
+                        getattr(usage, "candidates_token_count", None),
+                        getattr(usage, "thoughts_token_count", None),
+                        getattr(usage, "cached_content_token_count", None),
+                    )
                 return MessageDecision.model_validate_json(response.text or "")
         except Exception as exc:
             # Provider errors/prompts can contain private text; do not expose them to the user.

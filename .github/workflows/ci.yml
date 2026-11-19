@@ -156,17 +156,51 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v3
-      # Preserve existing settings; explicitly enable conversation memory by default.
-      # A repository variable WINNIE_MESSAGE_MEMORY_ENABLED=false can opt out.
-      - name: Deploy to Cloud Run
+      - name: Remember the serving revision
+        id: previous
+        run: |
+          revision="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region "$GCP_REGION" --project "$GCP_PROJECT" --format=json | jq -r '.status.traffic[] | select(.percent == 100) | .revisionName')"
+          test -n "$revision"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      # Keep the current traffic in place while the new image starts and passes a smoke test.
+      - name: Deploy candidate to Cloud Run
         run: >
           gcloud run deploy "$CLOUD_RUN_SERVICE" --source backend
+          --no-traffic --tag ci-candidate
           --update-env-vars "WINNIE_MESSAGE_MEMORY_ENABLED=${{ vars.WINNIE_MESSAGE_MEMORY_ENABLED || 'true' }}"
           --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
-      - name: Smoke test
+      - name: Smoke test candidate
+        id: candidate
+        run: |
+          service="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region "$GCP_REGION" --project "$GCP_PROJECT" --format=json)"
+          url="$(echo "$service" | jq -r '.status.traffic[] | select(.tag == "ci-candidate") | .url')"
+          revision="$(echo "$service" | jq -r '.status.traffic[] | select(.tag == "ci-candidate") | .revisionName')"
+          test -n "$url" && test "$url" != null && test -n "$revision"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors "$url/api/health"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - name: Promote tested revision
+        id: promote
+        run: >
+          gcloud run services update-traffic "$CLOUD_RUN_SERVICE"
+          --to-revisions "${{ steps.candidate.outputs.revision }}=100"
+          --remove-tags ci-candidate
+          --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
+      - name: Smoke test production
         run: |
           url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --region "$GCP_REGION" --project "$GCP_PROJECT" --format='value(status.url)')"
           curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors "$url/api/health"
+      - name: Roll back failed promotion
+        if: failure() && steps.promote.outcome == 'success'
+        run: >
+          gcloud run services update-traffic "$CLOUD_RUN_SERVICE"
+          --to-revisions "${{ steps.previous.outputs.revision }}=100"
+          --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
+      - name: Remove failed candidate tag
+        if: failure() && steps.promote.outcome != 'success'
+        run: >
+          gcloud run services update-traffic "$CLOUD_RUN_SERVICE"
+          --remove-tags ci-candidate
+          --region "$GCP_REGION" --project "$GCP_PROJECT" --quiet
 
   deploy-frontend:
     name: deploy-frontend

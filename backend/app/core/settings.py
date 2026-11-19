@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     sheets_credentials_file: Path | None = None
     sheet_sync_interval_seconds: int = Field(default=300, ge=60, le=86400)
     message_ai_enabled: bool = False
-    message_ai_model: str = ""  # Empty uses the existing GEMINI_MODEL setting.
+    # Short member replies use Flash even when event planning selects a larger model.
+    message_ai_model: str = "gemini-3.8-flash"
     message_ai_timeout_seconds: float = Field(default=10, gt=0, le=20)
     message_ai_max_tasks: int = Field(default=60, ge=1, le=100)
     message_memory_enabled: bool = True

@@ -1,50 +1,30 @@
-# Backend CI and image delivery
+# CI and production deployment
 
-`.github/workflows/backend.yml` runs on every pull request, push, merge queue,
-and manual dispatch. It deliberately has no path filters, so the required status
-is always reported, including when shared schemas or dependencies change.
+`.github/workflows/backend.yml` runs the extended backend, migration, messaging,
+and container checks. `.github/workflows/ci.yml` runs the release checks on pull
+requests and pushes to `main`. On a push to `main`, with the GitHub OIDC variables
+configured, it deploys the API to Cloud Run and the dashboard to Firebase Hosting.
+Neither workflow applies Supabase migrations or sends test texts.
 
-The workflow runs:
+The production target is project `hack-princeton-514716`, Cloud Run service `api`
+in `us-east1`, and Firebase Hosting at
+`https://hack-princeton-514716.web.app`. Firebase rewrites `/api/**` to Cloud Run.
+GitHub authenticates through Workload Identity Federation; no GCP key file is
+needed in repository secrets.
 
-- Python 3.13 with locked uv dependencies, Ruff, and the complete pytest suite.
-  Coverage XML and JUnit results are retained as artifacts for 14 days, including
-  on test failures. Coverage is reported without an arbitrary minimum threshold.
-- Every `supabase/tests/*.test.mjs` migration test against isolated PGlite databases.
-- Messaging TypeScript checks, tests, and build with locked npm dependencies.
-- A production Docker build and a real `/api/health` request without credentials.
+The main release workflow deploys a zero-traffic Cloud Run revision, gives it a
+temporary `ci-candidate` URL, and checks `/api/health` there. Only after that
+check passes does it move 100% of API traffic to the new revision. A failed
+production smoke test restores the previous serving revision. The frontend
+build and Hosting deploy follow the backend promotion. This matters because a
+previously pinned Cloud Run revision could let `gcloud run deploy` succeed while
+the public URL continued to serve older code.
 
-Tests use synthetic data and mocks; no Supabase, Gemini, or Photon secrets are
-needed. CI never applies migrations to a hosted database or sends messages.
+Check the GitHub Actions run and Cloud Run traffic after each release. The
+public health endpoint and Photon webhook readiness endpoint confirm routing
+and configuration; a real opted-in phone test is still needed to verify text
+delivery. Supabase migration history and Secret Manager values are managed
+separately from this workflow.
 
-In GitHub repository Settings → Rules → Rulesets, require **Backend checks**
-before merging into the default branch. That aggregate check fails if any job
-fails or is cancelled. Enable GitHub Actions if it is disabled for the repository.
-
-After all checks pass on a push to the default branch, the workflow publishes
-`ghcr.io/<owner>/<repository>/backend:<full-commit-sha>` and `:latest` using the
-automatic GitHub token. Names are lowercased for registry compatibility. The
-repository must allow Actions to write packages. Pull requests cannot publish.
-Use the commit tag for deployments and rollback.
-
-This provides continuous integration and container delivery. Production rollout
-is not configured: the repository has Docker/Cloud Run instructions but no
-selected deployment project, service, region, or deployment identity. Configure
-that target and its credentials before adding a rollout job after `publish`.
-The backend README describes the current manual Cloud Run deployment procedure.
-
-To reproduce checks locally:
-
-```sh
-cd backend
-uv sync --locked --group dev
-uv run --no-sync ruff check .
-uv run --no-sync pytest --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml --junitxml=test-results.xml
-cd ..
-npm ci
-node --test supabase/tests/*.test.mjs
-npm --prefix messaging ci
-npm --prefix messaging run typecheck
-npm --prefix messaging test
-npm --prefix messaging run build
-docker build -t winnie-backend:local backend
-```
+To reproduce the release checks locally, run `uv run pytest` and `uv run ruff
+check .` in `backend/`, then `npm test` and `npm run build` in `frontend/`.

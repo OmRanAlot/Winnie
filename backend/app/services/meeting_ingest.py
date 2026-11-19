@@ -58,6 +58,13 @@ async def transcribe_and_summarize(audio: bytes, mime_type: str, api_key: str, m
             response_mime_type="application/json", response_json_schema=ANSWER_SCHEMA
         ),
     )
+    usage = getattr(response, "usage_metadata", None)
+    if usage is not None:
+        logger.info("gemini_usage feature=meeting_transcription model=%s input=%s output=%s thinking=%s cached=%s",
+                    model, getattr(usage, "prompt_token_count", None),
+                    getattr(usage, "candidates_token_count", None),
+                    getattr(usage, "thoughts_token_count", None),
+                    getattr(usage, "cached_content_token_count", None))
     if not response.text:
         raise ValueError("Gemini returned no text (the response may have been blocked).")
     return TranscriptAndSummary.model_validate(json.loads(response.text))

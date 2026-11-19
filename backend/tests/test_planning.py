@@ -215,14 +215,15 @@ async def test_gemini_plan_uses_one_structured_call(monkeypatch):
     calls = []
 
     class NativeModel:
-        def with_structured_output(self, schema, method):
+        def with_structured_output(self, schema, method, include_raw):
             assert schema is DraftContents
             assert method == "function_calling"
+            assert include_raw is True
             return self
 
         async def ainvoke(self, messages):
             calls.append(messages)
-            return {"tasks": [task("a")]}
+            return {"raw": None, "parsed": {"tasks": [task("a")]}, "parsing_error": None}
 
     monkeypatch.setattr("app.agents.planner.planning_model", lambda model: NativeModel())
 
