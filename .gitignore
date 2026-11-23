@@ -26,6 +26,8 @@ test-results.xml
 # Node
 node_modules/
 dist/
+/build/
+/frontend/.firebase/
 *.tsbuildinfo
 
 # Local data and private source material
@@ -40,3 +42,5 @@ Thumbs.db
 .idea/
 
 env.yaml
+photos/
+demo-video/

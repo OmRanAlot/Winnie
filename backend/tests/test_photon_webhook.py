@@ -206,3 +206,46 @@ async def test_plan_notifications_dispatch_without_help_workflow_and_record_outc
     assert result['p_outcome'] == ('uncertain' if failed else 'sent')
     assert result['p_provider_id'] == (None if failed else 'provider')
     sender.send.assert_awaited_once()
+
+
+async def test_missing_event_plan_storage_does_not_break_reassignment_notices(monkeypatch):
+    """Deployed before the event-plan migration: reassignment notices still go out."""
+    from app.integrations.supabase import StorageUnavailable
+    from app.routes import photon
+
+    monkeypatch.setenv('WINNIE_HELP_WORKFLOW_ENABLED', 'true')
+    calls, notices = [], [{'id': 'req', 'claim_token': 't', 'text': 'Take over?', 'recipient': '+15555550123'}]
+
+    def rpc(name, **values):
+        calls.append(name)
+        if name == 'claim_reassignment_notification':
+            return notices.pop() if notices else None
+        if name == 'claim_event_plan_notification':
+            raise StorageUnavailable('function public.claim_event_plan_notification does not exist')
+        return 'sent'
+
+    monkeypatch.setattr(photon, 'HelpRequestStore', lambda: SimpleNamespace(rpc=rpc))
+    sender = SimpleNamespace(send=AsyncMock(return_value='provider'))
+    assert await photon.dispatch_notifications(sender) is False
+    sender.send.assert_awaited_once()
+    assert 'finish_reassignment_notification' in calls
+
+
+async def test_unexpected_send_error_still_releases_the_notice(monkeypatch):
+    """A provider bug must not leave a notice claimed forever or crash the worker."""
+    from app.routes import photon
+
+    monkeypatch.setenv('WINNIE_HELP_WORKFLOW_ENABLED', 'false')
+    calls, notices = [], [{'id': 'n', 'claim_token': 't', 'text': 'Assignment', 'recipient': '+15555550123'}]
+
+    def rpc(name, **values):
+        calls.append((name, values))
+        if name == 'claim_event_plan_notification':
+            return notices.pop() if notices else None
+        return 'uncertain'
+
+    monkeypatch.setattr(photon, 'HelpRequestStore', lambda: SimpleNamespace(rpc=rpc))
+    sender = SimpleNamespace(send=AsyncMock(side_effect=RuntimeError('provider bug')))
+    assert await photon.dispatch_notifications(sender) is False
+    finish = next(values for name, values in calls if name == 'finish_event_plan_notification')
+    assert finish['p_outcome'] == 'uncertain'

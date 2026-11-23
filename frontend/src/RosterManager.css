@@ -1,0 +1,142 @@
+.roster-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  align-items: start;
+  gap: var(--s4);
+}
+
+.roster-directory:only-child {
+  grid-column: 1 / -1;
+}
+
+.roster-heading, .roster-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+.roster-heading h3 {
+  margin: 0;
+}
+
+.roster-directory .roster-entries {
+  display: grid;
+  gap: var(--s2);
+  list-style: none;
+  margin: var(--s3) 0;
+  padding: 0;
+}
+
+.roster-entries button {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s3);
+  width: 100%;
+  border: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.roster-entries button[aria-pressed="true"] {
+  background: var(--hover);
+  border-color: var(--rust);
+}
+
+.roster-entries span {
+  color: var(--muted);
+}
+
+.roster-directory summary {
+  cursor: pointer;
+  padding-block: var(--s2);
+}
+
+.roster-fields {
+  display: grid;
+  gap: var(--s3);
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.roster-fields label {
+  display: grid;
+  gap: var(--s2);
+  font-weight: 600;
+}
+
+.roster-fields .roster-consent {
+  display: flex;
+  align-items: baseline;
+}
+
+.roster-actions {
+  justify-content: flex-start;
+}
+
+.roster-notice, .roster-feedback {
+  margin: 0 0 var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+
+.roster-notice {
+  color: var(--maroon);
+  border-color: var(--rust);
+}
+
+.roster-phones {
+  margin-bottom: var(--s4);
+}
+
+.roster-phone-help {
+  margin: 0 0 var(--s3);
+  color: var(--muted);
+}
+
+.roster-phone-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s2);
+}
+
+.roster-phone-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
+  gap: var(--s2) var(--s3);
+  align-items: baseline;
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.roster-phone-ready {
+  color: #2f6b3a;
+  font-weight: 650;
+}
+
+.roster-phone-pending {
+  color: var(--rust);
+  font-weight: 650;
+}
+
+@media (max-width: 760px) {
+  .roster-phone-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .roster-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .roster-editor {
+    grid-row: 1;
+  }
+}

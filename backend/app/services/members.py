@@ -22,6 +22,12 @@ class AliasConflict(ValueError):
     pass
 
 
+class RosterWriteError(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
 def resolve_member_choice(text: str, candidates: list[dict]) -> str | None:
     """Resolve a saved list number or exact unique name; never fuzzy-match a recipient."""
     value = normalize_alias(text).rstrip('.!? ')
@@ -125,14 +131,45 @@ class MemberStore:
         ).eq("code", identity[0]["member_code"]).eq("active", True)).data
         return members[0] if len(members) == 1 else None
 
-    # Public profile fields only: contact details (email, phone_number) never leave the backend.
+    # The shared directory excludes the contact fields available to roster administrators.
     PUBLIC_FIELDS = "code,display_name,board_role,role_description,skills,previous_role_skills_manual"
+    ROSTER_FIELDS = "code,display_name,board_role,email,phone_number,contact_consent,active"
 
     def list_active(self):
         """Active board members for the dashboard, ordered by name."""
         return self._execute("members", lambda table: table.select(
             self.PUBLIC_FIELDS
         ).eq("active", True).order("display_name")).data
+
+    def list_roster(self):
+        """Private administrator view, including former members."""
+        rows, offset = [], 0
+        while True:
+            page = self._execute("members", lambda table, offset=offset: table.select(
+                self.ROSTER_FIELDS
+            ).order("display_name").order("code").range(offset, offset + 499)).data
+            rows.extend(page)
+            if len(page) < 500:
+                return rows
+            offset += 500
+
+    def save_roster_member(self, actor, code, semester, changes, *, create=False):
+        client = None
+        try:
+            client = self.client_factory()
+            return client.rpc("save_board_member", {
+                "actor": actor, "member": code, "semester": semester,
+                "changes": changes, "create_member": create,
+            }).execute().data
+        except APIError as exc:
+            if exc.code in ("22023", "23505", "42501", "P0002", "40P01"):
+                raise RosterWriteError(exc.code, exc.message) from exc
+            raise StorageUnavailable("Roster storage is unavailable.") from exc
+        except HTTPError as exc:
+            raise StorageUnavailable("Roster storage is unavailable.") from exc
+        finally:
+            if client is not None:
+                client.postgrest.session.close()
 
     def previous_roles(self) -> dict[str, list[str]]:
         """{code: previous roles} from members.previous_roles; {} until that column exists

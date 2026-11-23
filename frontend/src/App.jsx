@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
-import { getAssignments, getCandidates, getEventLabels, getMembers, getMeetings, getTasks, updateTaskStatus, weekStart, getDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
+import { getAssignments, getAutomationStatus, getCandidates, getMembers, getMeetings, getSheetSyncSources, getTasks, updateTaskStatus, weekStart, getDependencies, saveTaskDependencies, generateTaskPlan, createTaskRecord, saveTaskNotes, getTaskDraft, saveTaskDraft as persistTaskDraft } from "./lib/api.js";
+import { collectUpcomingEvents, tasksForEvent } from "./lib/upcomingEvents.js";
 import { getEventPlans, getEventPlan, createEventPlan, updateEventPlan, reviewEventPlan } from "./lib/eventPlans.js";
 import Recorder from "./Recorder.jsx";
 import PlanLoading from "./PlanLoading.jsx";
@@ -8,6 +9,7 @@ import SheetSync from "./SheetSync.jsx";
 import AutomationStatus from "./AutomationStatus.jsx";
 import { nudgeTask } from "./lib/api.js";
 import HelpReview from "./HelpReview.jsx";
+import RosterManager from "./RosterManager.jsx";
 import ProfileEditor from "./ProfileEditor.jsx";
 import EvaluationPanel from "./EvaluationPanel.jsx";
 import UploadMeeting from "./UploadMeeting.jsx";
@@ -16,6 +18,7 @@ import { dispatchPhotonNotifications } from "./lib/api.js";
 import { reassignmentStore } from "./lib/reassignments.js";
 import { orderProfiles } from "./lib/profileOrder.js";
 import { inferTaskDependencies } from "./lib/taskDependencies.js";
+import { staggeredLoads } from "./lib/staggeredLoads.js";
 import { PIXEL_ARROW_CURSOR, PIXEL_HAND_CURSOR, CUTE_CSS } from "./lib/pixelCursor.js";
 import CursorFx from "./lib/CursorFx.jsx";
 const requestsStore = reassignmentStore(supabase, { notify: dispatchPhotonNotifications });
@@ -28,6 +31,31 @@ const EMPTY_EVENT_INPUT = { name: "", description: "", date: "", time: "" };
 const EMPTY_EVENT_PLAN = {
   ...EMPTY_EVENT_INPUT, planText: "", tasks: [], questions: [], warnings: [], planMode: "",
 };
+// Matches backend TaskDraft (dashboard.py) plus create-only fields stripped before draft save.
+const EMPTY_TASK_FORM = {
+  title: "", description: "", startDate: "", dueDate: "", time: "",
+  priority: "normal", summary: "", ownerCode: "", status: "todo", dependencyIds: [],
+  eventTag: "",
+};
+const taskDraftPayload = (form) => ({
+  title: form.title ?? "",
+  description: form.description ?? "",
+  startDate: form.startDate ?? "",
+  dueDate: form.dueDate ?? "",
+  time: form.time ?? "",
+  summary: form.summary ?? "",
+  priority: form.priority || "normal",
+  ownerCode: form.ownerCode ?? "",
+  eventTag: form.eventTag ?? "",
+});
+const normalizeTaskForm = (form = {}) => ({
+  ...EMPTY_TASK_FORM,
+  ...form,
+  dependencyIds: Array.isArray(form.dependencyIds) ? form.dependencyIds : [],
+  status: form.status || "todo",
+  priority: form.priority || "normal",
+  eventTag: form.eventTag ?? "",
+});
 // Shared display helpers resolve only the currently loaded board records.
 let currentPeople = [];
 let currentTasks = [];
@@ -63,10 +91,10 @@ function readDashboardCache(memberCode) {
   }
 }
 
-function writeDashboardCache(memberCode, tasks, people, savedAt) {
+function writeDashboardCache(memberCode, tasks, people, savedAt, watermark) {
   try {
     window.sessionStorage.setItem(`winnie:dashboard-cache:${memberCode || "board"}`, JSON.stringify({
-      tasks, people, savedAt: savedAt.toISOString(),
+      tasks, people, savedAt: savedAt.toISOString(), watermark,
     }));
   } catch {
     // The dashboard still works when browser storage is unavailable or full.
@@ -154,7 +182,11 @@ button.pill{cursor:pointer}button.pill:hover{background:var(--hover)}
 .gantt-key span{display:inline-flex;align-items:center;gap:var(--s1)}
 .gantt-key b{color:#6b3e2e;font-size:16px;line-height:1}
 .gantt-key .gantt-key-star{color:var(--sun);font-size:15px;text-shadow:0 0 1px var(--ink)}
-.nav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:0 calc(var(--s6) * -1);padding:var(--s4) var(--s6);position:sticky;bottom:0;z-index:5}
+.nav{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:var(--s5);background:var(--surface);border-top:1px solid var(--line);margin:0 calc(var(--s6) * -1);padding:var(--s4) var(--s6);position:sticky;bottom:0;z-index:5}
+.task-filters{display:flex;flex-wrap:wrap;gap:var(--s3);margin:0 0 var(--s4);align-items:end}
+.task-filters label{display:grid;gap:4px;font-weight:600;font-size:14px;min-width:min(220px,100%)}
+.event-list .due{align-items:stretch}
+.event-list .pill{text-align:left}
 .nav button{border:1px solid var(--line);background:var(--paper);border-radius:var(--r);padding:var(--s3);font-size:20px;font-weight:600;color:var(--ink);cursor:pointer}
 .nav button:hover{background:var(--ink);color:var(--paper)}
 .bell{position:relative;background:none;border:0;color:var(--ink);cursor:pointer;padding:var(--s2);display:grid}
@@ -629,8 +661,10 @@ export function Gantt({ tasks: all, allTasks = all, people = currentPeople, isAd
 
 /* ---------- App ---------- */
 export default function App({ profile, admin, signOut }) {
-  const dashboardCacheKey = profile.member_code || "board";
+  const boardMember = Boolean(profile.member_code);
+  const dashboardCacheKey = `${profile.id}:${boardMember ? 'board' : 'member'}`;
   const [dashboardCache] = useState(() => readDashboardCache(dashboardCacheKey));
+  const dashboardCacheRef = useRef(dashboardCache);
   const [stack, setStack] = useState([{ n: "dash" }]);
   const [viewAs, setViewAs] = useState(null);
   const [adminShowAllGantt, setAdminShowAllGantt] = useState(true);
@@ -645,9 +679,14 @@ export default function App({ profile, admin, signOut }) {
   const [dependencyError, setDependencyError] = useState("");
   const [lastTaskRefresh, setLastTaskRefresh] = useState(() => dashboardCache?.savedAt ? new Date(dashboardCache.savedAt) : null);
   const [loading, setLoading] = useState(() => !dashboardCache);
+  const [loadProgress, setLoadProgress] = useState(0);
   const refreshVersion = useRef(0);
-  const refreshInFlight = useRef(0);
+  const [taskForm, setTaskForm] = useState(EMPTY_TASK_FORM);
   const [savedTaskForm, setSavedTaskForm] = useState(null);
+  const [submittingTask, setSubmittingTask] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [taskPersonFilter, setTaskPersonFilter] = useState("");
+  const [taskEventFilter, setTaskEventFilter] = useState("");
   const [eventInput, setEventInput] = useState(EMPTY_EVENT_INPUT);
   const [eventPlanForm, setEventPlanForm] = useState(EMPTY_EVENT_PLAN);
   const [eventPlanError, setEventPlanError] = useState("");
@@ -683,19 +722,23 @@ export default function App({ profile, admin, signOut }) {
   const statusLocks = useRef(new Set());
   const [MEETINGS, setMeetings] = useState([]);
   const [meetingError, setMeetingError] = useState('');
-  const [meetingsLoading, setMeetingsLoading] = useState(true);
+  const [meetingsLoading, setMeetingsLoading] = useState(false);
+  const meetingRequest = useRef(null);
   const reloadMeetings = useCallback(async () => {
+    if (meetingRequest.current) return meetingRequest.current;
     setMeetingsLoading(true);
-    try { setMeetings(await getMeetings()); setMeetingError(''); }
-    catch (e) { setMeetingError(e.message); throw e; }
-    finally { setMeetingsLoading(false); }
+    meetingRequest.current = getMeetings().then(value => {
+      setMeetings(value); setMeetingsLoaded(true); setMeetingError('');
+    }).catch(e => { setMeetingError(e.message); throw e; }).finally(() => {
+      meetingRequest.current = null; setMeetingsLoading(false);
+    });
+    return meetingRequest.current;
   }, []);
-  useEffect(() => { reloadMeetings().catch(() => {}); }, [reloadMeetings]);
   const reloadEventPlans = useCallback(async () => {
     setEventPlansLoading(true);
     setEventPlansError("");
     try { setEventPlans(await getEventPlans()); }
-    catch (e) { setEventPlansError(e.message); }
+    catch (e) { setEventPlansError(e.message); throw e; }
     finally { setEventPlansLoading(false); }
   }, []);
   const attendanceSaved = (id, attendees) => setMeetings(current => current.map(m =>
@@ -712,6 +755,20 @@ export default function App({ profile, admin, signOut }) {
   };
   const [TASKS, setTasks] = useState(() => dashboardCache?.tasks ?? []);
   const [PEOPLE, setPeople] = useState(() => dashboardCache?.people ?? []);
+  const [adminOpened, setAdminOpened] = useState(false);
+  const [adminLoads, setAdminLoads] = useState({});
+  const [metricsSnapshot, setMetricsSnapshot] = useState(null);
+  const [sheetSources, setSheetSources] = useState(null);
+  const [automationStatus, setAutomationStatus] = useState(null);
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
+  const [meetingsLoaded, setMeetingsLoaded] = useState(false);
+  const reloadRequests = useCallback(async () => {
+    try {
+      const rows = await requestsStore.list();
+      setReqs(rows.filter(row => row.id !== reviewingRequestRef.current));
+      setRequestDataError(''); setRequestsLoaded(true);
+    } catch (e) { setRequestDataError(e.message); throw e; }
+  }, []);
   const taskRelations = useMemo(() => {
     const relations = new Map(TASKS.map((item) => [item.id, {
       dependsOn: new Set([...(item.dependsOn ?? []), ...(item.dep ? [item.dep] : [])]),
@@ -736,7 +793,6 @@ export default function App({ profile, admin, signOut }) {
       dependents.length ? `Dependency for: ${dependents.join(", ")}` : "",
     ].filter(Boolean).join(" · ") || "Dependencies: None";
   };
-  const [eventOverrides, setEventOverrides] = useState({});
   const tasks = TASKS; // the redesign's screens read `tasks`; same live list
   const [source, setSource] = useState(() => dashboardCache
     ? `Live cache: ${dashboardCache.tasks.length} tasks, ${dashboardCache.people.length} members`
@@ -744,86 +800,88 @@ export default function App({ profile, admin, signOut }) {
   const live = source.startsWith("Live");
   currentTasks = TASKS;
   currentPeople = PEOPLE;
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
+    if (!boardMember) {
+      setTasks([]); setPeople([]); setSource('Live: account loaded'); setLoading(false);
+      return;
+    }
     const version = ++refreshVersion.current;
-    refreshInFlight.current += 1;
-    // Secondary failures must not prevent current task data from reaching the chart.
-    const secondary = Promise.allSettled([requestsStore.list(), getDependencies()]);
-    const membership = Promise.allSettled([getMembers(), getAssignments()]);
+    const cache = dashboardCacheRef.current;
+    const cacheAge = cache?.savedAt ? Date.now() - Date.parse(cache.savedAt) : Infinity;
+    // A short cache lifetime bounds stale deletes and roster changes, which have no task timestamp.
+    const incremental = !force && cacheAge >= 0 && cacheAge < 5 * 60 * 1000;
+    const since = incremental ? new Date(Date.parse(cache.watermark || cache.savedAt) - 5000).toISOString() : null;
+    if (!cache) { setLoading(true); setLoadProgress(5); }
     try {
-      const ts = await getTasks();
+      const ts = await getTasks({
+        updatedSince: since,
+        onPage: (loaded, total) => setLoadProgress(Math.min(70, 10 + Math.round(60 * loaded / Math.max(total, 1)))),
+      });
       if (version !== refreshVersion.current) return;
-      let enriched = ts.map((t) => ({
-        ...t,
-        assignees: t.ownerCode ? [t.ownerCode] : [],
-        assignee: t.ownerCode ?? null,
-        dependsOn: [],
-        dep: null,
+      const previousTasks = new Map((cache?.tasks ?? []).map(t => [t.id, t]));
+      const changedTasks = new Map(ts.map(t => [t.id, t]));
+      let enriched = (incremental ? [
+        ...ts.filter(t => !previousTasks.has(t.id)),
+        ...cache.tasks.map(t => changedTasks.get(t.id) ?? t),
+      ] : ts).map(t => ({
+        ...t, assignees: t.ownerCode ? [t.ownerCode] : (t.assignees ?? previousTasks.get(t.id)?.assignees ?? []),
+        assignee: t.ownerCode ?? t.assignee ?? previousTasks.get(t.id)?.assignee ?? null,
+        dependsOn: t.dependsOn ?? previousTasks.get(t.id)?.dependsOn ?? [],
+        dep: t.dep ?? previousTasks.get(t.id)?.dep ?? null,
       }));
       setTasks(enriched);
       setDataError("");
-      setSource(`Live: ${ts.length} tasks`);
-      setLoading(false);
-
-      const [memberResult, assignmentResult] = await membership;
-      if (version !== refreshVersion.current) return;
-      let people = PEOPLE;
-      if (memberResult.status === "fulfilled") {
-        people = memberResult.value;
-        setPeople(people);
-      } else {
-        setDataError(memberResult.reason?.message || "Board member details could not be loaded.");
-      }
-      if (assignmentResult.status === "fulfilled") {
-        const byTask = assignmentResult.value.byTask;
-        enriched = enriched.map((t) => {
-          const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
-          return { ...t, assignees: codes, assignee: codes[0] ?? null };
-        });
+      let people = cache?.people ?? [];
+      if (!incremental) {
+        setLoadProgress(75);
+        const [memberResult, assignmentResult, dependencyResult] = await Promise.allSettled([
+          getMembers(), getAssignments(), getDependencies(),
+        ]);
+        if (version !== refreshVersion.current) return;
+        if (memberResult.status === 'fulfilled') { people = memberResult.value; setPeople(people); }
+        else setDataError(memberResult.reason?.message || 'Board member details could not be loaded.');
+        if (assignmentResult.status === 'fulfilled') {
+          const byTask = assignmentResult.value.byTask;
+          enriched = enriched.map(t => {
+            const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
+            return { ...t, assignees: codes, assignee: codes[0] ?? null };
+          });
+        } else setDataError(assignmentResult.reason?.message || 'Task assignments could not be loaded.');
+        if (dependencyResult.status === 'fulfilled') {
+          const links = {};
+          dependencyResult.value.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
+          enriched = enriched.map(t => ({ ...t, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null }));
+          setDependencyError('');
+        } else setDependencyError(dependencyResult.reason?.message || 'Task dependencies could not be loaded.');
         setTasks(enriched);
-      } else {
-        setDataError(assignmentResult.reason?.message || "Task assignments could not be loaded.");
+      } else if (ts.length) {
+        const [assignmentResult, dependencyResult] = await Promise.allSettled([
+          getAssignments(), getDependencies(),
+        ]);
+        if (version !== refreshVersion.current) return;
+        if (assignmentResult.status === 'fulfilled') {
+          const byTask = assignmentResult.value.byTask;
+          enriched = enriched.map(t => {
+            const codes = t.ownerCode ? [t.ownerCode] : byTask[t.id] ?? [];
+            return { ...t, assignees: codes, assignee: codes[0] ?? null };
+          });
+        } else setDataError(assignmentResult.reason?.message || 'Task assignments could not be loaded.');
+        if (dependencyResult.status === 'fulfilled') {
+          const links = {};
+          dependencyResult.value.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
+          enriched = enriched.map(t => ({ ...t, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null }));
+          setDependencyError('');
+        } else setDependencyError(dependencyResult.reason?.message || 'Task dependencies could not be loaded.');
+        setTasks(enriched);
       }
-      setSource(`Live: ${ts.length} tasks, ${people.length} members`);
+      setLoadProgress(100);
+      setSource(`Live: ${enriched.length} tasks, ${people.length} members`);
       const refreshedAt = new Date();
       setLastTaskRefresh(refreshedAt);
-      writeDashboardCache(dashboardCacheKey, enriched, people, refreshedAt);
-
-      const [requests, dependencies] = await secondary;
-      if (version !== refreshVersion.current) return;
-      let tasksForCache = enriched;
-      if (requests.status === 'fulfilled') {
-        setReqs(requests.value.filter(request => request.id !== reviewingRequestRef.current)); setRequestDataError("");
-      } else { setRequestDataError(requests.reason?.message || 'Request history could not be loaded.'); }
-      if (dependencies.status === 'fulfilled') {
-        const links = {};
-        dependencies.value.forEach(edge => { (links[edge.task_id] ||= []).push(edge.depends_on_id); });
-        const refreshedTasks = enriched.map(t => ({
-          ...t, dependsOn: links[t.id] || [], dep: links[t.id]?.[0] || null,
-        }));
-        setTasks(refreshedTasks);
-        tasksForCache = refreshedTasks;
-        setDependencyError("");
-      } else {
-        setDependencyError(dependencies.reason?.message || 'Task dependencies could not be loaded.');
-        const cachedLinks = Object.fromEntries((dashboardCache?.tasks ?? []).map((task) => [
-          task.id, task.dependsOn ?? (task.dep ? [task.dep] : []),
-        ]));
-        tasksForCache = enriched.map((task) => ({
-          ...task, dependsOn: cachedLinks[task.id] ?? [], dep: cachedLinks[task.id]?.[0] ?? null,
-        }));
-        setTasks(tasksForCache);
-      }
-      writeDashboardCache(dashboardCacheKey, tasksForCache, people, refreshedAt);
-      // Enrich tasks whose event is "Miscellaneous" or blank with a Gemini-suggested label.
-      const needsLabel = enriched.filter((t) => !t.event || t.event.toLowerCase() === "miscellaneous");
-      if (needsLabel.length > 0) {
-        getEventLabels(needsLabel.map((t) => ({ id: t.id, title: t.title, description: t.description || "" })))
-          .then((overrides) => {
-            if (version === refreshVersion.current) setEventOverrides((prev) => ({ ...prev, ...overrides }));
-          })
-          .catch(() => {}); // non-fatal
-      }
+      const watermark = [...enriched, ...ts].map(t => t.updatedAt).filter(Boolean).sort().at(-1)
+        || cache?.watermark || refreshedAt.toISOString();
+      writeDashboardCache(dashboardCacheKey, enriched, people, refreshedAt, watermark);
+      dashboardCacheRef.current = { tasks: enriched, people, savedAt: refreshedAt.toISOString(), watermark };
     } catch (e) {
       if (version === refreshVersion.current) {
         setDataError(e.message);
@@ -831,19 +889,21 @@ export default function App({ profile, admin, signOut }) {
       }
       throw e;
     } finally {
-      refreshInFlight.current -= 1;
       if (version === refreshVersion.current) setLoading(false);
     }
-  }, [dashboardCacheKey]);
+  }, [dashboardCacheKey, boardMember]);
   useEffect(() => {
-    const reload = () => { if (!refreshInFlight.current) refresh().catch(() => {}); };
-    reload();
-    const timer = typeof document === "undefined" ? null : setInterval(reload, 15000);
-    timer?.unref?.();
-    window.addEventListener("focus", reload);
-    return () => { ++refreshVersion.current; if (timer) clearInterval(timer); window.removeEventListener("focus", reload); };
+    refresh().catch(() => {});
+    return () => { ++refreshVersion.current; };
   }, [refresh]);
   useEffect(() => { if (!admin) setViewAs(null); }, [admin]);
+  useEffect(() => {
+    if (!admin) return;
+    let active = true;
+    getTaskDraft().then((form) => { if (active && form) setPersistedDraft(normalizeTaskForm(form)); })
+      .catch((e) => { if (active) setDraftError(e.message); });
+    return () => { active = false; };
+  }, [admin]);
   const sendRequest = async () => {
     if (mutationLock.current || requestDataError || !modal?.reassign) return;
     mutationLock.current = true; setRequestBusy(true); setRequestError("");
@@ -852,6 +912,7 @@ export default function App({ profile, admin, signOut }) {
       setModal(null); setRequestReason("");
       say(saved?.notification_warning || "Request saved for administrator review first. Recipient consent follows approval.");
       try { await refresh(); } catch { say("Request saved. Refresh failed; please retry."); }
+      reloadRequests().catch(() => {});
     } catch (e) {
       const errorText = [e?.message, e?.details, e?.hint, e?.code].filter(Boolean).join(" ");
       if (e?.code === "23505" || errorText.includes("task_reassignment_one_pending_per_member")) {
@@ -877,12 +938,13 @@ export default function App({ profile, admin, signOut }) {
       setCands({});
       say(saved?.notification_warning || (decision === "approved" ? "Admin approved. Awaiting recipient consent; ownership is unchanged." : "Request denied"));
       try { await refresh(); } catch { say("Decision saved. Refresh failed; please retry."); }
-      setRequestDataError("");
+      await reloadRequests().catch(() => {});
     } catch (e) {
       reviewingRequestRef.current = null;
       setReqs(current => [...current.filter(request => request.id !== r.id), r]);
       setRequestError(e.message);
       refresh().catch(() => {});
+      reloadRequests().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); setReviewingRequestId(null); }
   };
   const respondToRequest = async (r, decision) => {
@@ -892,9 +954,11 @@ export default function App({ profile, admin, signOut }) {
       const saved = await requestsStore.respond(r.id, decision);
       say(saved?.notification_warning || (decision === "accepted" ? "Accepted. Ownership transferred; the outgoing owner is recorded in transfer history." : "Request denied. Task ownership is unchanged."));
       try { await refresh(); } catch { say("Response saved. Refresh failed; please retry."); }
+      reloadRequests().catch(() => {});
     } catch (e) {
       setRequestError(e.message);
       refresh().catch(() => {});
+      reloadRequests().catch(() => {});
     } finally { mutationLock.current = false; setRequestBusy(false); }
   };
   const archiveRequest = async (r, archived) => {
@@ -937,14 +1001,139 @@ export default function App({ profile, admin, signOut }) {
   };
   const p = stack[stack.length - 1];
   useEffect(() => {
-    if (admin && p.n === "planEvent") reloadEventPlans();
-  }, [admin, p.n, reloadEventPlans]);
+    if (admin && p.n === 'admin') setAdminOpened(true);
+  }, [admin, p.n]);
   useEffect(() => {
-    if (['attendance', 'past', 'mm', 'memberStatus'].includes(p.n)) reloadMeetings().catch(() => {});
-  }, [p.n, reloadMeetings]);
+    if (!adminOpened || !admin) return;
+    const status = (key, state) => setAdminLoads(previous => ({ ...previous, [key]: state }));
+    return staggeredLoads(
+      { key: 'planEvent', run: reloadEventPlans },
+      [
+        { key: 'metrics', run: async () => {
+          setMetricsSnapshot(PEOPLE.map(member => ({ member, ...getMemberStatus(member) })));
+        } },
+        { key: 'reassignments', run: reloadRequests },
+        { key: 'attendance', run: reloadMeetings },
+        { key: 'sheets', run: async () => setSheetSources(await getSheetSyncSources()) },
+        { key: 'automation', run: async () => setAutomationStatus(await getAutomationStatus()) },
+      ], status,
+    );
+  }, [adminOpened, admin, reloadEventPlans, reloadMeetings, reloadRequests]);
+  useEffect(() => {
+    if (!meetingsLoaded && !admin && ['past', 'meeting'].includes(p.n)) reloadMeetings().catch(() => {});
+  }, [p.n, admin, meetingsLoaded, reloadMeetings]);
+  useEffect(() => {
+    // Header badge and review page need the queue for every role; do not wait for Admin Settings.
+    if (requestsLoaded) return;
+    reloadRequests().catch(() => {});
+  }, [requestsLoaded, reloadRequests]);
+  useEffect(() => {
+    if (!admin || p.n !== 'planEvent') return;
+    reloadEventPlans().catch(() => {});
+  }, [admin, p.n, reloadEventPlans]);
   const go = (n, x = {}) => setStack((s) => [...s, { n, ...x }]);
   const back = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   const say = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
+  const openTaskCreator = (form = EMPTY_TASK_FORM) => {
+    const initialForm = normalizeTaskForm(form);
+    setTaskForm(initialForm);
+    setSavedTaskForm(initialForm);
+    setCreateError("");
+    go("createTask", { initialForm });
+  };
+  const saveTaskDraft = async () => {
+    if (draftSaving) return;
+    setDraftSaving(true); setDraftError("");
+    try {
+      const saved = await persistTaskDraft(taskDraftPayload(taskForm));
+      const normalized = normalizeTaskForm({ ...taskForm, ...saved });
+      setSavedTaskForm(normalized);
+      setPersistedDraft(normalized);
+      say("Draft saved to your account.");
+    } catch (e) {
+      setDraftError(e.message);
+      setCreateError(`Could not save draft: ${e.message}`);
+    } finally {
+      setDraftSaving(false);
+    }
+  };
+  const submitTask = async () => {
+    const title = taskForm.title.trim();
+    const monthSource = taskForm.dueDate || taskForm.startDate;
+    if (!title) { setCreateError("Enter a task name before submitting."); return; }
+    if (!monthSource || !/^\d{4}-\d{2}/.test(monthSource)) {
+      setCreateError("Enter a start date or due date so the task can be filed under a month.");
+      return;
+    }
+    if (taskForm.startDate && taskForm.dueDate && taskForm.startDate > taskForm.dueDate) {
+      setCreateError("The start date must be on or before the due date.");
+      return;
+    }
+    if (!live) { setCreateError("Reconnect and refresh before creating a task."); return; }
+    const description = taskForm.description.trim();
+    const notes = taskForm.summary.trim();
+    if (description.length > 10000 || notes.length > 10000) {
+      setCreateError("Description and notes must each be 10,000 characters or fewer.");
+      return;
+    }
+    setSubmittingTask(true);
+    setCreateError("");
+    try {
+      const owner = taskForm.ownerCode || null;
+      const eventTag = taskForm.eventTag.trim() || null;
+      const created = await createTaskRecord({
+        title,
+        month_code: monthSource.slice(0, 7),
+        description,
+        notes,
+        due_date: taskForm.dueDate || null,
+        start_date: taskForm.startDate || null,
+        due_time: taskForm.time || null,
+        owner_code: owner,
+        assignee_text: person(owner)?.name || "",
+        stakeholder_codes: owner ? [owner] : [],
+        event_tag: eventTag,
+        project_name: eventTag,
+        priority: taskForm.priority || "normal",
+        status: taskForm.status || "todo",
+        source: "manual",
+      });
+      const dependencyIds = (taskForm.dependencyIds || []).filter((id) => id && id !== created.id);
+      let dependencyWarning = "";
+      if (dependencyIds.length) {
+        try {
+          await saveTaskDependencies(dependencyIds.map((depends_on_id) => ({
+            task_id: created.id,
+            depends_on_id,
+          })));
+        } catch (e) {
+          dependencyWarning = ` Task created, but dependencies were not saved: ${e.message}`;
+        }
+      }
+      setTasks((current) => [{
+        ...created,
+        event: eventTag || created.event || "",
+        dependsOn: dependencyWarning ? [] : dependencyIds,
+        dep: dependencyWarning ? null : (dependencyIds[0] ?? null),
+        assignees: owner ? [owner] : (created.assignees ?? []),
+        assignee: owner ?? created.assignee ?? null,
+      }, ...current.filter((item) => item.id !== created.id)]);
+      const feedback = `Created “${title}”.${dependencyWarning}`;
+      setStatusFeedback({
+        taskId: created.id,
+        error: Boolean(dependencyWarning),
+        text: feedback,
+      });
+      say(feedback);
+      try { await refresh({ force: true }); } catch { /* board still has optimistic row */ }
+      setStack([{ n: "dash" }, { n: "task", id: created.id }]);
+    } catch (e) {
+      setCreateError(`Task was not created: ${e.message}`);
+      setStatusFeedback({ error: true, text: `Task was not created: ${e.message}` });
+    } finally {
+      setSubmittingTask(false);
+    }
+  };
   const openEventPlanEditor = (form, eventPlanId = null, generated = false) => {
     setEventPlanForm(form);
     setExpandedEventTaskId(null);
@@ -1077,8 +1266,9 @@ export default function App({ profile, admin, signOut }) {
   // Status buttons in the redesign: save through the same path as the task page.
   const setTaskStatus = (id, status) => { const t = task(id); if (t) return changeStatus(t, status); };
   const isAdminView = admin && !viewAs;
-  const ownProfile = { id: profile.member_code, name: profile.name || profile.email,
-    role: profile.role, skills: profile.skills || [] };
+  const ownMember = person(profile.member_code);
+  const ownProfile = { id: profile.member_code, name: ownMember?.name || profile.name || profile.email,
+    role: ownMember?.role || profile.role, skills: profile.skills || [] };
   const me = (admin && viewAs ? person(viewAs) : ownProfile) || ownProfile;
   const sameMember = (left, right) => left != null && right != null && String(left) === String(right);
   const currentOwner = (t) => t.currentAssignee ?? t.current_assignee_code ?? t.assignee;
@@ -1114,6 +1304,11 @@ export default function App({ profile, admin, signOut }) {
       received: requests.filter((request) => request.status === "approved" && sameMember(request.proposed_assignee_code, member.id)).length,
     };
   };
+  useEffect(() => {
+    if (adminOpened && adminLoads.metrics === 'ready') {
+      setMetricsSnapshot(PEOPLE.map(member => ({ member, ...getMemberStatus(member) })));
+    }
+  }, [adminOpened, adminLoads.metrics, PEOPLE, TASKS, storedReqs]);
 
   const Top = ({ title, tag, noBack }) => (
     <div className="top">
@@ -1139,11 +1334,12 @@ export default function App({ profile, admin, signOut }) {
     </>
   );
   const Nav = () => (
-    <div className="nav"><button onClick={() => go("meetings")}>Meetings</button><button onClick={() => go("tasks")}>Tasks</button><button onClick={() => go("profiles")}>Profiles</button></div>
+    <div className="nav"><button onClick={() => go("meetings")}>Meetings</button><button onClick={() => go("events")}>Events</button><button onClick={() => go("tasks")}>Tasks</button><button onClick={() => go("profiles")}>Profiles</button></div>
   );
 
   let page;
-  const adminPages = ["admin", "editlist", "edit", "eval", "evals", "taskmetrics", "tm", "meetmetrics", "mm", "reassigned", "requestArchive", "sheetSync"];
+  const adminPages = ["admin", "editlist", "edit", "eval", "evals", "taskmetrics", "tm",
+    "meetmetrics", "mm", "reassigned", "requestArchive", "sheetSync", "createTask"];
   switch (!admin && adminPages.includes(p.n) ? "dash" : p.n) {
     case "dash": {
       // Live: the Gantt picks the week itself; admins see everyone's tasks, members their own.
@@ -1154,7 +1350,7 @@ export default function App({ profile, admin, signOut }) {
         <div className="top"><h1 className="greeting">Hey {me.name.split(" ")[0]}!</h1>
           {viewAs ? <button className="btn alt" onClick={() => { setViewAs(null); setStack([{ n: "dash" }, { n: "admin" }]); }}>BACK TO ADMIN</button>
             : isAdminView ? <button className="btn alt" onClick={() => go("admin")}>ADMIN SETTINGS</button>
-            : <button className="bell" aria-label="Notifications" onClick={() => go("review")}><Icon n="bell" s={26} /><b>{reqs.filter(r => r.status === "pending").length}</b></button>}
+            : <button className="bell" aria-label="Notifications" onClick={() => go("review")}><Icon n="bell" s={26} /><b>{requestsLoaded ? reqs.filter(r => r.status === "pending").length : '?'}</b></button>}
           <Avatar p={me} onClick={() => go("profile", { id: me.id })} /></div>
         <div className="home"><div><h3>{isAdminView && adminShowAllGantt ? 'All E-board Gantt Chart:' : 'Your Gantt Chart:'}</h3><button className="link" onClick={() => go("tasks")}>View all {isAdminView ? TASKS.length : mine.length} tasks</button><Gantt tasks={mine} allTasks={TASKS} people={PEOPLE} isAdminView={isAdminView} showAll={adminShowAllGantt} onShowAllChange={setAdminShowAllGantt} who={live && !isAdminView ? me.name : null} stateKey={profile.member_code || "board"} onOpen={(id) => go("task", { id })} /></div>
           <div><h3>Due Soon:</h3>{soon.map((t) => (<div className="due" key={t.id}>
@@ -1175,13 +1371,70 @@ export default function App({ profile, admin, signOut }) {
       </>);
       break;
     }
+    case "events": {
+      const upcoming = collectUpcomingEvents({
+        tasks: TASKS, meetings: MEETINGS, eventPlans: isAdminView ? eventPlans : [],
+      });
+      page = (<><Top title="Upcoming Events" />
+        <p className="grid-intro">Open an event or meeting to see its tasks. Admins can assign work from an event page.</p>
+        <div className="event-list" style={{ maxWidth: 920, margin: "0 auto" }}>
+          {upcoming.map((item) => (
+            <div className="due" key={item.key}>
+              <button className="pill" type="button" onClick={() => go("event", { key: item.key, name: item.name, meetingId: item.meetingId })}>
+                <b>{item.name}</b>
+                <small style={{ display: "block" }}>
+                  {item.dateLabel}
+                  {item.openCount ? ` · ${item.openCount} open task${item.openCount === 1 ? "" : "s"}` : item.taskCount ? ` · ${item.taskCount} task${item.taskCount === 1 ? "" : "s"}` : ""}
+                  {item.kinds.includes("meeting") ? " · meeting" : ""}
+                  {item.kinds.includes("plan") ? " · event plan" : ""}
+                </small>
+              </button>
+            </div>
+          ))}
+          {!upcoming.length && <p className="empty">No upcoming events yet. Tag tasks with an event name, plan an event, or schedule a meeting.</p>}
+        </div>
+        {isAdminView && <div style={{ textAlign: "center", marginTop: 18 }}>
+          <button className="btn alt" type="button" onClick={() => { setEventInput({ ...EMPTY_EVENT_INPUT }); setPlanError(""); go("planEvent"); }}>Plan Event</button>
+        </div>}
+      </>);
+      break;
+    }
+    case "event": {
+      const eventName = p.name || "";
+      const eventTasks = tasksForEvent(TASKS, eventName).slice().sort(compareByDueDate);
+      const linkedMeeting = p.meetingId ? MEETINGS.find((item) => String(item.id) === String(p.meetingId)) : null;
+      page = (<><Top title={eventName || "Event"} />
+        {linkedMeeting && <p style={{ textAlign: "center", marginTop: 0 }}>Meeting on {linkedMeeting.date}</p>}
+        <p className="grid-intro">{isAdminView
+          ? "All board tasks tagged for this event. Assign new work with New Task."
+          : "Board tasks for this event or meeting."}</p>
+        {isAdminView && <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <button className="btn" type="button" onClick={() => openTaskCreator({ ...EMPTY_TASK_FORM, eventTag: eventName })}>
+            Assign task for this event
+          </button>
+        </div>}
+        <div className="sum" style={{ maxWidth: 920, margin: "0 auto" }}>
+          {eventTasks.map((t) => (
+            <div className="due" key={t.id}>
+              <button className="pill" type="button" onClick={() => go("task", { id: t.id })}>
+                {t.title}<br /><small>{who(t).name} · {t.status} · {t.due}</small>
+              </button>
+            </div>
+          ))}
+          {!eventTasks.length && <p className="empty">No tasks are tagged for this event yet.</p>}
+        </div>
+      </>);
+      break;
+    }
     case "meetings":
       page = (<><Top title="Meetings" /><div style={{ textAlign: "right", marginTop: -50, marginBottom: 20, fontSize: 20, pointerEvents: "none" }}>{new Date().toLocaleDateString('en-US')}</div>
         <div className="two meeting-layout" style={{ gridTemplateColumns: "180px 1fr", gap: 24 }}>
           <div className="side panel">{["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" onClick={() => setRecorder(k)}>{k}</button>)}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             {["Internal", "Committee", "External"].map((k) => <button key={k} className="pill" style={{ padding: 28, display: "flex", alignItems: "center", gap: 10 }} onClick={() => setRecorder(k)}><Icon n="mic" />Create a new {k.toLowerCase()} recording</button>)}
-            <button className="btn alt" style={{ alignSelf: "flex-end" }} onClick={() => go("past")}>Past Meetings</button></div></div><UploadMeeting onSaved={() => Promise.all([refresh(), reloadMeetings()])} /></>);
+            <button className="btn alt" style={{ alignSelf: "flex-end" }} onClick={() => go("past")}>Past Meetings</button>
+            <button className="btn alt" style={{ alignSelf: "flex-end" }} onClick={() => go("events")}>Upcoming Events</button>
+          </div></div><UploadMeeting onSaved={() => Promise.all([refresh(), reloadMeetings()])} /></>);
       break;
     case "past":
       page = (<><Top title="Your past meetings" /><table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 900, margin: "20px auto", background: "#fff", borderRadius: 16, overflow: "hidden" }}>
@@ -1215,7 +1468,7 @@ export default function App({ profile, admin, signOut }) {
           <p>GirlHacks title: {profile.girlhacks_title || 'Not provided'}</p>
           <p>Personal skills: {profile.skills?.length ? profile.skills.join(', ') : 'Not provided'}</p>
         </div>}
-        <div className="two"><div className="panel"><h3>Tasks</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.title}</a> ({t.status})</li>)}{!ts.length && <li className="none">No tasks assigned yet.</li>}</ul></div>
+        <div className="two"><div className="panel"><h3>{isAdminView ? `Tasks for ${q.name}` : "Tasks"}</h3><ul>{ts.map((t) => <li key={t.id}><a href="#t" onClick={(e) => { e.preventDefault(); go("task", { id: t.id }); }}>{t.event ? `${t.event}: ` : ""}{t.title}</a> ({t.status})</li>)}{!ts.length && <li className="none">No tasks assigned yet.</li>}</ul></div>
           <div className="panel"><h3>Skills</h3>
             {q.technical?.length || q.soft?.length ? (<>
               <p className="lbl" style={{ margin: "4px 0" }}>Technical</p><ul>{q.technical.map((s) => <li key={s}>{s}</li>)}</ul>
@@ -1255,11 +1508,18 @@ export default function App({ profile, admin, signOut }) {
       break;
     }
     case "tasks": {
-      const visibleTasks = isAdminView ? tasks : tasks.filter((t) => owns(t, me.id));
+      const eventNames = [...new Set(TASKS.map((item) => (item.event || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      let visibleTasks = isAdminView ? tasks : tasks.filter((t) => owns(t, me.id));
+      if (isAdminView && taskPersonFilter) {
+        visibleTasks = visibleTasks.filter((t) => owns(t, taskPersonFilter));
+      }
+      if (taskEventFilter) {
+        visibleTasks = visibleTasks.filter((t) => String(t.event || "").trim().toLowerCase() === taskEventFilter.toLowerCase());
+      }
       const G = (title, st, avs) => (<>
         <h2 className="sec" style={{ gridColumn: 1 }}>{title}</h2>{avs ? <h2 className="sec" style={{ fontSize: 24 }}>Assign Task:</h2> : <span />}
         {visibleTasks.filter((t) => t.status === st).sort(compareByDueDate).map((t) => (<Fragment key={t.id}>
-          <div className="pill" onClick={() => go("task", { id: t.id })}><span style={{ flex: 1, minWidth: 0 }}>{(() => { const ev = eventOverrides[t.id] || t.event; return ev ? <><small className="event-tag">{ev}</small><br /></> : null; })()}{t.title} - {t.due}</span>
+          <div className="pill" onClick={() => go("task", { id: t.id })}><span style={{ flex: 1, minWidth: 0 }}>{t.event ? <><small className="event-tag">{t.event}</small><br /></> : null}{t.title} - {t.due}</span>
             <button className={`chev ${open[t.id] ? "open" : ""}`} aria-label="Expand" onClick={(e) => { e.stopPropagation(); setOpen({ ...open, [t.id]: !open[t.id] }); }}><Icon n="chev" s={20} /></button></div>
           <div className="row" style={{ gap: 8 }}>
             {isAdminView && t.status !== "Completed" && <button type="button" className="btn alt" style={{ padding: "6px 14px", fontSize: 14 }}
@@ -1281,7 +1541,22 @@ export default function App({ profile, admin, signOut }) {
                 style={s.fit === "strong" ? undefined : { opacity: 0.7 }} onClick={() => { setRequestError(""); setRequestReason(""); setModal({ reassign: [t, q, s] }); }} />; });
           })() : <small>Reconnect to request reassignment.</small>)}</div>
           {open[t.id] && <div className="det">Assignee: {t.assigneeText || who(t).name} · Status: {t.status} · Assigned {t.assigned}<br />{taskRelationshipText(t.id)}</div>}</Fragment>))}{!visibleTasks.some((t) => t.status === st) && <p className="empty">Nothing here yet. Tasks move here as their status changes.</p>}</>);
-      page = (<><Top title="Tasks Summary" /><div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
+      page = (<><Top title="Tasks Summary" />
+        <div className="task-filters">
+          {isAdminView && <label>Person
+            <select className="field" value={taskPersonFilter} onChange={(e) => setTaskPersonFilter(e.target.value)}>
+              <option value="">Everyone</option>
+              {PEOPLE.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+            </select>
+          </label>}
+          <label>Event
+            <select className="field" value={taskEventFilter} onChange={(e) => setTaskEventFilter(e.target.value)}>
+              <option value="">All events</option>
+              {eventNames.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="sum">{G("Due soon:", "Upcoming", 1)}{G("In progress:", "In-Progress", 1)}{G("Completed:", "Completed", 0)}</div></>);
       break;
     }
     case "planEvent":
@@ -1318,7 +1593,8 @@ export default function App({ profile, admin, signOut }) {
           <h2>Saved Event Plans</h2>
           <p style={{ color: "var(--muted)" }}>Plans are shared with administrators. Saving keeps a draft; approval creates assigned tasks.</p>
           {eventPlansError && <p role="alert">{eventPlansError} <button type="button" className="btn alt" onClick={reloadEventPlans}>Retry</button></p>}
-          {eventPlansLoading ? <p role="status">Loading saved event plans…</p> : eventPlans.length
+          {eventPlansLoading && !eventPlans.length && <p role="status">Loading saved event plans…</p>}
+          {eventPlans.length
             ? eventPlans.map((item) => <div className="due" key={item.id}>
               <span style={{ flex: 1 }}><b>{item.event_name}</b><small style={{ display: "block" }}>
                 {item.event_date}{item.event_time ? ` · ${item.event_time.slice(0, 5)}` : ""} · {item.status || 'draft'} · revision {item.revision || 1}
@@ -1328,7 +1604,7 @@ export default function App({ profile, admin, signOut }) {
                 {openingEventPlanId === item.id ? "Opening…" : "Open"}
               </button>
             </div>)
-            : !eventPlansError && <p>No saved event plans yet.</p>}
+            : !eventPlansError && !eventPlansLoading && <p>No saved event plans yet.</p>}
         </section></>);
       break;
     case "eventPlan": {
@@ -1448,19 +1724,128 @@ export default function App({ profile, admin, signOut }) {
         </div></>);
       break;
     }
+    case "createTask": {
+      const initialForm = p.initialForm ?? EMPTY_TASK_FORM;
+      const dependencyOptions = TASKS.filter((item) => item.status !== "Completed")
+        .slice()
+        .sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+      page = (<><Top title="New Task" tag />
+        <p className="grid-intro">Create a board task directly. This is separate from event plans.</p>
+        {persistedDraft && <div style={{ textAlign: "center", marginBottom: 12 }}>
+          <button className="btn alt" type="button" disabled={submittingTask}
+            onClick={() => { setTaskForm(normalizeTaskForm(persistedDraft)); setSavedTaskForm(normalizeTaskForm(persistedDraft)); setCreateError(""); }}>
+            Load saved draft
+          </button>
+        </div>}
+        <div className="create-task-grid">
+          <div className="panel"><div className="create-task-fields">
+            <label>Name
+              <input className="field" maxLength={200} value={taskForm.title}
+                onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })} />
+            </label>
+            <label>Description
+              <textarea className="field" maxLength={10000} value={taskForm.description}
+                onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })} />
+            </label>
+            <label>Start Date
+              <input className="field" type="date" value={taskForm.startDate}
+                onChange={(e) => setTaskForm({ ...taskForm, startDate: e.target.value })} />
+            </label>
+            <label>Due Date
+              <input className="field" type="date" value={taskForm.dueDate}
+                onChange={(e) => setTaskForm({ ...taskForm, dueDate: e.target.value })} />
+            </label>
+            <label>Due Time
+              <input className="field" type="time" value={taskForm.time}
+                onChange={(e) => setTaskForm({ ...taskForm, time: e.target.value })} />
+            </label>
+            <label>Assigned to
+              <select className="field" value={taskForm.ownerCode || ""}
+                onChange={(e) => setTaskForm({ ...taskForm, ownerCode: e.target.value })}>
+                <option value="">Unassigned</option>
+                {PEOPLE.map((member) => <option key={member.id} value={member.id}>{member.name} · {member.role}</option>)}
+              </select>
+            </label>
+            <label>Event
+              <input className="field" maxLength={100} list="task-event-options" value={taskForm.eventTag}
+                placeholder="e.g. GirlHacks 2026"
+                onChange={(e) => setTaskForm({ ...taskForm, eventTag: e.target.value })} />
+              <datalist id="task-event-options">
+                {[...new Set([
+                  ...TASKS.map((item) => (item.event || "").trim()).filter(Boolean),
+                  ...eventPlans.map((item) => (item.event_name || "").trim()).filter(Boolean),
+                ])].sort((a, b) => a.localeCompare(b)).map((name) => <option key={name} value={name} />)}
+              </datalist>
+            </label>
+            <label>Status
+              <select className="field" value={taskForm.status || "todo"}
+                onChange={(e) => setTaskForm({ ...taskForm, status: e.target.value })}>
+                <option value="todo">Todo</option>
+                <option value="in_progress">In progress</option>
+                <option value="blocked">Blocked</option>
+                <option value="done">Done</option>
+              </select>
+            </label>
+            <label>Priority
+              <select className="field" value={taskForm.priority}
+                onChange={(e) => setTaskForm({ ...taskForm, priority: e.target.value })}>
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div></div>
+          <div className="panel"><div className="create-task-fields">
+            <label>Notes
+              <textarea className="field task-summary" maxLength={10000} value={taskForm.summary}
+                placeholder="Optional notes stored on the task record."
+                onChange={(e) => setTaskForm({ ...taskForm, summary: e.target.value })} />
+            </label>
+            <label>Depends on
+              <select className="field" multiple size={Math.min(8, Math.max(3, dependencyOptions.length || 3))}
+                value={taskForm.dependencyIds || []}
+                onChange={(e) => setTaskForm({
+                  ...taskForm,
+                  dependencyIds: Array.from(e.target.selectedOptions, (option) => option.value),
+                })}>
+                {dependencyOptions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+              </select>
+            </label>
+            <p style={{ margin: 0, color: "var(--muted)", fontWeight: 500 }}>
+              Hold Ctrl/Cmd to select multiple prerequisites. Dependencies are saved after the task is created.
+            </p>
+          </div></div>
+        </div>
+        {(createError || draftError) && <p className="plan-error" role="alert">{createError || draftError}</p>}
+        <div className="create-task-actions">
+          <button className="btn alt" type="button" disabled={submittingTask}
+            onClick={() => { setTaskForm(normalizeTaskForm(savedTaskForm ?? initialForm)); setCreateError(""); }}>
+            Revert Changes
+          </button>
+          <button className="btn out" type="button" disabled={draftSaving || submittingTask} onClick={saveTaskDraft}>
+            {draftSaving ? "Saving…" : "Save Draft"}
+          </button>
+          <button className="btn" type="button" disabled={submittingTask || !live} onClick={submitTask}>
+            {submittingTask ? "Submitting…" : "Create task"}
+          </button>
+        </div></>);
+      break;
+    }
     case "admin":
       page = (<><Top title="Admin Settings" tag noBack /><div className="admin-menu">
-        <button onClick={() => go("editlist")}>Board Information</button>
+        <button onClick={() => go("editlist")}>Manage Board Roster</button>
         <button onClick={() => go("metricsOverview")}>Metrics Overview</button>
         <button onClick={() => go("review")}>Task Reassignment Requests</button>
         <button onClick={() => go("attendance")}>Manage Meeting Attendance</button>
         <button onClick={() => go("sheetSync")}>Google Sheets Sync</button>
+        <button onClick={() => openTaskCreator(EMPTY_TASK_FORM)}>New Task</button>
         <button onClick={() => { setEventInput({ ...EMPTY_EVENT_INPUT }); setPlanError(""); go("planEvent"); }}>Plan Event</button>
       </div>
-        <div style={{ textAlign: "center" }}><button className="btn alt" onClick={() => setStack([{ n: "dash" }])}>Back to dashboard</button></div><AutomationStatus /></>);
+        <p role="status" style={{ textAlign: 'center' }}>Admin data: {Object.values(adminLoads).filter(value => value === 'ready').length} of 6 ready</p>
+        <div style={{ textAlign: "center" }}><button className="btn alt" onClick={() => setStack([{ n: "dash" }])}>Back to dashboard</button></div><AutomationStatus initialData={automationStatus} deferInitial /></>);
       break;
     case "metricsOverview": {
-      const memberMetrics = PEOPLE.map((member) => ({ member, ...getMemberStatus(member) }));
+      const memberMetrics = metricsSnapshot ?? PEOPLE.map((member) => ({ member, ...getMemberStatus(member) }));
       const maxTasks = Math.max(1, ...memberMetrics.map(({ completed, pending, overdue, transferred }) =>
         completed.length + pending.length + overdue.length + transferred.length,
       ));
@@ -1595,7 +1980,7 @@ export default function App({ profile, admin, signOut }) {
       break;
     }
     case "sheetSync":
-      page = <><Top title="Google Sheets Sync" tag /><SheetSync onApplied={refresh} /></>;
+      page = <><Top title="Google Sheets Sync" tag /><SheetSync onApplied={() => refresh({ force: true })} initialSources={sheetSources} initialStatus={automationStatus} deferInitial loadError={adminLoads.sheets === 'error'} /></>;
       break;
     case "attendance": {
       page = <><Top title="Meeting Attendance" tag />
@@ -1606,11 +1991,13 @@ export default function App({ profile, admin, signOut }) {
       break;
     }
     case "editlist":
-      page = <Grid title="Board Information" tag description="Board information comes from the approved roster files and is read-only here." people={orderProfiles(PEOPLE)} onPick={(q) => go("edit", { id: q.id })} />;
+      page = <><Top title="Board Roster" tag /><RosterManager currentMemberCode={profile.member_code}
+        onSaved={() => refresh({ force: true })} onViewProfile={id => go("edit", { id })} /></>;
       break;
     case "edit": {
-      const q = person(p.id);
-      page = q ? <><Top title="Board Information" tag /><ProfileEditor key={q.id} member={q} /></> : <p>Member not found.</p>;
+      const member = person(p.id);
+      page = member ? <><Top title="Board Information" tag /><ProfileEditor member={member} /></>
+        : <p>Member not found.</p>;
       break;
     }
     case "evals":
@@ -1669,14 +2056,14 @@ export default function App({ profile, admin, signOut }) {
         </div>;
         page = <><Top title={archivedOnly ? "Archived Reassignment Requests" : approvedOnly ? "Approved Reassignments" : admin ? "Reassignment Requests" : "Your Reassignment Requests"} tag={admin} />
           {archivedOnly && <button className="btn alt" onClick={() => go("review")}>Back to Task Reassignment Requests</button>}
-          <button className="btn alt" onClick={() => refresh().catch(() => {})}>Refresh</button>
+          <button className="btn alt" onClick={() => Promise.allSettled([refresh({ force: true }), reloadRequests()])}>Refresh</button>
           {admin && <button className="btn alt" onClick={() => dispatchPhotonNotifications().then(result => say(result.queued ? "Pending text notifications queued." : "Photon webhook delivery is not enabled.")).catch(e => setRequestError(e.message))}>Retry text notifications</button>}
           {admin && !archivedOnly && <button className="btn alt" onClick={() => go("requestArchive")}>Archived requests ({reqs.filter(r => !!r.archived_at).length})</button>}
           {requestError && <p role="alert">{requestError}</p>}
           {!approvedOnly && !archivedOnly && <><h2>Pending ({pending.length})</h2>{pending.map(card)}
-            {!loading && !dataError && !requestDataError && !pending.length && <p className="empty">No pending requests.</p>}</>}
+            {requestsLoaded && !loading && !dataError && !requestDataError && !pending.length && <p className="empty">No pending requests.</p>}</>}
           <h2>{archivedOnly ? "Archived" : approvedOnly ? "Approved" : "History"}</h2>{history.map(card)}
-          {!loading && !dataError && !requestDataError && !history.length && <p className="empty">{archivedOnly ? "No archived requests." : approvedOnly ? "No approved reassignments." : "No request history."}</p>}
+          {requestsLoaded && !loading && !dataError && !requestDataError && !history.length && <p className="empty">{archivedOnly ? "No archived requests." : approvedOnly ? "No approved reassignments." : "No request history."}</p>}
         </>;
         break;
       }
@@ -1696,7 +2083,7 @@ export default function App({ profile, admin, signOut }) {
   // The "Profiles" grid for admins opens a profile first, where clicking the name offers dashboard view
   return (
     <div className={`app${p.n === "dash" ? "" : " inner-page"}`}><style>{CSS}{CUTE_CSS}</style><CursorFx /><header style={{ display: "flex", justifyContent: "flex-end", gap: 16 }}>
-        <button className="link" onClick={() => go("review")}>Requests ({requestDataError ? '?' : reqs.filter(r => r.status === "pending").length})</button>
+        <button className="link" onClick={() => go("review")}>{`Requests (${!requestsLoaded ? '?' : reqs.filter(r => r.status === "pending").length})`}</button>
         <button className="link" onClick={() => signOut().catch(e => say(e.message))}>Sign out</button>
       </header>
       {statusFeedback && <div className="panel" role={statusFeedback.error ? 'alert' : 'status'} style={{marginBottom:12}}>
@@ -1705,13 +2092,22 @@ export default function App({ profile, admin, signOut }) {
         <button className="link" aria-label="Dismiss status message" onClick={() => setStatusFeedback(null)}>Dismiss</button>
       </div>}
       {dataError && <div role="alert">Could not refresh Supabase data: {dataError} <button onClick={() => refresh().catch(() => {})}>Retry</button></div>}
-      {requestDataError && <p role="alert">Requests unavailable: {requestDataError} <button onClick={() => refresh().catch(() => {})}>Retry requests</button></p>}
+      {requestDataError && <p role="alert">Requests unavailable: {requestDataError} <button onClick={() => reloadRequests().catch(() => {})}>Retry requests</button></p>}
       {dependencyError && <p role="alert">Task links unavailable: {dependencyError}. Tasks are still refreshed.</p>}
-      {loading && <p role="status">Loading tasks and requests?</p>}
+      {loading && boardMember && <div className="panel" role="status" style={{ maxWidth: 520, margin: '20px auto', textAlign: 'center' }}>
+        <strong>Loading the E-board task board</strong>
+        <progress value={loadProgress} max="100" style={{ display: 'block', width: '100%', marginTop: 12 }} />
+        <small>{loadProgress}% complete</small>
+      </div>}
+      {loading && !boardMember && <p role="status">Loading your account…</p>}
       {meetingError && ['past', 'meeting', 'mm', 'memberStatus'].includes(p.n) && <p role="alert">{meetingError} <button onClick={() => reloadMeetings().catch(() => {})}>Retry meetings</button></p>}
-      {admin && persistedDraft && p.n === "planTask" && <button className="btn alt" onClick={() => openTaskCreator(persistedDraft)}>Resume saved draft</button>}
-      <main className={`page-content${p.n === "dash" ? " dashboard-content" : ""}`}>{page}</main>
-      {p.n === "dash" && <div style={{display:'flex',alignItems:'center',justifyContent:'flex-start',gap:12,marginBottom:8}}><button className="btn alt" onClick={() => refresh().catch(() => {})}>Refresh tasks</button><small>{lastTaskRefresh ? `Tasks refreshed at ${lastTaskRefresh.toLocaleTimeString()}` : 'Waiting for task data…'}</small></div>}
+      {admin && persistedDraft && p.n === "admin" && <div style={{ textAlign: "center", marginBottom: 8 }}>
+        <button className="btn alt" type="button" onClick={() => openTaskCreator(persistedDraft)}>Resume saved task draft</button>
+      </div>}
+      <main className={`page-content${p.n === "dash" ? " dashboard-content" : ""}`}>
+        {loading && boardMember && !dashboardCache ? null : page}
+      </main>
+      {p.n === "dash" && <div style={{display:'flex',alignItems:'center',justifyContent:'flex-start',gap:12,marginBottom:8}}><button className="btn alt" onClick={() => refresh({ force: true }).catch(() => {})}>Refresh tasks</button><small>{lastTaskRefresh ? `Tasks refreshed at ${lastTaskRefresh.toLocaleTimeString()}` : 'Waiting for task data…'}</small></div>}
       {p.n === "dash" && <Nav />}
       {modal?.view && (<div className="modal"><div className="box">View {modal.view.name}’s page?<div className="acts"><button className="btn alt" onClick={() => setModal(null)}>Cancel</button>
         <button className="btn" onClick={() => { setViewAs(modal.view.id); setModal(null); setStack([{ n: "dash" }]); }}>Confirm</button></div></div></div>)}

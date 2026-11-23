@@ -105,7 +105,7 @@ approval are recipients asked to accept or deny. Acceptance atomically transfers
 rejection/denial preserves it. Original assignees and outgoing-owner history remain stored.
 See [HELP_WORKFLOW.md](HELP_WORKFLOW.md) for current name/number selection and live tests.
 
-Notifications, Nudge and scheduled Sheets sync require `20261115200000_notification_automation.sql`
+Notifications, Nudge and scheduled Sheets sync require `20261115203000_notification_automation.sql`
 and the cloud setup in [AUTOMATION.md](AUTOMATION.md). The frontend queues authorized nudges
 and displays automation health; it never sends provider credentials or recipient identities.
 
@@ -114,7 +114,7 @@ and displays automation health; it never sends provider credentials or recipient
 After applying the migration and restarting, sign in as an administrator. Create a task
 with an assignee and dates, edit its notes, change status and reload the page. Save a
 draft, reload, and choose **Resume saved draft** under **Create Task**. Save an evaluation
-comment and reopen it. Confirm the board information has no edit controls. Record
+comment and reopen it. Add or edit a person in **Manage Board Roster**. Record
 attendance and check that the evaluation uses recorded meetings only. A member account should not see administrator
 editing controls, and the API also rejects those writes.
 

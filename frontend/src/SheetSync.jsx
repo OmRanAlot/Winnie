@@ -5,8 +5,8 @@ import AutomationStatus from './AutomationStatus.jsx';
 
 const display = value => value == null || value === '' ? '(empty)' : String(value);
 
-export default function SheetSync({ onApplied }) {
-  const [sources, setSources] = useState([]);
+export default function SheetSync({ onApplied, initialSources = null, initialStatus = null, deferInitial = false, loadError = false }) {
+  const [sources, setSources] = useState(initialSources ?? []);
   const [key, setKey] = useState('');
   const [plan, setPlan] = useState(null);
   const [resolutions, setResolutions] = useState({});
@@ -17,7 +17,18 @@ export default function SheetSync({ onApplied }) {
     const data = await getSheetSyncSources();
     setSources(data); setKey(current => current || data[0]?.key || '');
   };
-  useEffect(() => { reload().catch(e => setError(e.message)).finally(() => setBusy(false)); }, []);
+  useEffect(() => {
+    if (deferInitial) return;
+    reload().catch(e => setError(e.message)).finally(() => setBusy(false));
+  }, [deferInitial]);
+  useEffect(() => {
+    if (initialSources) {
+      setSources(initialSources); setKey(current => current || initialSources[0]?.key || ''); setBusy(false);
+    }
+  }, [initialSources]);
+  useEffect(() => {
+    if (loadError) { setError('Could not load tracker sources.'); setBusy(false); }
+  }, [loadError]);
   const run = async action => {
     setBusy(true); setError(''); setMessage('');
     try { await action(); } catch (e) { setError(e.message); }
@@ -70,6 +81,6 @@ export default function SheetSync({ onApplied }) {
       })}>Apply Reviewed Changes</button>
     </>}
     {message && <p role="status">{message}</p>}
-    <AutomationStatus />
+    <AutomationStatus initialData={initialStatus} deferInitial={deferInitial} />
   </div>;
 }

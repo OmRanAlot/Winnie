@@ -253,3 +253,27 @@ def test_missing_production_provider_package_has_actionable_safe_error(tmp_path,
         assert 'provider package' in response.json()['detail'] and 'private provider' not in response.text
     finally:
         app.dependency_overrides.pop(authorize_tasks,None)
+
+
+def test_interactive_draft_gives_up_before_the_hosting_proxy_does(knowledge, monkeypatch):
+    """Firebase Hosting cuts requests at 60 s; the API must answer first with its own message."""
+    from app.routes import planning as planning_route
+
+    monkeypatch.setenv("WINNIE_PLANNING_KNOWLEDGE_PATH", str(knowledge))
+    monkeypatch.setenv("WINNIE_PLANNING_TIMEOUT_SECONDS", "180")
+    seen = {}
+
+    async def fake_create_draft(request, **kwargs):
+        seen["timeout"] = kwargs["timeout"]
+        raise PlanningUnavailable("slow") from TimeoutError()
+
+    monkeypatch.setattr(planning_route, "create_draft", fake_create_draft)
+    app.dependency_overrides[authorize_tasks] = lambda: None
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/planning/drafts", json=request().model_dump(mode="json"))
+    finally:
+        app.dependency_overrides.pop(authorize_tasks, None)
+    assert seen["timeout"] < 60
+    assert response.status_code == 503
+    assert "took too long" in response.json()["detail"]

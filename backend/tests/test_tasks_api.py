@@ -118,6 +118,24 @@ def test_record_api_and_timeline_share_ingested_uuid_tasks(client, db):
         app.dependency_overrides.pop(get_task_store, None)
 
 
+def test_record_api_filters_recent_updates(client, db):
+    from datetime import UTC
+
+    db.insert('tasks', [
+        {'title': 'Earlier', 'month_code': '2026-11', 'owner_code': 'MEMBER',
+         'updated_at': '2026-11-17T12:00:00+00:00'},
+        {'title': 'Recent', 'month_code': '2026-11', 'owner_code': 'MEMBER',
+         'updated_at': '2026-11-19T12:00:00+00:00'},
+        {'title': 'Other owner', 'month_code': '2026-11', 'owner_code': 'OTHER',
+         'updated_at': '2026-11-19T12:00:00+00:00'},
+    ])
+    response = client.get('/api/tasks/records', params={
+        'updated_since': datetime(2026, 11, 18, tzinfo=UTC).isoformat(),
+    })
+    assert response.status_code == 200
+    assert {task['title'] for task in response.json()['data']} == {'Recent', 'Other owner'}
+
+
 def test_dependency_batch_endpoint_persists_only_admin_validated_links(client, db):
     from app.core.auth import require_admin
     from app.routes.tasks import authorize_tasks

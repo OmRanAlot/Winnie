@@ -3,26 +3,38 @@
     GET /api/members                       public profiles, with role-based skills
     GET /api/members/assignments           which members each task is assigned to
     GET /api/members/candidates/{task_id}  who could take over a pending task (skills + workload)
+    GET /api/members/messaging-contacts    admin: every board phone ready for iMessage
+    POST /api/members/messaging-contacts/sync  admin: link identities + enroll Photon users
     GET /api/members/{code}/advisors       members who held this member's role before
 
-Only public profile fields are returned; contact details stay in the backend. Uses the same
-access check as /api/tasks.
+The shared directory uses the same access check as /api/tasks. Roster administration
+requires a signed-in administrator and is the only member endpoint with contact details.
 """
 
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
 from google.genai import errors as genai_errors
 from httpx import HTTPError
+from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.auth import Principal, require_admin
 from app.core.settings import Settings
 from app.integrations.supabase import StorageUnavailable
 from app.routes.tasks import authorize_tasks, envelope
+from app.schemas.roster import RosterCreate, RosterUpdate
+from app.schemas.tasks import StakeholderCode
 from app.services.member_history import advisors_for, load_previous_roles, with_previous_roles
 from app.services.member_skills import load_skills, with_skills
-from app.services.members import AliasConflict, MemberStore, task_assignments
+from app.services.members import AliasConflict, MemberStore, RosterWriteError, task_assignments
+from app.services.messaging_contacts import (
+    MessagingContactsError,
+    MessagingContactStore,
+    board_phone_rows,
+    sync_board_phones,
+)
 from app.services.task_matching import suggest_candidates, workload
 from app.services.tasks import TaskNotFound, TaskStore
 
@@ -40,10 +52,73 @@ def get_task_store():
     return TaskStore()
 
 
+def get_messaging_contacts():
+    return MessagingContactStore()
+
+
 def failure(status, message):
     return JSONResponse(status_code=status, content={
         "success": False, "data": None, "error": {"message": message}, "meta": {},
     })
+
+
+def require_roster_admin(actor: Annotated[Principal, Depends(require_admin)]):
+    if actor.service:
+        raise HTTPException(403, "Sign in as an administrator to manage the roster.")
+    return actor
+
+
+RosterAdmin = Annotated[Principal, Depends(require_roster_admin)]
+Members = Annotated[MemberStore, Depends(get_member_store)]
+ROSTER_UNAVAILABLE = "The roster is unavailable. Check that the roster migration is applied."
+
+
+def save_roster_entry(code, body, response, actor, members, *, create=False):
+    try:
+        saved = members.save_roster_member(
+            actor.user_id, code, Settings().active_semester, body.model_dump(exclude_unset=True),
+            create=create,
+        )
+    except RosterWriteError as error:
+        if error.code == "23505":
+            if str(error).startswith("That name"):
+                return failure(409, "That name is already used on the roster or in the task tracker.")
+            return failure(409, "That email is already linked to another member.")
+        if error.code == "P0002":
+            return failure(404, "Member not found.")
+        if error.code == "42501":
+            return failure(403, "Administrator access is required.")
+        if error.code == "40P01":
+            return failure(409, "The roster changed during this edit. Reload it and try again.")
+        if str(error).startswith(("Confirm the member", "Ask another administrator")):
+            return failure(422, str(error))
+        return failure(422, "Check the submitted roster fields.")
+    except StorageUnavailable:
+        return failure(503, ROSTER_UNAVAILABLE)
+    response.headers["Cache-Control"] = "private, no-store"
+    return envelope(saved)
+
+
+@router.get("/roster")
+def list_roster(response: Response, _actor: RosterAdmin, members: Members):
+    try:
+        data = members.list_roster()
+    except StorageUnavailable:
+        return failure(503, ROSTER_UNAVAILABLE)
+    response.headers["Cache-Control"] = "private, no-store"
+    return envelope(data, {"total": len(data)})
+
+
+@router.post("/roster", status_code=201)
+def create_roster_entry(body: RosterCreate, response: Response, actor: RosterAdmin, members: Members):
+    return save_roster_entry(f"WICS_{uuid4().hex.upper()}", body, response, actor, members, create=True)
+
+
+@router.patch("/roster/{code}")
+def update_roster_entry(
+    code: StakeholderCode, body: RosterUpdate, response: Response, actor: RosterAdmin, members: Members
+):
+    return save_roster_entry(code, body, response, actor, members)
 
 
 def semester_tasks(tasks: TaskStore, semester: str) -> list[dict]:
@@ -89,6 +164,66 @@ def list_assignments(
     unresolved = sum(codes is None for codes in data.values())
     return envelope(data, {"semester": semester, "tasks": len(data), "unresolved": unresolved,
                            "aliases": len(aliases)})
+
+
+class MessagingSyncInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enroll_photon: bool = True
+    rotate_across_lines: bool = Field(
+        default=True,
+        description="On dedicated Photon projects, enroll each board phone on every line.",
+    )
+
+
+@router.get("/messaging-contacts")
+def list_messaging_contacts(
+    response: Response,
+    _actor: RosterAdmin,
+    members: Members,
+    contacts: Annotated[MessagingContactStore, Depends(get_messaging_contacts)],
+):
+    """Every active, consented board phone with iMessage identity status."""
+    try:
+        roster = members.list_roster()
+        identities = contacts.list_identities()
+        data = board_phone_rows(roster, identities)
+    except StorageUnavailable:
+        return failure(503, ROSTER_UNAVAILABLE)
+    response.headers["Cache-Control"] = "private, no-store"
+    return envelope(data, {
+        "total": len(data),
+        "ready": sum(1 for row in data if row["ready"]),
+        "with_phone": sum(1 for row in data if row.get("handle")),
+    })
+
+
+@router.post("/messaging-contacts/sync")
+def sync_messaging_contacts(
+    body: MessagingSyncInput,
+    response: Response,
+    _actor: RosterAdmin,
+    members: Members,
+    contacts: Annotated[MessagingContactStore, Depends(get_messaging_contacts)],
+):
+    """Link iMessage identities for all roster phones and enroll them in Photon."""
+    try:
+        roster = members.list_roster()
+        data = sync_board_phones(
+            roster, contacts, Settings(),
+            enroll_photon=body.enroll_photon,
+            rotate_across_lines=body.rotate_across_lines,
+        )
+    except MessagingContactsError as error:
+        return failure(error.status, str(error))
+    except StorageUnavailable:
+        return failure(503, ROSTER_UNAVAILABLE)
+    response.headers["Cache-Control"] = "private, no-store"
+    return envelope(data, {
+        "total": data["total"],
+        "ready": data["ready"],
+        "mode": data.get("mode"),
+        "lines": data.get("lines") or [],
+    })
 
 
 @router.get("/candidates/{task_id}")

@@ -52,6 +52,7 @@ describe('authentication screens', () => {
     expect(await authHeaders()).toEqual({ Authorization: 'Bearer synthetic' });
     await act(async () => event('TOKEN_REFRESHED', { ...session, access_token: 'new-token' }));
     expect(await authHeaders()).toEqual({ Authorization: 'Bearer new-token' });
+    expect(sdk.getProfile).toHaveBeenCalledTimes(1);
     expect(sdk.getSession).not.toHaveBeenCalled();
     await act(async () => event('SIGNED_OUT', null));
     expect(await authHeaders()).toEqual({});

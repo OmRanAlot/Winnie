@@ -8,7 +8,7 @@ always-running worker is required once deployment/setup is complete.
 
 1. Apply any missing earlier migrations, then apply these new migrations in order:
    - `20261115195000_admin_first_reassignment.sql`
-   - `20261115200000_notification_automation.sql`
+   - `20261115203000_notification_automation.sql`
    - `20261115220000_nudge_delivery_refresh.sql` (after other earlier migrations)
    Do not replay migrations already installed through the SQL Editor.
 2. Ensure the signed Photon webhook/queue setup is working. Keep the local listener stopped.
@@ -21,12 +21,25 @@ always-running worker is required once deployment/setup is complete.
    The flag explicitly enables auto-apply for the tracker sources already configured on
    Cloud Run. Omit it to preserve each source's existing `auto_apply` setting. Conflicting edits
    still block application and require review in Google Sheets Sync.
+
+   If the image already deployed successfully and setup failed during configuration, resume
+   without rebuilding local code:
+
+   ```powershell
+   powershell -File .\deploy\setup-automation.ps1 -EnableSheetsAutoApply -SkipBuild
+   ```
+
+   Environment updates use a temporary gcloud flags file so Windows PowerShell preserves
+   JSON quotes and unrelated environment variables/secrets. If a previous update corrupted
+   the Sheets JSON, setup recovers that setting from the latest healthy revision before
+   enabling auto-apply. All automation settings are applied together in one revision.
 4. Deploy the frontend using the normal Firebase deployment. Open Admin Settings →
    Automation and notifications; check job outcomes after the next five-minute tick.
 
-The setup script checks the migration, deploys the existing API, verifies Photon readiness,
-creates a scheduler-only service account, grants invocation on this service, preserves existing
-secrets/environment values, and creates/updates two jobs. It does not run the jobs immediately.
+The setup script checks the migration and Photon readiness, creates a scheduler-only service
+account, grants invocation on this service, and deploys/configures the API while preserving
+unrelated secrets/environment values. It verifies readiness again before creating/updating
+the two jobs. It does not run the jobs immediately.
 It does not copy a Windows credentials-file path to Cloud Run. Google Sheets uses the existing
 runtime service account and workbook sharing; Scheduler's account only invokes the API.
 

@@ -35,6 +35,13 @@ const STATUS_TO_UI = { todo: "Upcoming", in_progress: "In-Progress", blocked: "I
 const STATUS_FROM_UI = { Upcoming: "todo", "In-Progress": "in_progress", Completed: "done" };
 const apiBase = (import.meta.env?.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
+// Firebase Hosting cuts proxied requests off at 60 seconds; the backend may still finish.
+const GATEWAY_MESSAGES = {
+  504: "The server took too long to answer. It may still finish: refresh the board in a minute before trying again.",
+  502: "The server is temporarily unavailable. Please try again in a moment.",
+  503: "The server is temporarily unavailable. Please try again in a moment.",
+};
+
 export async function request(path, options = {}) {
   const method = (options.method ?? "GET").toUpperCase();
   const endpoint = `${apiBase}${path.split("?")[0]}`;
@@ -46,10 +53,17 @@ export async function request(path, options = {}) {
       headers: { ...(typeof FormData !== 'undefined' && options.body instanceof FormData ? {} : { "Content-Type": "application/json" }), ...await authHeaders(), ...options.headers },
       signal: options.signal ?? AbortSignal.timeout(15000),
     });
-  } catch {
-    throw new Error(`Cannot reach the backend for ${method} ${endpoint}. Is it running on port 8000?`);
+  } catch (cause) {
+    if (cause?.name === "TimeoutError" || cause?.name === "AbortError") {
+      throw new Error(`${method} ${endpoint} took too long to respond. Please try again.`);
+    }
+    throw new Error(`Cannot reach the server for ${method} ${endpoint}. Check your connection and try again.`);
   }
   const body = await response.json().catch(() => null);
+  if (!body && GATEWAY_MESSAGES[response.status]) {
+    // Hosting/load-balancer pages are HTML, not our JSON envelope.
+    throw new Error(GATEWAY_MESSAGES[response.status]);
+  }
   if (!response.ok || !body?.success) {
     const raw = body?.error?.message || body?.detail;
     const detail = Array.isArray(raw) ? raw.map(e => `${e.loc?.slice(1).join('.')}: ${e.msg}`).join('; ') : raw;
@@ -102,6 +116,7 @@ export function toUiTask(t, monday = weekStart()) {
     dueIso: t.due_date,
     finished: t.completed_at ? usDate(t.completed_at.slice(0, 10)) : "",
     completedAt: t.completed_at || null,
+    updatedAt: t.updated_at || null,
     meetingId: t.source_meeting_id ?? null,
     assignee: ownerCode,
     currentAssignee: ownerCode,
@@ -120,11 +135,14 @@ export function toUiTask(t, monday = weekStart()) {
   };
 }
 
-export async function getTasks() {
+export async function getTasks({ updatedSince, onPage } = {}) {
   const all = [];
+  const params = new URLSearchParams({ limit: String(PAGE) });
+  if (updatedSince) params.set('updated_since', updatedSince);
   for (let offset = 0; ; offset += PAGE) {
-    const body = await request(`/tasks/records?limit=${PAGE}&offset=${offset}`);
+    const body = await request(`/tasks/records?${params}&offset=${offset}`);
     all.push(...body.data);
+    onPage?.(all.length, body.meta?.total ?? all.length);
     if (body.data.length < PAGE || (body.meta?.total != null && all.length >= body.meta.total)) break;
   }
   const monday = weekStart();
@@ -148,6 +166,37 @@ export async function getMembers() {
     personalSkills: m.skills_source === 'supabase' ? m.skills : [],
     skillsSource: m.skills_source ?? null, // "role-derived" = generated from the role text
   }));
+}
+
+export async function getBoardRoster(signal) {
+  return (await request('/members/roster', { signal })).data;
+}
+
+export async function addBoardMember(fields) {
+  return (await request('/members/roster', { method: 'POST', body: JSON.stringify(fields) })).data;
+}
+
+export async function updateBoardMember(code, fields) {
+  return (await request(`/members/roster/${encodeURIComponent(code)}`, {
+    method: 'PATCH', body: JSON.stringify(fields),
+  })).data;
+}
+
+/** Returns `{ data, meta }` — both are needed for the board-phone panel. */
+export async function getMessagingContacts(signal) {
+  const body = await request('/members/messaging-contacts', { signal });
+  return { data: body.data, meta: body.meta };
+}
+
+export async function syncMessagingContacts({ enrollPhoton = true, rotateAcrossLines = true } = {}) {
+  const body = await request('/members/messaging-contacts/sync', {
+    method: 'POST',
+    body: JSON.stringify({
+      enroll_photon: enrollPhoton,
+      rotate_across_lines: rotateAcrossLines,
+    }),
+  });
+  return { data: body.data, meta: body.meta };
 }
 
 export async function getMeetings() {
@@ -265,7 +314,11 @@ export async function assignRecordingTasks(id, recording) {
     }),
     signal: AbortSignal.timeout(200000),
   });
-  return body.data.assignments; // [{title, description, seat, assignee, deadline, rationale, needs_review}]
+  return { // assignments: [{title, description, seat, assignee, deadline, rationale, needs_review}]
+    assignments: body.data.assignments ?? [],
+    stored: body.meta?.stored === true,
+    storeError: body.meta?.store_error ?? null,
+  };
 }
 
 // {[task_id]: "AI-generated label"} for tasks passed as [{id, title, description}]

@@ -38,7 +38,8 @@ export function AuthProvider({ children }) {
       sessionRef.current = next;
       if (next && next.user.id !== activeUser.current) { setLoading(true); setProfile(null); }
       activeUser.current = next?.user.id || null;
-      setSession(next);
+      // Token rotation updates the request token without reloading the same profile.
+      setSession(previous => previous?.user.id === next?.user.id ? previous : next);
       if (event === 'PASSWORD_RECOVERY') setPasswordMode(true);
       if (!next) { setProfile(null); setError(''); setLoading(false); }
     });
@@ -71,7 +72,7 @@ export function AuthProvider({ children }) {
       if (!controller.signal.aborted && current === generation.current) setLoading(false);
     });
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [session?.access_token, revision]);
+  }, [session?.user.id, revision]);
   async function signOut() {
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) throw signOutError;

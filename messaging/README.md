@@ -32,7 +32,14 @@ the user typed; it comes from Photon message metadata.
 npm start
 ```
 
-The command loads `.env`, runs TypeScript with `tsx`, and starts the incoming-message
+From the repository root you can also start API + dashboard + this listener with
+`.\scripts\dev-local.ps1 -Messaging`, or exercise Photon alone with your own number via
+`.\scripts\test-photon.ps1` (`send` / `listen` / `chat`). That CLI never reads roster
+phone numbers from Supabase; you pass `-To` / `-From` explicitly, and the handle
+must already be allowlisted under Users in the Photon dashboard. See
+[LOCAL_SETUP.md](../docs/LOCAL_SETUP.md).
+
+The `npm start` command loads `.env`, runs TypeScript with `tsx`, and starts the incoming-message
 loop. Leave it running, then text the iMessage line shown in your Photon dashboard
 from a phone allowed in that project. `ping` checks the backend connection, `help`
 shows the menu, `whoami` shows registration status, and `tasks` returns only the

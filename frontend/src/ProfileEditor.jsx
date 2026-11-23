@@ -1,6 +1,6 @@
 import { getRoleProfile } from "./lib/roleProfiles.js";
 
-// Approved roster information is displayed without an application edit path.
+// Role and skill details linked from the board roster.
 export default function BoardInformation({ member }) {
   const values = (items) => Array.isArray(items) ? items.filter(Boolean) : [];
   const skills = values(member.skills);
@@ -9,7 +9,6 @@ export default function BoardInformation({ member }) {
   const profile = getRoleProfile(member.role);
 
   return <section className="board-profile">
-    <p className="board-profile-intro">Board information comes from the approved roster files and is read-only here.</p>
     <div className="board-profile-identity">
       <div className="board-profile-avatar" aria-hidden="true">{member.name?.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div>
       <div><p className="board-profile-label">E-Board Member</p><h2>{member.name}</h2><p className="board-profile-role">{member.role}</p></div>

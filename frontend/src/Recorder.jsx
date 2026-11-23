@@ -1,7 +1,7 @@
 // Meeting recorder for the Meetings screen: records the microphone, transcribes live in the
 // browser (lib/speech.ts), saves audio + transcript to POST /api/recordings, then asks the backend
-// to extract proposed tasks (POST /api/recordings/{id}/assignments). Proposed tasks are shown for
-// review only; nothing is added to the task list automatically.
+// to extract tasks (POST /api/recordings/{id}/assignments), which the backend stores on the board
+// (once per recording). If storing fails, the proposals are shown as NOT saved.
 import { useEffect, useRef, useState } from "react";
 import { assignRecordingTasks, saveRecording } from "./lib/api.js";
 import { browserRecognition, startTranscription } from "./lib/speech.ts";
@@ -27,6 +27,7 @@ export default function Recorder({ kind, onClose, onSaved = async () => {} }) {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [tasks, setTasks] = useState(null);
+  const [stored, setStored] = useState(false);
   const text = useRef("");
   const media = useRef(null);
   const speech = useRef(null);
@@ -94,8 +95,14 @@ export default function Recorder({ kind, onClose, onSaved = async () => {} }) {
       const saved = await saveRecording(recording);
       if (!text.current.trim()) { setNotice("Saved, but no words were transcribed, so there are no tasks to extract."); setPhase("done"); setTasks([]); return; }
       setPhase("assigning");
-      setTasks(await assignRecordingTasks(saved.id, recording));
-      try { await onSaved(); } catch { setNotice('Tasks were saved, but the board could not refresh. Please refresh it.'); }
+      const result = await assignRecordingTasks(saved.id, recording);
+      setTasks(result.assignments);
+      setStored(result.stored);
+      if (!result.stored) {
+        setError(`${result.storeError || "Tasks were not saved."} The recording itself is saved; try again later or add these tasks by hand.`);
+      } else {
+        try { await onSaved(); } catch { setNotice('Tasks were saved, but the board could not refresh. Please refresh it.'); }
+      }
       setPhase("done");
     } catch (e) {
       setError(e.message);
@@ -117,14 +124,14 @@ export default function Recorder({ kind, onClose, onSaved = async () => {} }) {
         {transcript || <i>Words appear here as you speak…</i>} <span style={{ opacity: 0.6 }}>{interim}</span></div>}
       {notice && <p style={{ fontSize: 14 }}>{notice}</p>}
       {error && <p role="alert" style={{ color: "#c0392b", fontSize: 15 }}>{error}</p>}
-      {tasks && tasks.length > 0 && <div style={{ marginTop: 10 }}><b>Tasks saved from this recording (review flagged assignments):</b>
+      {tasks && tasks.length > 0 && <div style={{ marginTop: 10 }}><b>{stored ? "Tasks saved from this recording (review flagged assignments):" : "Proposed tasks (NOT saved):"}</b>
         <ul style={{ fontSize: 15, lineHeight: 1.5, paddingLeft: 20 }}>{tasks.map((t, i) => (
           <li key={i}><b>{t.title}</b> → {t.assignee || "Unassigned"} ({t.seat}){t.deadline ? `, ${t.deadline}` : ""}{t.needs_review ? " ⚠ needs review" : ""}</li>))}</ul></div>}
       {tasks && tasks.length === 0 && phase === "done" && !notice && <p>No tasks were found in this meeting.</p>}
       <div className="acts">
         {phase === "idle" && <button className="btn" onClick={start}>● Start recording</button>}
         {phase === "recording" && <button className="btn" onClick={stop}>■ Stop</button>}
-        {(phase === "done" || phase === "error") && <button className="btn alt" onClick={() => { setPhase("idle"); setTasks(null); setSeconds(0); }}>Record another</button>}
+        {(phase === "done" || phase === "error") && <button className="btn alt" onClick={() => { setPhase("idle"); setTasks(null); setStored(false); setError(""); setSeconds(0); }}>Record another</button>}
         <button className="btn out" disabled={busy || phase === "recording"} onClick={onClose}>Close</button>
       </div>
     </div></div>
