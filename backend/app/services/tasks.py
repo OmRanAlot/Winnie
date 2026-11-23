@@ -123,7 +123,7 @@ class TaskStore:
 
     def list(
         self, *, month_code=None, semester_code=None, status=None,
-        stakeholder_code=None, limit=50, offset=0,
+        stakeholder_code=None, updated_since=None, limit=50, offset=0,
     ):
         def query(table):
             request = table.select("*", count="exact")
@@ -135,6 +135,8 @@ class TaskStore:
                 request = request.eq("status", status)
             if stakeholder_code is not None:
                 request = request.contains("stakeholder_codes", [stakeholder_code])
+            if updated_since is not None:
+                request = request.gte("updated_at", updated_since.isoformat())
             return request.order("created_at", desc=True).order("id").range(
                 offset, offset + limit - 1
             )

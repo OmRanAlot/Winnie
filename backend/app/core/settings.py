@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     sheets_credentials_file: Path | None = None
     sheet_sync_interval_seconds: int = Field(default=300, ge=60, le=86400)
     message_ai_enabled: bool = False
+    message_reword_enabled: bool = False
     # Short member replies use Flash even when event planning selects a larger model.
     message_ai_model: str = "gemini-3.8-flash"
     message_ai_timeout_seconds: float = Field(default=10, gt=0, le=20)

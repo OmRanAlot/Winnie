@@ -60,8 +60,8 @@ Partial imports do not remove records absent from the source file.
 Only a confirmed Auth email matching an active, consenting roster entry links the
 profile. Importing after the Auth account already exists also fills its profile. An
 unconfirmed account, a name match, or self-editable metadata cannot claim a role.
-Linked login email addresses are fixed; changing them needs a separately implemented
-administrator workflow. The import sends no invitations and does not create Auth
+Administrators can replace a member's roster email in
+[Manage Board Roster](AUTH_FINALIZATION.md#invite-a-member). The import sends no invitations and does not create Auth
 accounts, messaging identities, or member aliases. Invitation/password-setup UI is
 still separate work. Role changes do not grant admin privileges.
 

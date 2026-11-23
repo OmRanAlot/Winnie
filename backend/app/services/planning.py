@@ -9,15 +9,15 @@ or keys. The real cause is logged server-side by exception type only (never the 
 import asyncio
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 from app.agents.planner import deep_plan, mock_plan
 from app.schemas.planning import PlanningDraft, PlanningRequest
 from app.services.planning_context import load_examples
 from app.services.planning_policies import (
-    ORDER_LEAD_DAYS,
     apply_task_policies,
+    schedule_order_policies,
     validate_order_deadlines,
 )
 
@@ -50,6 +50,7 @@ async def create_draft(request: PlanningRequest, *, knowledge_path: Path,
                        mode: str = "mock", model: str = "", timeout: float = 60) -> PlanningDraft:
     logger.info("draft start mode=%s timeout=%.0fs", mode, timeout)
     started = time.perf_counter()
+    stage = "context"
     try:
         try:
             examples, warnings = load_examples(knowledge_path, request)
@@ -65,6 +66,7 @@ async def create_draft(request: PlanningRequest, *, knowledge_path: Path,
             ]
             logger.warning("draft historical context missing; planning from the event idea only")
         logger.info("draft loaded %d historical example event(s)", len(examples))
+        stage = "model"
         if mode == "mock":
             contents = mock_plan(request, examples)
             warnings.append("MOCK: historical checklist only; the idea has not been analyzed by an LLM.")
@@ -72,17 +74,17 @@ async def create_draft(request: PlanningRequest, *, knowledge_path: Path,
             contents = await asyncio.wait_for(deep_plan(request, examples, model), timeout)
         else:
             raise ValueError("Configure planning mode and explicit provider:model.")
+        stage = "policies"
         contents = apply_task_policies(contents)
-        if mode == "mock":
-            for task in contents.tasks:
-                if task.kind == "order_items":
-                    task.due_date = request.event_date - timedelta(days=ORDER_LEAD_DAYS)
+        contents = schedule_order_policies(contents, request.event_date)
+        stage = "evidence_and_phase"
         validate_draft(contents, request, examples)
+        stage = "ordering_deadlines"
         validate_order_deadlines(contents, request.event_date)
     except (OSError, ValueError, KeyError, ImportError, TimeoutError) as exc:
         category = ("timeout" if isinstance(exc, TimeoutError)
                     else "configuration, context or output")
-        logger.error("draft failed (%s): %s", category, type(exc).__name__)
+        logger.error("draft failed (%s): %s stage=%s", category, type(exc).__name__, stage)
         logger.debug("draft failure detail", exc_info=True)
         public = None
         if isinstance(exc, ImportError):

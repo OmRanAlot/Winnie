@@ -87,6 +87,50 @@ def required_order_edges(plan: DraftContents) -> list[tuple[str, str]]:
             if prerequisite.id != order.id and prerequisite.kind in ("materials_list", "budget_approval")]
 
 
+def schedule_order_policies(plan: DraftContents, event_date: date) -> DraftContents:
+    """Apply confirmed purchase timing to a single-shot draft, including added tasks.
+
+    Only ordering and its prerequisites receive policy-derived deadlines. The
+    pipeline has a separate timeline specialist and continues to validate its dates.
+    """
+    tasks = {task.id: task.model_copy(deep=True) for task in plan.tasks}
+    policy_edges = set(required_order_edges(plan))
+    for upstream, downstream in policy_edges:
+        if upstream not in tasks[downstream].dependency_ids:
+            tasks[downstream].dependency_ids.append(upstream)
+
+    # Check the expanded graph for cycles before changing its schedule. New
+    # policy edges may require dates to move; the input graph was already validated.
+    DraftContents(tasks=[task.model_copy(update={"due_date": None})
+                         for task in tasks.values()], questions=plan.questions)
+    cutoff = event_date - timedelta(days=ORDER_LEAD_DAYS)
+    scheduled = {}
+
+    def schedule(task_id):
+        task = tasks[task_id]
+        if task_id in scheduled and scheduled[task_id] <= task.due_date:
+            return
+        scheduled[task_id] = task.due_date
+        for upstream_id in task.dependency_ids:
+            upstream = tasks[upstream_id]
+            if upstream.phase != "before":
+                raise ValueError("Ordering prerequisites must be preparation tasks.")
+            gap = 1 if (upstream_id, task_id) in policy_edges else 0
+            latest = task.due_date - timedelta(days=gap)
+            if upstream.due_date is None or upstream.due_date > latest:
+                upstream.due_date = latest
+                upstream.rationale += " Deadline inferred from the required purchasing prerequisite."
+            schedule(upstream_id)
+
+    for task in tasks.values():
+        if task.kind == "order_items":
+            if task.due_date is None or task.due_date > cutoff:
+                task.due_date = cutoff
+                task.rationale += " Deadline set by the confirmed 21-day ordering rule."
+            schedule(task.id)
+    return DraftContents(tasks=list(tasks.values()), questions=plan.questions)
+
+
 def validate_policy_dependencies(plan: DraftContents, dependencies):
     edges = {(edge.upstream_task_id, edge.downstream_task_id): edge for edge in dependencies.edges}
     for pair in required_order_edges(plan):

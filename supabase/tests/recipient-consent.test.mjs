@@ -5,6 +5,10 @@ import { PGlite } from '@electric-sql/pglite';
 const folder = new URL('../migrations/', import.meta.url);
 const migrations = await Promise.all((await readdir(folder)).filter(n => n.endsWith('.sql')).sort().map(n => readFile(new URL(n,folder),'utf8')));
 const ids = {OWNER:'11111111-1111-4111-8111-111111111111',TARGET:'22222222-2222-4222-8222-222222222222',ADMIN:'33333333-3333-4333-8333-333333333333',OTHER:'44444444-4444-4444-8444-444444444444'};
+const reviewStateRepair = await readFile(new URL(
+ '20261115230000_repair_reassignment_review_state.sql', folder), 'utf8');
+const originalRequests = await readFile(new URL(
+ '20261114160001_task_original_assignee_and_requests.sql', folder), 'utf8');
 async function as(db, code) {
   await db.exec('reset role');
   await db.query("select set_config('request.jwt.claim.sub',$1,false)",[ids[code] || '']);
@@ -96,6 +100,131 @@ test('admin rejection and post-approval recipient denial preserve ownership',asy
   assert.equal((await owner(db,task.id)).owner_code,'OWNER');
  } finally {await db.close();}
 });
+
+test('repair of a stale review constraint permits admin approval without transferring ownership',async()=>{
+ const {db,task,request}=await setup();
+ try {
+  await db.exec(`reset role;
+   alter table task_reassignment_requests drop constraint task_reassignment_review_state;
+   alter table task_reassignment_requests add constraint task_reassignment_review_state check (
+    (status in ('pending','declined') and reviewed_by_profile_id is null and reviewed_at is null)
+    or (status in ('approved','rejected') and reviewed_by_profile_id is not null and reviewed_at is not null)
+   );`);
+  await as(db,'ADMIN');
+  await assert.rejects(db.query('select review_task_reassignment($1,$2)',[request.id,'approved']),
+   /violates check constraint "task_reassignment_review_state"/);
+  await db.exec('reset role');
+  await db.exec(reviewStateRepair);
+  await db.exec(reviewStateRepair); // Safe for SQL-editor installs and CLI replay.
+  const unchanged=(await db.query('select * from task_reassignment_requests where id=$1',[request.id])).rows[0];
+  assert.equal(unchanged.admin_decision,'pending');
+  assert.equal(unchanged.reviewed_by_profile_id,null);
+  await as(db,'OTHER');
+  await assert.rejects(db.query('select review_task_reassignment($1,$2)',[request.id,'approved']),/Only the president/);
+  await as(db,'ADMIN');
+  const approved=(await db.query('select * from review_task_reassignment($1,$2)',[request.id,'approved'])).rows[0];
+  assert.equal(approved.admin_decision,'approved');
+  assert.equal(approved.status,'pending');
+  assert.equal(approved.recipient_decision,'pending');
+  assert.equal(approved.reviewed_by_profile_id,ids.ADMIN);
+  assert.ok(approved.reviewed_at);
+  assert.equal((await owner(db,task.id)).owner_code,'OWNER');
+  await as(db,'TARGET');
+  const completed=(await db.query('select * from respond_task_reassignment($1,$2)',[request.id,'accepted'])).rows[0];
+  assert.equal(completed.status,'approved');
+  assert.deepEqual(await owner(db,task.id),{owner_code:'TARGET',original_assignee_code:'OWNER'});
+  await as(db,'ADMIN');
+  const archived=(await db.query('select * from archive_task_reassignment($1)',[request.id])).rows[0];
+  assert.ok(archived.archived_at);
+  assert.equal(archived.archived_by_profile_id,ids.ADMIN);
+  const restored=(await db.query('select * from archive_task_reassignment($1,false)',[request.id])).rows[0];
+  assert.equal(restored.archived_at,null);
+  await db.exec("reset role; update members set active=false where code='ADMIN'");
+  await as(db,'ADMIN');
+  assert.equal((await db.query('select id from task_reassignment_requests')).rows.length,0);
+  await assert.rejects(db.query('select archive_task_reassignment($1,false)',[request.id]), /Only active admins/);
+ } finally {await db.close();}
+});
+test('repair replaces a stale guard that leaves reviewed_at null on admin approval',async()=>{
+ const {db,task,request}=await setup();
+ try {
+  await db.exec('reset role');
+  const oldGuard=originalRequests.match(/create function public\.guard_task_reassignment_request\(\)[\s\S]*?\n\$\$;/)[0];
+  await db.exec(oldGuard.replace('create function','create or replace function'));
+  await as(db,'ADMIN');
+  await assert.rejects(db.query('select review_task_reassignment($1,$2)',[request.id,'approved']),
+   /violates check constraint "task_reassignment_review_state"/);
+  await db.exec('reset role');
+  await db.exec(reviewStateRepair);
+  // A flagged admin need not hold the President role.
+  await db.exec("update members set board_role='Member' where code='ADMIN'");
+  await as(db,'ADMIN');
+  const approved=(await db.query('select * from review_task_reassignment($1,$2)',[request.id,'approved'])).rows[0];
+  assert.equal(approved.admin_decision,'approved');
+  assert.equal(approved.status,'pending');
+  assert.ok(approved.reviewed_at);
+  assert.equal(approved.reviewed_by_profile_id,ids.ADMIN);
+  assert.equal((await owner(db,task.id)).owner_code,'OWNER');
+  await as(db,'TARGET');
+  await db.query('select respond_task_reassignment($1,$2)',[request.id,'accepted']);
+  assert.equal((await owner(db,task.id)).owner_code,'TARGET');
+ } finally {await db.close();}
+});
+
+test('standalone repair upgrades old RPCs and consent trigger while preserving historical decisions',async()=>{
+ const {db,task,request}=await setup(true);
+ try {
+  await as(db,'ADMIN');
+  await db.query('select review_task_reassignment($1,$2)',[request.id,'rejected']);
+  await as(db,'OWNER');
+  const pending=(await db.query('select * from submit_task_reassignment($1,$2)',[task.id,'TARGET'])).rows[0];
+  await as(db,'TARGET');
+  await db.query('select respond_task_reassignment($1,$2)',[pending.id,'accepted']);
+  await db.exec('reset role');
+  const historic=(await db.query("insert into tasks(title,month_code,owner_code,assignee_text) values('Historic transfer','2026-11','OWNER','OWNER') returning *")).rows[0];
+  await as(db,'OWNER');
+  const completed=(await db.query('select * from submit_task_reassignment($1,$2)',[historic.id,'TARGET'])).rows[0];
+  await as(db,'TARGET');
+  await db.query('select respond_task_reassignment($1,$2)',[completed.id,'accepted']);
+  await as(db,'ADMIN');
+  await db.query('select review_task_reassignment($1,$2)',[completed.id,'approved']);
+  await db.exec('reset role');
+  const notificationIds=(await db.query('select id from reassignment_notifications order by id')).rows;
+  await db.exec(reviewStateRepair);
+  await db.exec(reviewStateRepair);
+  const history=(await db.query('select * from task_reassignment_requests where id=$1',[request.id])).rows[0];
+  assert.equal(history.status,'rejected');
+  assert.equal(history.admin_decision,'rejected');
+  const repaired=(await db.query('select * from task_reassignment_requests where id=$1',[pending.id])).rows[0];
+  assert.equal(repaired.recipient_decision,'pending');
+  assert.equal(repaired.admin_decision,'pending');
+  assert.equal(repaired.legacy_recipient_response.decision,'accepted');
+  assert.equal(repaired.legacy_recipient_response.profile_id,ids.TARGET);
+  assert.equal((await owner(db,task.id)).owner_code,'OWNER');
+  const transferred=(await db.query('select * from task_reassignment_requests where id=$1',[completed.id])).rows[0];
+  assert.equal(transferred.admin_decision,'approved');
+  assert.equal(transferred.status,'approved');
+  assert.ok(transferred.handoff_completed_at);
+  assert.equal((await owner(db,historic.id)).owner_code,'TARGET');
+  assert.deepEqual((await db.query('select id from reassignment_notifications order by id')).rows,notificationIds);
+  assert.equal((await db.query("select count(*)::int n from reassignment_notifications where status='pending' and event in ('incoming','review')")).rows[0].n,0);
+  // Existing terminal decision messages remain; the repair creates no messages.
+  await as(db,'TARGET');
+  await assert.rejects(db.query('select respond_task_reassignment($1,$2)',[pending.id,'accepted']),/Administrator approval is required/);
+  await as(db,'OTHER');
+  await assert.rejects(db.query('select review_task_reassignment($1,$2)',[pending.id,'approved']),/Only the president/);
+  await as(db,'ADMIN');
+  const approved=(await db.query('select * from review_task_reassignment($1,$2)',[pending.id,'approved'])).rows[0];
+  assert.equal(approved.status,'pending');
+  assert.ok(approved.reviewed_at);
+  assert.equal((await owner(db,task.id)).owner_code,'OWNER');
+  await as(db,'TARGET');
+  const denied=(await db.query('select * from respond_task_reassignment($1,$2)',[pending.id,'denied'])).rows[0];
+  assert.equal(denied.status,'declined');
+  assert.equal((await owner(db,task.id)).owner_code,'OWNER');
+ } finally {await db.close();}
+});
+
 test('stale ownership, completed tasks and revoked consent cannot complete an authorized transfer',async()=>{
  const {db,task,request}=await setup();
  try {

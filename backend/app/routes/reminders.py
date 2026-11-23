@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from app.agents.message_wording import reword
 from app.core.settings import Settings
 from app.integrations.reminders import ReminderStore
 from app.integrations.supabase import StorageUnavailable
@@ -47,10 +48,15 @@ Store = Annotated[ReminderStore, Depends(get_reminder_store)]
 
 @router.post("/next")
 def next_delivery(request: NextRequest, store: Store):
+    settings = Settings()
     try:
-        return next_reminder(store, TaskStore(), MemberStore(), Settings(), scan=request.scan)
+        result = next_reminder(store, TaskStore(), MemberStore(), settings, scan=request.scan)
     except (StorageUnavailable, ValueError, KeyError):
         raise HTTPException(503, "Reminder storage is unavailable. Check migration and settings.")
+    delivery = result.get("delivery")
+    if delivery and delivery.get("transport") == "photon":
+        result = {**result, "delivery": {**delivery, "text": reword(delivery["text"], settings)}}
+    return result
 
 
 @router.post("/result")

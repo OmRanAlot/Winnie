@@ -17,7 +17,7 @@ await build({
   bundle: true, format: 'esm', platform: 'node', jsx: 'automatic', external: ['react', 'react/jsx-runtime'],
   plugins: [{ name: 'fake-services', setup(build) {
     build.onResolve({ filter: /^\.\/lib\/(api\.js|eventPlans\.js|supabase(?:\.js)?|reassignments\.js)$/ }, args => ({ path: args.path, namespace: 'fake' }));
-    build.onResolve({ filter: /^\.\/(Recorder|SheetSync|FairyLights(?: \(1\))?)\.jsx$/ }, args => ({ path: args.path, namespace: 'fake' }));
+    build.onResolve({ filter: /^\.\/(Recorder|SheetSync|FairyLights(?: \(1\))?|RosterManager)\.jsx$/ }, args => ({ path: args.path, namespace: 'fake' }));
     build.onLoad({ filter: /.*/, namespace: 'fake' }, args => ({ contents:
       args.path.includes('eventPlans.js') ? `
         export const reviewEventPlan = (id,revision,decision) => { globalThis.__dashboard.reviewedPlan={id,revision,decision}; if(globalThis.__dashboard.planReviewError) return Promise.reject(new Error('Plan changed. Reopen it.')); globalThis.__dashboard.eventPlans=globalThis.__dashboard.eventPlans.map(p=>p.id===id?{...p,status:decision}:p); return Promise.resolve({status:decision}); };
@@ -53,8 +53,9 @@ await build({
         };
         export const dispatchPhotonNotifications = () => Promise.resolve({queued:true});
         export const getAutomationStatus = () => Promise.resolve({jobs:[],notifications:{}});
+        export const getSheetSyncSources = () => Promise.resolve([]);
         export const nudgeTask = id => { globalThis.__dashboard.nudged=id; return Promise.resolve({queued:1}); };
-        export const getTaskDraft = () => Promise.resolve(null);
+        export const getTaskDraft = () => Promise.resolve(globalThis.__dashboard.draft || null);
         export const saveTaskDraft = form => { globalThis.__dashboard.draft = form; return Promise.resolve(form); };
         export const generateTaskPlan = body => { globalThis.__dashboard.plan = body; return globalThis.__dashboard.planResponse ?? Promise.resolve({
           mode:'deepagents', questions:['Confirm room capacity.'], warnings:['Review suggested dates.'],
@@ -65,12 +66,28 @@ await build({
         }); };
         export const createTaskRecord = body => { globalThis.__dashboard.created = body; const t={...body,id:'created',status:'Upcoming',notes:'',assignee:body.owner_code}; globalThis.__dashboard.tasks.push(t); return Promise.resolve(t); };
         export const saveTaskNotes = (id, notes) => { globalThis.__dashboard.tasks = globalThis.__dashboard.tasks.map(t => t.id===id ? {...t,notes} : t); return Promise.resolve(); };
-        export const editMember = () => Promise.resolve();
+        export const getBoardRoster = () => {
+          globalThis.__dashboard.rosterLoads = (globalThis.__dashboard.rosterLoads || 0) + 1;
+          return Promise.resolve([]);
+        };
+        export const getMessagingContacts = () => Promise.resolve({ data: [], meta: { total: 0, ready: 0, with_phone: 0 } });
+        export const syncMessagingContacts = () => Promise.resolve({ data: { contacts: [], total: 0, ready: 0 }, meta: { total: 0, ready: 0, mode: null, lines: [] } });
+        export const addBoardMember = () => Promise.resolve();
+        export const updateBoardMember = () => Promise.resolve();
         export const getEvaluation = () => Promise.resolve({comments:''});
         export const saveEvaluation = () => Promise.resolve();
         export const ingestMeetingAudio = () => Promise.resolve();
       ` : args.path.includes('reassignments') ? 'export const reassignmentStore = () => ({list: () => globalThis.__dashboard.list(), review: (...a) => globalThis.__dashboard.review(...a), respond: (...a) => globalThis.__dashboard.respond(...a), submit: (...a) => globalThis.__dashboard.submit(...a)});'
         : args.path.includes('supabase') ? 'export const supabase = {};'
+        : args.path.includes('RosterManager') ? `
+            import React, { useEffect } from 'react';
+            export default function RosterManager() {
+              useEffect(() => {
+                globalThis.__dashboard.rosterLoads = (globalThis.__dashboard.rosterLoads || 0) + 1;
+              }, []);
+              return React.createElement('button', { type: 'button' }, 'Add person');
+            }
+          `
         : 'export default function Recorder() { return null; }',
     }));
   } }],
@@ -78,7 +95,8 @@ await build({
 const { default: App, Gantt } = await import(pathToFileURL(output));
 const text = node => typeof node === 'string' ? node : (node?.children ?? []).map(text).join('');
 const button = (renderer, label) => renderer.root.findAllByType('button').find((b) =>
-  b.children.every((child) => typeof child === 'string') && b.children.join('') === label
+  b.children.every((child) => typeof child === 'string' || typeof child === 'number')
+  && b.children.join('') === label
 );
 const profile = { id: 'profile1', member_code: 'MEMBER', name: 'Member', role: 'member' };
 function setup() {
@@ -528,6 +546,82 @@ test('metrics overview places member names below the chart x-axis', async () => 
   }
 });
 
+test('only admins can open the board roster and contacts load on demand', async () => {
+  setup();
+  let renderer;
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: false })); });
+    assert.equal(button(renderer, 'ADMIN SETTINGS'), undefined);
+    assert.equal(globalThis.__dashboard.rosterLoads, undefined);
+    await act(async () => renderer.update(React.createElement(App, { profile, admin: true })));
+    await act(async () => button(renderer, 'ADMIN SETTINGS').props.onClick());
+    assert.equal(globalThis.__dashboard.rosterLoads, undefined);
+    await act(async () => button(renderer, 'Manage Board Roster').props.onClick());
+    assert.ok(button(renderer, 'Add person'));
+    assert.equal(globalThis.__dashboard.rosterLoads, 1);
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+  }
+});
+
+test('admin New Task form creates a record outside event plans', async () => {
+  setup();
+  let renderer;
+  const change = async (node, value) => act(async () => node.props.onChange({ target: { value } }));
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(renderer, 'ADMIN SETTINGS').props.onClick());
+    await act(async () => button(renderer, 'New Task').props.onClick());
+    assert.ok(text(renderer.toJSON()).includes('Create a board task directly'));
+    assert.ok(!text(renderer.toJSON()).includes('Approve and create tasks'));
+    await change(renderer.root.findAllByType('input').find((node) => node.props.maxLength === 200), 'Order supplies');
+    await change(renderer.root.findAllByType('textarea').find((node) => node.props.maxLength === 10000 && !node.props.className?.includes('task-summary')), 'Snacks for GBM');
+    await change(renderer.root.findAllByType('input').find((node) => node.props.type === 'date' && node.props.value === ''), '2026-11-20');
+    // Prefer due date for month_code: set the second date input.
+    const dates = renderer.root.findAllByType('input').filter((node) => node.props.type === 'date');
+    await change(dates[1], '2026-11-25');
+    const ownerSelect = renderer.root.findAllByType('select').find((node) => !node.props.multiple && node.props.value === '');
+    await change(ownerSelect, 'MEMBER');
+    await act(async () => button(renderer, 'Create task').props.onClick());
+    assert.equal(globalThis.__dashboard.created.title, 'Order supplies');
+    assert.equal(globalThis.__dashboard.created.month_code, '2026-11');
+    assert.equal(globalThis.__dashboard.created.owner_code, 'MEMBER');
+    assert.equal(globalThis.__dashboard.created.due_date, '2026-11-25');
+    assert.equal(globalThis.__dashboard.created.start_date, '2026-11-20');
+    assert.equal(globalThis.__dashboard.created.status, 'todo');
+    assert.equal(globalThis.__dashboard.created.source, 'manual');
+    assert.equal(globalThis.__dashboard.created.description, 'Snacks for GBM');
+    assert.ok(globalThis.__dashboard.tasks.some((item) => item.id === 'created'));
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    delete globalThis.window;
+  }
+});
+
+test('admin New Task form can tag an event when assigning work', async () => {
+  setup();
+  let renderer;
+  const change = async (node, value) => act(async () => node.props.onChange({ target: { value } }));
+  try {
+    await act(async () => { renderer = TestRenderer.create(React.createElement(App, { profile, admin: true, signOut() {} })); });
+    await act(async () => button(renderer, 'ADMIN SETTINGS').props.onClick());
+    await act(async () => button(renderer, 'New Task').props.onClick());
+    await change(renderer.root.findAllByType('input').find((node) => node.props.maxLength === 200), 'Book room');
+    const dates = renderer.root.findAllByType('input').filter((node) => node.props.type === 'date');
+    await change(dates[1], '2026-12-01');
+    await change(renderer.root.findAllByType('input').find((node) => node.props.list === 'task-event-options'), 'GirlHacks');
+    const ownerSelect = renderer.root.findAllByType('select').find((node) => !node.props.multiple && node.props.value === '');
+    await change(ownerSelect, 'MEMBER');
+    await act(async () => button(renderer, 'Create task').props.onClick());
+    assert.equal(globalThis.__dashboard.created.event_tag, 'GirlHacks');
+    assert.equal(globalThis.__dashboard.created.project_name, 'GirlHacks');
+    assert.equal(globalThis.__dashboard.created.owner_code, 'MEMBER');
+  } finally {
+    if (renderer) await act(async () => renderer.unmount());
+    delete globalThis.window;
+  }
+});
+
 for (const decision of ['approved','rejected']) {
  test(`saved event plan ${decision} review uses its exact revision and locks dirty edits`, async()=>{
   setup(); let renderer;
@@ -537,6 +631,9 @@ for (const decision of ['approved','rejected']) {
    await act(async()=>{renderer=TestRenderer.create(React.createElement(App,{profile,admin:true,signOut(){}}));});
    await act(async()=>button(renderer,'ADMIN SETTINGS').props.onClick());
    await act(async()=>button(renderer,'Plan Event').props.onClick());
+   // Plan Event triggers an async reload; wait until the saved plan row is painted.
+   await act(async () => { await Promise.resolve(); });
+   assert.ok(button(renderer, 'Open'), 'saved event plans must appear before review');
    await act(async()=>button(renderer,'Open').props.onClick());
    const label=decision==='approved'?'Approve and create tasks':'Reject plan';
    assert.equal(button(renderer,label).props.disabled,false);

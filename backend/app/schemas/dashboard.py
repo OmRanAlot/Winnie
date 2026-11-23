@@ -21,6 +21,7 @@ class TaskDraft(BaseModel):
     summary: str = Field(default="", max_length=10000)
     priority: Literal["low", "normal", "high"] = "normal"
     ownerCode: str = Field(default="", pattern=r"^$|^[A-Z][A-Z0-9_-]{0,49}$")
+    eventTag: str = Field(default="", max_length=100)
 
     @model_validator(mode="after")
     def valid_dates(self):

@@ -1,5 +1,4 @@
-# Used by `gcloud run deploy --source .` (replaces the .gitignore-based default, which would
-# drop backend/data and break `COPY data ./data` in the Dockerfile).
+# Upload only the runtime fixture from local data.
 .git
 node_modules
 photon/node_modules
@@ -18,5 +17,7 @@ htmlcov
 tests
 *.log
 # Private local data must never be uploaded.
-data/recordings
-data/demo-login.json
+data/**
+!data/
+!data/eboardMembers.json
+env.yaml

@@ -1,5 +1,6 @@
 """Signed Photon webhook -> durable inbox -> on-demand Cloud Task -> existing message flow."""
 import json
+import logging
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID, uuid4
@@ -38,6 +39,7 @@ from app.services.members import MemberStore
 from app.services.reminders import next_reminder, utc_now
 from app.services.tasks import TaskStore
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/api/photon', tags=['photon'])
 
 
@@ -107,6 +109,16 @@ async def webhook(request: Request, inbox: Inbox, queue: Queue):
         raise HTTPException(503, 'Photon queue is unavailable. Check server configuration.') from exc
 
 
+async def _claim_event_plan_notice(store):
+    """Event-plan notices are optional: missing storage (migration not applied yet) must not
+    stop member replies or reassignment notices from being delivered."""
+    try:
+        return await run_in_threadpool(store.rpc, 'claim_event_plan_notification')
+    except (StorageUnavailable, ValueError):
+        logger.warning('Event-plan notifications unavailable; check the event-plan migration.')
+        return None
+
+
 async def dispatch_notifications(sender):
     store = HelpRequestStore()
     settings = Settings()
@@ -116,7 +128,7 @@ async def dispatch_notifications(sender):
                   if Settings().help_workflow_enabled else None)
         finish = 'finish_reassignment_notification'
         if not notice:
-            notice = await run_in_threadpool(store.rpc, 'claim_event_plan_notification')
+            notice = await _claim_event_plan_notice(store)
             finish = 'finish_event_plan_notification'
         if not notice and settings.notifications_enabled:
             notice = await run_in_threadpool(store.rpc, 'claim_task_notification',
@@ -137,6 +149,9 @@ async def dispatch_notifications(sender):
             provider = await sender.send(notice['text'], str(notice['id']), recipient=notice['recipient'])
             outcome = 'sent'
         except PhotonUnavailable:
+            provider, outcome = None, 'uncertain'
+        except Exception:  # always release the claim; never auto-resend an unknown send
+            logger.exception('Unexpected error sending notice %s; recorded as uncertain.', notice['id'])
             provider, outcome = None, 'uncertain'
         if reminder_store:
             await run_in_threadpool(reminder_store.finish, notice['id'], notice['claim_token'], outcome, provider, utc_now())

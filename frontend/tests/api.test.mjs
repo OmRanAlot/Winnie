@@ -27,3 +27,18 @@ test('dashboard reads and updates the same UUID task records', async () => {
     assert.deepEqual(JSON.parse(calls[1].options.body), { status: 'in_progress' });
   } finally { globalThis.fetch = original; }
 });
+
+test('browser reload can fetch only task changes', async () => {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async url => {
+    calls.push(url);
+    return { ok: true, json: async () => ({ success: true, data: [], meta: { total: 0 } }) };
+  };
+  try {
+    await getTasks({ updatedSince: '2026-11-18T12:00:00.000Z' });
+    assert.equal(calls.length, 1);
+    const params = new URL(calls[0], 'https://winnie.example').searchParams;
+    assert.equal(params.get('updated_since'), '2026-11-18T12:00:00.000Z');
+  } finally { globalThis.fetch = original; }
+});

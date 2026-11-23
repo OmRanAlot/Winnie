@@ -10,6 +10,9 @@ from app.schemas.planning import PlanningDraft, PlanningRequest
 from app.services.planning import PlanningUnavailable, create_draft
 from app.services.planning_pipeline import run_pipeline
 
+# Firebase Hosting drops proxied requests after 60 s with a bare 504; answer before that.
+INTERACTIVE_BUDGET_SECONDS = 50
+
 router = APIRouter(prefix="/api/planning", tags=["planning"],
                    dependencies=[Depends(authorize_tasks)])
 router.include_router(runs_router)
@@ -24,7 +27,8 @@ async def draft_plan(request: PlanningRequest):
     try:
         draft: PlanningDraft = await create_draft(
             request, knowledge_path=path, mode=settings.planning_mode,
-            model=settings.planning_model or f"google_genai:{settings.gemini_model}", timeout=min(settings.planning_timeout_seconds, 90),
+            model=settings.planning_model or f"google_genai:{settings.gemini_model}",
+            timeout=min(settings.planning_timeout_seconds, INTERACTIVE_BUDGET_SECONDS),
         )
     except PlanningUnavailable as exc:
         if exc.public_message:

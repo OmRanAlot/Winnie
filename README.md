@@ -56,11 +56,27 @@ in `backend/app/services/<feature>.py`, a call to an outside system in
 
 ## Run locally
 
+**Full walkthrough (env files, one-command launcher, Photon with your number):** [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md).
+
 Prerequisites: [uv](https://docs.astral.sh/uv/) (installs Python 3.13 for you) and Node.js 22.12+ with npm. Commands below use PowerShell, starting in the repository root. On macOS/Linux, use `cp` instead of `Copy-Item` and `cd` instead of `Set-Location`.
 
 The app runs in **prod mode by default**, which is what Cloud Run uses. To run it on your laptop, start the backend with the `--local` flag. That sets `WINNIE_MODE=local` for that one process only: nothing is written to a file, so it cannot reach a deployment, and Cloud Run never sees the flag. Local mode also turns on auto-reload and listens on `127.0.0.1` only.
 
 Supabase, Gemini and every other outside service work exactly as they do in prod: the backend reads the same `.env` / `backend/.env` as always, so no Docker or local database is needed. That also means localhost talks to the same Supabase project as the deployed app; point your `.env` at a separate dev project if you want isolated data.
+
+### One command (Windows)
+
+After `backend/.env` and `frontend/.env` are filled in (see [LOCAL_SETUP.md](docs/LOCAL_SETUP.md)):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-local.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-local.ps1 -Messaging   # also start the Photon laptop listener
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-local.ps1 -FrontendPort 5174
+```
+
+Ctrl+C stops every process the script started. Add `-SkipInstall` on later runs once dependencies are synced. Use `-FrontendPort` / `-BackendPort` to change ports.
+
+### Manual (two terminals)
 
 Backend, terminal 1:
 
@@ -82,7 +98,24 @@ npm run dev:local
 
 Open [the dashboard](http://localhost:5173) and [the API docs](http://localhost:8000/docs). The dashboard reaches the backend through Vite's `/api` proxy to port 8000. The backend's startup log must say `mode=local`; if it says `mode=prod`, it was started without `--local`. Running `uv run python -m app.cli.serve` with no flag behaves like production (all interfaces, no reload).
 
-The messaging sidecar (`messaging/`) is optional. Its `MESSAGING_BRIDGE_SECRET` in `messaging/.env` must match `WINNIE_MESSAGING_BRIDGE_SECRET` in your backend env; then run `npm install; npm run dev` there.
+### Photon (local testing with your number)
+
+Add **your** phone or iMessage email under Users in the [Photon dashboard](https://app.photon.codes) (shared lines only text allowlisted users). Do not rely on roster numbers stored in Supabase. For laptop replies, keep `WINNIE_PHOTON_ENABLED=false` in `backend/.env` so the webhook path does not null out local bridge replies.
+
+```powershell
+# Bot -> your phone
+.\scripts\test-photon.ps1 send -To +1YOURNUMBER -Text "hello from Winnie"
+
+# Watch inbound from your phone (optionally bridge to the local API)
+.\scripts\test-photon.ps1 listen -From +1YOURNUMBER
+.\scripts\test-photon.ps1 chat -To +1YOURNUMBER -Bridge
+
+# Or run the full listener with the stack:
+.\scripts\dev-local.ps1 -Messaging
+# then text ping / help / whoami to the project iMessage line from your phone
+```
+
+`MESSAGING_BRIDGE_SECRET` in `messaging/.env` must match `WINNIE_MESSAGING_BRIDGE_SECRET` in the backend env. `scripts\test-photon.ps1` also accepts `WINNIE_PHOTON_PROJECT_ID` / `WINNIE_PHOTON_PROJECT_SECRET` from `backend/.env` when `messaging/.env` is incomplete.
 
 ## Task tracker setup
 

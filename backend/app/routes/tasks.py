@@ -13,6 +13,7 @@ envelope.
 """
 
 import logging
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -131,6 +132,7 @@ def list_task_records(
     semester_code: SemesterCode | None = None,
     status: TaskStatus | None = None,
     stakeholder_code: StakeholderCode | None = None,
+    updated_since: datetime | None = None,
     limit: int = Query(default=50, ge=1, le=250),
     offset: int = Query(default=0, ge=0, le=100000),
 ):
@@ -140,6 +142,7 @@ def list_task_records(
         tasks, total = store.list(
             month_code=month_code, semester_code=semester_code,
             status=status, stakeholder_code=stakeholder_code,
+            updated_since=updated_since,
             limit=limit, offset=offset,
         )
         meta["total"] = total

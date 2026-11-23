@@ -2,14 +2,15 @@
 import { useEffect, useState } from 'react';
 import { getAutomationStatus } from './lib/api.js';
 
-export default function AutomationStatus() {
-  const [data, setData] = useState(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+export default function AutomationStatus({ initialData = null, deferInitial = false }) {
+  const [data, setData] = useState(initialData), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   async function load() {
     setBusy(true); setError('');
     try { setData(await getAutomationStatus()); } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { if (!deferInitial) load(); }, [deferInitial]);
+  useEffect(() => { if (initialData) setData(initialData); }, [initialData]);
   const uncertain = Object.values(data?.notifications || {}).reduce((n, value) => n + (value.uncertain || 0), 0);
   const pending = Object.values(data?.notifications || {}).reduce((n, value) => n + (value.pending || 0), 0);
   return <section className="panel" style={{maxWidth:920,margin:'24px auto'}}>

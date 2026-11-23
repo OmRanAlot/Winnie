@@ -15,6 +15,6 @@ htmlcov
 tests
 *.log
 # Private local data must never be baked into the image.
-data/recordings
-data/demo-login.json
+data/**
+!data/eboardMembers.json
 env.yaml

@@ -131,6 +131,16 @@ class Query:
         self.filters.append((column, lambda v, value=value: v == value))
         return self
 
+    def gte(self, column: str, value: Any) -> Query:
+        def matches(v):
+            if v is None:
+                return False
+            if column.endswith('_at'):
+                return datetime.fromisoformat(str(v)) >= datetime.fromisoformat(str(value))
+            return v >= value
+        self.filters.append((column, matches))
+        return self
+
     def in_(self, column: str, values: list[Any]) -> Query:
         self.filters.append((column, lambda v, values=tuple(values): v in values))
         return self

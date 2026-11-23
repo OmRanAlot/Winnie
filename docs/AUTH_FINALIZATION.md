@@ -55,6 +55,23 @@ References: [SMTP](https://supabase.com/docs/guides/auth/auth-smtp),
 
 ## Invite a member
 
+Before inviting, open **Admin Settings → Manage Board Roster** to add the member's
+name, role and consented contact details. Apply
+[`20261123120000_manage_board_roster.sql`](../supabase/migrations/20261123120000_manage_board_roster.sql)
+and deploy the dashboard and API to enable this page.
+
+Choose a board role, enter a new role name, or clear a member's current role.
+Several members can hold the same role. Remove someone from the active board
+to suspend their access while retaining their task and attendance history.
+Use **Former members** to edit or restore their entry. The admin managing
+their own entry can edit their name, role and phone, and another administrator
+must handle changes to their sign-in email or active status.
+
+When replacing a member's email, the previous account loses board access.
+Invite the replacement address if the member has no verified account for it.
+Adding contact information sends no invitation. Register an actual sender
+separately before using a phone number for [iMessage](MESSAGING_MEMBERS.md).
+
 Only use email addresses actually provided in the consented roster. Invite manually
 through **Authentication → Users → Invite user**, or preview a roster-checked invite
 from `backend/`:

@@ -11,7 +11,9 @@ async function database() {
   const db=new PGlite();
   await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
     create schema auth; grant usage on schema public,auth to anon,authenticated,service_role;
-    create function auth.uid() returns uuid language sql as $$ select null::uuid $$;
+    create function auth.uid() returns uuid language sql stable as $$
+      select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+    $$;
     create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz,
       encrypted_password text,raw_user_meta_data jsonb default '{}');`);
   for(const sql of migrations) await db.exec(sql);
@@ -57,4 +59,86 @@ test('member edits sync linked profiles atomically without granting privileges; 
     await assert.rejects(db.exec('select * from dashboard_task_drafts'),/permission denied/);
     await assert.rejects(db.query('select update_dashboard_member($1,$2::jsonb)',['A','{}']),/permission denied/);
   } finally {await db.close();}
+});
+
+test('roster onboarding and offboarding change access and retain task and alias history', async () => {
+  const db = await database();
+  const bob = '22222222-2222-4222-8222-222222222222';
+  const replacement = '33333333-3333-4333-8333-333333333333';
+  const save = async (code, fields, create = false, actor = id) => (await db.query(
+    "select public.save_board_member($1,$2,'fall-2026',$3::jsonb,$4) as member",
+    [actor, code, JSON.stringify(fields), create],
+  )).rows[0].member;
+  const addAuthUser = (uuid, email) => db.query(
+    "insert into auth.users(id,email,email_confirmed_at,encrypted_password) values($1,$2,now(),'hash')",
+    [uuid, email],
+  );
+  const profile = async uuid => (await db.query(
+    'select member_code,role,phone_number,is_admin from profiles where id=$1', [uuid],
+  )).rows[0];
+  try {
+    await db.exec(`insert into public.members(code,display_name,email,contact_consent)
+      values('ADMIN','Board Admin','admin@example.com',true)`);
+    await addAuthUser(id, 'admin@example.com');
+    await db.query('update profiles set is_admin=true where id=$1', [id]);
+    await addAuthUser(bob, 'bob@example.com');
+
+    await db.exec('set role service_role');
+    const created = await save('BOB', {
+      display_name: 'Bob Example', board_role: 'Treasurer', email: 'BOB@example.com',
+      phone_number: '(202) 555-0123', contact_consent: true,
+    }, true);
+    assert.equal(created.active, true);
+    assert.equal(created.email, 'bob@example.com');
+    assert.deepEqual(await profile(bob), {
+      member_code: 'BOB', role: 'Treasurer', phone_number: '(202) 555-0123', is_admin: false,
+    });
+    await assert.rejects(save('NEW', {display_name:'New Member', email:'new@example.com'}, true),
+      /permission to store/);
+    await assert.rejects(save('NEW', {display_name:'New Member'}, true, bob), /Administrator access/);
+    await assert.rejects(save('NEW', {display_name:'Bob Example'}, true), /already on the board roster/);
+    assert.equal((await db.query("select count(*)::integer as n from members where code='NEW'")).rows[0].n, 0);
+    await assert.rejects(save('ADMIN', {active:false}), /another administrator/);
+    await assert.rejects(save('ADMIN', {email:'other@example.com'}), /another administrator/);
+    await assert.rejects(save('BOB', {is_admin:true}), /Unsupported roster field/);
+
+    await db.exec(`insert into public.member_identities(platform,sender_id,member_code,reminders_enabled)
+      values('imessage','+12025550123','BOB',true)`);
+    await db.exec(`insert into public.tasks(title,month_code,owner_code)
+      values('Historical task','2026-11','BOB')`);
+    await save('BOB', {display_name:'Robert Example', board_role:'', phone_number:'+1 202-555-0123'});
+    assert.deepEqual(await profile(bob), {
+      member_code: 'BOB', role: 'member', phone_number: '+1 202-555-0123', is_admin: false,
+    });
+    const identities = () => db.query("select sender_id from member_identities where member_code='BOB'");
+    assert.deepEqual((await identities()).rows, [{sender_id:'+12025550123'}]);
+    await save('BOB', {phone_number:'+12025550199'});
+    assert.deepEqual((await identities()).rows, []);
+    assert.deepEqual((await db.query("select alias from member_aliases where member_code='BOB' order by alias")).rows,
+      [{alias:'Bob Example'}, {alias:'Robert Example'}]);
+
+    await save('BOB', {active:false});
+    assert.equal((await profile(bob)).member_code, 'BOB');
+    assert.equal((await db.query("select owner_code from tasks where title='Historical task'")).rows[0].owner_code, 'BOB');
+    await db.exec('reset role');
+    await db.query("select set_config('request.jwt.claim.sub',$1,false)", [bob]);
+    await db.exec('set role authenticated');
+    assert.equal((await db.query('select current_board_member_code() as code')).rows[0].code, null);
+    await assert.rejects(save('BOB', {active:true}), /permission denied/);
+    await db.exec('reset role; set role service_role');
+    await save('BOB', {active:true, board_role:'Secretary'});
+    assert.equal((await db.query('select current_board_member_code() as code')).rows[0].code, 'BOB');
+    assert.equal((await profile(bob)).role, 'Secretary');
+
+    await db.exec('reset role');
+    await db.query('update profiles set is_admin=true where id=$1', [bob]);
+    await addAuthUser(replacement, 'updated@example.com');
+    await db.exec('set role service_role');
+    await save('BOB', {email:'updated@example.com'});
+    assert.deepEqual(await profile(bob), {member_code:null, role:'Secretary', phone_number:null, is_admin:false});
+    assert.deepEqual(await profile(replacement), {
+      member_code:'BOB', role:'Secretary', phone_number:'+12025550199', is_admin:false,
+    });
+    assert.equal((await db.query('select current_board_member_code() as code')).rows[0].code, null);
+  } finally { await db.close(); }
 });

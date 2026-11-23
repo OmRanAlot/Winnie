@@ -142,6 +142,10 @@ User-confirmed rules are enforced in the planner, overriding historical guesses:
 - Ordering requires an itemized materials list. If needed but omitted, the backend
   adds an explicit ordering task and a materials-list task. Existing budget approval
   and materials-list tasks must precede ordering by at least one day.
+- The single-shot draft route applies this confirmed timing rule after adding policy
+  tasks: orders are due no later than 21 days before the event, and their prerequisites
+  move earlier as needed. These dates are labeled as policy-derived proposals. Unrelated
+  unknown dates stay null; cycles, invalid phases and fabricated citations still fail.
 - Dependency and timeline specialists receive these requirements. Backend validation
   rejects schedules that violate the ordering cutoff or prerequisite buffers and
   sends specific feedback for bounded correction attempts.

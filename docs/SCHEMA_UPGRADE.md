@@ -57,6 +57,29 @@ the copy fails and rolls back rather than silently truncating data.
 Do not remove the archive until the migrated data and dependent clients have been
 verified. Reapplying the upgrade does not duplicate migrated tasks or edges.
 
+## Admin reassignment approvals fail with `task_reassignment_review_state`
+
+An installation retaining the recipient-first review constraint rejects the
+admin-first intermediate state: `admin_decision = 'approved'`, `status = 'pending'`,
+with reviewer metadata populated. Run
+[`20261115230000_repair_reassignment_review_state.sql`](../supabase/migrations/20261115230000_repair_reassignment_review_state.sql)
+in the project's SQL editor, or through an authenticated database connection.
+It transactionally restores the matching admin-review and recipient-response RPCs,
+guard trigger, review constraint and notification functions. This also repairs a
+partially upgraded installation whose old guard never sets `reviewed_at` when admin
+approval leaves the request pending. It can be reapplied safely and does not rely
+on the original migration's one-time function renames.
+
+Existing task ownership and completed decisions are preserved. Any legacy acceptance
+before admin review is archived and requires fresh recipient consent after approval.
+Unsent messages advertising the obsolete workflow are cancelled; the repair creates
+no messages and does not approve or transfer any pending task. Authorization still
+requires the existing verified administrator and recipient identities.
+
+After applying it, retry approval from an authorized administrator account. The
+request should await recipient consent and retain its current owner until the
+recipient accepts. A rejection or recipient denial must not transfer ownership.
+
 ## Verification
 
 `supabase/tests/schema-chain.test.mjs` executes the complete ordered migration
